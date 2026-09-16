@@ -67,24 +67,6 @@ func (e *csrfEngine) value(tokenID string, t time.Time) csrfValue {
 	return csrfValue{Value: base64.RawURLEncoding.EncodeToString(h.Sum(nil)), Hour: hour}
 }
 
-// acceptHour reports whether the value's hour is the current or the previous
-// one (valid ≤2h, §2.3.4).
-func acceptHour(v, now string) bool {
-	if v == now {
-		return true
-	}
-	vt, err := time.Parse(csrfHourLayout, v)
-	if err != nil {
-		return false
-	}
-	nt, err := time.Parse(csrfHourLayout, now)
-	if err != nil {
-		return false
-	}
-	diff := nt.Sub(vt)
-	return diff >= 0 && diff <= time.Hour
-}
-
 // csrfFail is the single refusal builder for §2.3 (detail names the failed
 // check so the UI can explain without a second round trip).
 func csrfFail(detail string) *dashError {
@@ -143,8 +125,13 @@ func (s *server) csrfCheck(r *http.Request, p principal, now time.Time) *dashErr
 	if !strings.EqualFold(header, cookieVal) {
 		return csrfFail("cookie_mismatch")
 	}
-	derived := s.csrf.value(p.ID, now)
-	if !strings.EqualFold(header, derived.Value) || !acceptHour(derived.Hour, now.UTC().Format(csrfHourLayout)) {
+	// Values from the current or the previous hour are accepted, so a value is
+	// valid ≤2 h and a leaked one expires without an operator action (§2.3.4).
+	// The binding is to *this* token ID: a value derived for another label
+	// matches neither candidate.
+	current := s.csrf.value(p.ID, now)
+	previous := s.csrf.value(p.ID, now.Add(-time.Hour))
+	if !strings.EqualFold(header, current.Value) && !strings.EqualFold(header, previous.Value) {
 		return csrfFail("token_binding")
 	}
 	return nil

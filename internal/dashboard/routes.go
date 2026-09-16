@@ -521,8 +521,9 @@ func (s *server) healthJSON(w http.ResponseWriter, r *http.Request) {
 // partialHealth is row 12: the accelerator strip (every 1s).
 func (s *server) partialHealth(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	strip := s.stripData(ctx)
-	if err := s.renderPartial(w, r, "health", partialRows{Strip: strip}); err != nil {
+	data := s.newFragments()
+	data.Strip = s.stripData(ctx)
+	if err := s.renderPartial(w, r, "health", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
 }
@@ -542,7 +543,8 @@ func (s *server) partialIncidents(w http.ResponseWriter, r *http.Request) {
 	} else {
 		rows, seq = s.incidentRowsSince(ctx, since, limit)
 	}
-	data := partialRows{Seq: seq, StallS: s.healthStall(ctx), RenderTS: s.renderTS(), Count: len(rows), Incidents: rows}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Count, data.Incidents = seq, s.healthStall(ctx), len(rows), rows
 	if err := s.renderPartial(w, r, "incidents", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -562,7 +564,8 @@ func (s *server) partialTimeline(w http.ResponseWriter, r *http.Request) {
 	limit := s.cfg.PageLimit
 	since := parseSince(r)
 	rows, seq := s.timelineRows(id, since, limit)
-	data := partialRows{Seq: seq, StallS: s.healthStall(ctx), RenderTS: s.renderTS(), IncidentID: id, Timeline: rows}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.IncidentID, data.Timeline = seq, s.healthStall(ctx), id, rows
 	if err := s.renderPartial(w, r, "timeline", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -572,7 +575,8 @@ func (s *server) partialTimeline(w http.ResponseWriter, r *http.Request) {
 func (s *server) partialGroups(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, seq := s.groupRowsSince(ctx, parseSince(r), s.cfg.PageLimit)
-	data := partialRows{Seq: seq, StallS: s.healthStall(ctx), RenderTS: s.renderTS(), Groups: rows}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Groups = seq, s.healthStall(ctx), rows
 	if err := s.renderPartial(w, r, "groups", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -580,7 +584,8 @@ func (s *server) partialGroups(w http.ResponseWriter, r *http.Request) {
 
 // partialRules is row 16.
 func (s *server) partialRules(w http.ResponseWriter, r *http.Request) {
-	data := partialRows{Seq: s.deps.Index.LastSeq(), StallS: s.healthStall(r.Context()), RenderTS: s.renderTS(), Rules: s.ruleRows()}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Rules = s.deps.Index.LastSeq(), s.healthStall(r.Context()), s.ruleRows()
 	if err := s.renderPartial(w, r, "rules", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -588,7 +593,8 @@ func (s *server) partialRules(w http.ResponseWriter, r *http.Request) {
 
 // partialBreakers is row 17.
 func (s *server) partialBreakers(w http.ResponseWriter, r *http.Request) {
-	data := partialRows{Seq: s.deps.Index.LastSeq(), StallS: s.healthStall(r.Context()), RenderTS: s.renderTS(), Breakers: s.breakerRows()}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Breakers = s.deps.Index.LastSeq(), s.healthStall(r.Context()), s.breakerRows()
 	if err := s.renderPartial(w, r, "breakers", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -596,7 +602,8 @@ func (s *server) partialBreakers(w http.ResponseWriter, r *http.Request) {
 
 // partialBudget is row 18: the runtime watermark panel.
 func (s *server) partialBudget(w http.ResponseWriter, r *http.Request) {
-	data := partialRows{Seq: s.deps.Index.LastSeq(), StallS: s.healthStall(r.Context()), RenderTS: s.renderTS(), Budget: s.budgetData()}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Budget = s.deps.Index.LastSeq(), s.healthStall(r.Context()), s.budgetData()
 	if err := s.renderPartial(w, r, "budget", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -943,7 +950,8 @@ func (s *server) casCheck(w http.ResponseWriter, r *http.Request, id string, bod
 // incident-rows fragment (row 9/10 response type).
 func (s *server) writeRefreshedIncidentRows(w http.ResponseWriter, r *http.Request) {
 	rows, seq := s.incidentRows(r.Context(), s.cfg.PageLimit)
-	data := partialRows{Seq: seq, StallS: s.healthStall(r.Context()), RenderTS: s.renderTS(), Count: len(rows), Incidents: rows}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Count, data.Incidents = seq, s.healthStall(r.Context()), len(rows), rows
 	if err := s.renderPartial(w, r, "incidents", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
@@ -952,8 +960,9 @@ func (s *server) writeRefreshedIncidentRows(w http.ResponseWriter, r *http.Reque
 // writeRefreshedStrip answers a successful autonomy write with the refreshed
 // health-strip fragment (row 11 response type).
 func (s *server) writeRefreshedStrip(w http.ResponseWriter, r *http.Request, gates types.AutonomyGates) {
-	strip := s.stripDataWith(r.Context(), gates)
-	if err := s.renderPartial(w, r, "health", partialRows{Strip: strip}); err != nil {
+	data := s.newFragments()
+	data.Strip = s.stripDataWith(r.Context(), gates)
+	if err := s.renderPartial(w, r, "health", data); err != nil {
 		s.renderFailure(w, r, err)
 	}
 }
@@ -962,7 +971,8 @@ func (s *server) writeRefreshedStrip(w http.ResponseWriter, r *http.Request, gat
 // as the refreshed fragment on a 409).
 func (s *server) incidentRowsFragment(ctx context.Context) string {
 	rows, seq := s.incidentRows(ctx, s.cfg.PageLimit)
-	data := partialRows{Seq: seq, StallS: s.healthStall(ctx), RenderTS: s.renderTS(), Count: len(rows), Incidents: rows}
+	data := s.newFragments()
+	data.Seq, data.StallS, data.Count, data.Incidents = seq, s.healthStall(ctx), len(rows), rows
 	b, err := s.renderPartialString("incidents", data)
 	if err != nil {
 		return ""

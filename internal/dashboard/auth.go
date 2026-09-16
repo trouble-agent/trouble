@@ -80,6 +80,17 @@ func (s *server) authenticate(r *http.Request, required types.Scope) (principal,
 		return principal{}, &dashError{Code: types.CodeDashboard003, HTTP: 403, Message: "insufficient scope"}
 	}
 
+	// Step 5b: CSRF on every POST (§2.3, routes 9–11 without exception). This
+	// runs after authentication/scope (the checks need the principal the CSRF
+	// value is bound to) and before the write bucket: a forged cross-site POST
+	// must not consume the operator's write budget.
+	if isWriteRoute(r) {
+		if de := s.csrfCheck(r, p, now); de != nil {
+			s.counters.csrf.Add(1)
+			return principal{}, de
+		}
+	}
+
 	// Step 6: rate limit (only when a limiter is configured).
 	if s.limiter != nil {
 		var ok bool

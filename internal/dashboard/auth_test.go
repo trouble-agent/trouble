@@ -122,16 +122,9 @@ func TestScopeHierarchy(t *testing.T) {
 			case "GET":
 				resp, body = env.get(tc.path, tc.token)
 			default:
-				req := env.req(http.MethodPost, tc.path, []byte(payload), func(r *http.Request) {
-					r.Header.Set("Content-Type", "application/json")
-					bearer(tc.token)(r)
-					// A browser-shaped POST needs the double-submit pair.
-					v := env.csrfFor(labelFor(tc.token, env))
-					r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: v})
-					r.Header.Set(csrfHeaderName, v)
-					r.Header.Set("Origin", "http://"+strings.TrimPrefix(env.srv.URL, "http://"))
-				})
-				resp, body = env.do(req)
+				// Bearer-only POST (the curl path): checks 1–2 of §2.3 hold and
+				// the scope matrix is what this table asserts.
+				resp, body = env.post(tc.path, tc.token, payload)
 			}
 			wantStatus(t, resp, body, tc.want)
 			if tc.want == 403 {

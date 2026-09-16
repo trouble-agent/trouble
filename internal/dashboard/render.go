@@ -86,6 +86,9 @@ type partialRows struct {
 	Count      int
 	Banner     bool
 	IncidentID string
+	// Truncated is the number of rows left out to keep the fragment within the
+	// §2.1.2 8 KB cap (0 when everything fit).
+	Truncated int
 
 	// Poll triggers are pre-formatted here so templates stay attribute-only.
 	StripTrigger   string
@@ -292,7 +295,17 @@ func (s *server) renderPartial(w http.ResponseWriter, r *http.Request, name stri
 	})
 }
 
-// renderPartialString executes a fragment template and enforces the ≤8 KB cap.
+// renderPartialString executes a fragment template and enforces the ≤8 KB cap
+// of §2.1.2.
+//
+// The cap is a hard invariant, so an over-cap render is not shipped and not
+// failed either: the fragment is re-rendered with as many complete rows as fit,
+// and the remainder is reported as data-truncated plus a marker row (the
+// template renders it). §2.1.2's "one <tr> per open incident" and its ≤8 KB cap
+// cannot both hold for the row-heavy tables — a required incident row is ~129 B
+// (the 26-char ULID in the href alone is 30 B), so 200 rows is ~25 KB. Fitting
+// keeps the cap absolute and makes the overflow visible instead of silent; the
+// full set stays reachable a page at a time (page_limit, max 500).
 func (s *server) renderPartialString(name string, data partialRows) (string, error) {
 	entry, ok := s.partials[name]
 	if !ok || entry.set == nil {
@@ -303,10 +316,79 @@ func (s *server) renderPartialString(name string, data partialRows) (string, err
 	if err := entry.set.tpl.ExecuteTemplate(buf, entry.name, data); err != nil {
 		return "", err
 	}
-	if buf.Len() > maxPartialBytes {
-		return "", fmt.Errorf("%w: fragment %s is %d bytes (cap %d)", errRender, name, buf.Len(), maxPartialBytes)
+	if buf.Len() <= maxPartialBytes {
+		return buf.String(), nil
 	}
-	return buf.String(), nil
+	return s.fitPartial(entry, data)
+}
+
+// fitPartial re-renders a fragment with a reduced row set until it fits the cap.
+// Each pass scales the kept row count by the measured overshoot, so a normal
+// table converges in one or two passes; the last resort is a one-row cut.
+func (s *server) fitPartial(entry templateEntry, data partialRows) (string, error) {
+	total := partialRowCount(data)
+	if total == 0 {
+		return "", fmt.Errorf("%w: fragment over the cap with no rows to drop", errRender)
+	}
+	keep := total
+	for pass := 0; pass < 6; pass++ {
+		buf := getBuf()
+		err := entry.set.tpl.ExecuteTemplate(buf, entry.name, data)
+		n := buf.Len()
+		body := buf.String()
+		putBuf(buf)
+		if err != nil {
+			return "", err
+		}
+		if n <= maxPartialBytes {
+			return body, nil
+		}
+		next := keep * maxPartialBytes / n
+		if next >= keep {
+			next = keep - 1
+		}
+		if next <= 0 {
+			return "", fmt.Errorf("%w: fragment cannot fit the %d-byte cap", errRender, maxPartialBytes)
+		}
+		keep = next
+		data = trimPartial(data, keep, total)
+	}
+	return "", fmt.Errorf("%w: fragment did not converge under the %d-byte cap", errRender, maxPartialBytes)
+}
+
+// partialRowCount is the number of rows the fragment currently carries.
+func partialRowCount(d partialRows) int {
+	switch {
+	case d.Incidents != nil:
+		return len(d.Incidents)
+	case d.Timeline != nil:
+		return len(d.Timeline)
+	case d.Groups != nil:
+		return len(d.Groups)
+	case d.Rules != nil:
+		return len(d.Rules)
+	case d.Breakers != nil:
+		return len(d.Breakers)
+	}
+	return 0
+}
+
+// trimPartial keeps the first n rows and records how many were left out.
+func trimPartial(d partialRows, n, total int) partialRows {
+	d.Truncated = total - n
+	switch {
+	case d.Incidents != nil:
+		d.Incidents = d.Incidents[:n]
+	case d.Timeline != nil:
+		d.Timeline = d.Timeline[:n]
+	case d.Groups != nil:
+		d.Groups = d.Groups[:n]
+	case d.Rules != nil:
+		d.Rules = d.Rules[:n]
+	case d.Breakers != nil:
+		d.Breakers = d.Breakers[:n]
+	}
+	return d
 }
 
 // renderFailure is the §5 TROUBLE-DASHBOARD-007 path: a template execute

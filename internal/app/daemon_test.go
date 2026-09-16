@@ -240,7 +240,7 @@ func TestDaemonBootsServesHealthAndDrains(t *testing.T) {
 
 	// The stall checker, pointed at the live daemon, exits 0: the sequence is
 	// advancing, which is the primary signal (SPEC-12 §3.3).
-	res, err := lifecycle.Resolve([]string{"--config", filepath.Join(h.d.Cfg.StateRoot, "config.toml")}, []string{}, filepath.Join(h.d.Cfg.StateRoot, "config.toml"))
+	res, err := lifecycle.Resolve(nil, nil, filepath.Join(h.d.Cfg.StateRoot, "config.toml"))
 	if err != nil {
 		t.Fatalf("resolve for the checker: %v", err)
 	}
@@ -256,23 +256,32 @@ func TestDaemonBootsServesHealthAndDrains(t *testing.T) {
 func TestDaemonRendersAFiredIncidentWithinTwoSeconds(t *testing.T) {
 	h := bootDaemon(t)
 
-	// Drive the daemon's own sensors→ladder bridge: this is the path a fired rule
-	// takes (SPEC-03 emits, the ladder admits, the ledger records, the index
-	// projects, the dashboard renders).
-	sig := "journald\x1fpayment-worker\x1fqueue wedge: pool exhausted"
+	// Drive the daemon's own sensors→ladder bridge with a rule the shipped set
+	// actually carries (a fired rule's own name), so the ladder's rung metadata
+	// lookup behaves exactly as it does in production.
+	rule := types.Rule{}
+	for _, r := range h.d.Sensors.Rules() {
+		if r.Name == "psi_cpu_some_avg10_high" {
+			rule = r
+		}
+	}
+	if rule.Name == "" {
+		t.Fatalf("the shipped rule set does not contain psi_cpu_some_avg10_high; the e2e needs a real rule")
+	}
+	sig := types.NewSig(types.SigSource("psi"), "sha256", 1, []byte("e2e-dedup-digest-0001")).String()
 	start := time.Now()
 	rec, err := h.d.emit(context.Background(), types.RecordDraft{
 		Kind:   types.KEvent,
 		Sig:    sig,
-		Origin: types.Origin{HostID: "e2e-host", Source: "journald"},
+		Origin: types.Origin{HostID: h.d.Cfg.Origin.HostID, Source: "psi"},
 		Actor:  lifecycle.Actor(types.ActorDaemon, "troubled"),
 		Payload: map[string]any{
 			"fire":       true,
-			"rule":       "journald_queue_wedge",
-			"subject":    "payment-worker",
-			"entry_rung": string(types.RungPlay),
-			"severity":   string(types.SevHigh),
-			"message":    "queue wedge",
+			"rule":       rule.Name,
+			"subject":    "cpu",
+			"entry_rung": string(rule.EntryRung),
+			"severity":   string(rule.Severity),
+			"some_avg10": 91.0,
 		},
 	})
 	if err != nil {
@@ -297,13 +306,49 @@ func TestDaemonRendersAFiredIncidentWithinTwoSeconds(t *testing.T) {
 		t.Errorf("the incidents partial did not return its documented root element: %s", found)
 	}
 
-	open := h.d.Ledger.DashReader().OpenIncidents(10)
-	if len(open) != 1 {
-		t.Fatalf("open incidents = %d, want exactly 1 (AC-22: one incident per underlying bug)", len(open))
+	// The incident for THIS trigger is open — the host's own sensors may have
+	// opened others concurrently (this box really does have failed units), so the
+	// assertion is scoped to the signature the trigger used.
+	open := h.d.Ledger.DashReader().OpenIncidents(100)
+	inc := ""
+	for _, o := range open {
+		if o.Sig == sig {
+			inc = o.ID
+		}
 	}
-	inc := open[0].ID
+	if inc == "" {
+		t.Fatalf("the fired rule's incident is not open (%d open incidents, none for %s)", len(open), sig)
+	}
 	if tl := h.d.Ledger.DashReader().RecordsForIncident(inc, 0, 50); len(tl) == 0 {
 		t.Errorf("the incident has no timeline rows")
+	}
+
+	// AC-22, scoped: the same underlying bug arriving again folds into the same
+	// incident instead of opening a second one.
+	again, err := h.d.emit(context.Background(), types.RecordDraft{
+		Kind:   types.KEvent,
+		Sig:    sig,
+		Origin: types.Origin{HostID: h.d.Cfg.Origin.HostID, Source: "psi"},
+		Actor:  lifecycle.Actor(types.ActorDaemon, "troubled"),
+		Payload: map[string]any{
+			"fire": true, "rule": rule.Name, "subject": "cpu",
+			"entry_rung": string(rule.EntryRung), "severity": string(rule.Severity), "some_avg10": 93.0,
+		},
+	})
+	if err != nil {
+		t.Fatalf("second emit: %v", err)
+	}
+	same := 0
+	for _, o := range h.d.Ledger.DashReader().OpenIncidents(100) {
+		if o.Sig == sig {
+			same++
+		}
+	}
+	if same != 1 {
+		t.Errorf("recurrence of the same sig produced %d open incidents, want 1 (AC-22)", same)
+	}
+	if again.Seq <= rec.Seq {
+		t.Errorf("the recurrence record did not advance the sequence")
 	}
 
 	// The story page renders the incident (AC-16's incident surface).
@@ -320,12 +365,12 @@ func TestDaemonRefusesWriteActionsWithAReadToken(t *testing.T) {
 	h := bootDaemon(t)
 	if _, err := h.d.emit(context.Background(), types.RecordDraft{
 		Kind:   types.KEvent,
-		Sig:    "psi\x1fcpu\x1fsome avg10 high",
-		Origin: types.Origin{HostID: "e2e-host", Source: "psi"},
+		Sig:    types.NewSig(types.SigSource("psi"), "sha256", 1, []byte("e2e-write-digest-0002")).String(),
+		Origin: types.Origin{HostID: h.d.Cfg.Origin.HostID, Source: "psi"},
 		Actor:  lifecycle.Actor(types.ActorDaemon, "troubled"),
 		Payload: map[string]any{
 			"fire": true, "rule": "psi_cpu_some_avg10_high", "severity": string(types.SevHigh),
-			"entry_rung": string(types.RungPlay), "subject": "cpu",
+			"entry_rung": string(types.RungPlay), "subject": "cpu", "some_avg10": 88.0,
 		},
 	}); err != nil {
 		t.Fatalf("emit: %v", err)

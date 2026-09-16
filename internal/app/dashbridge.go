@@ -230,7 +230,9 @@ func closeTrigger(st types.LadderState) string {
 type Autonomy struct {
 	Ladder *ladder.Ladder
 	Store  *Store
-	Record RecordWriter
+	// Record is the audited config-record writer (lifecycle.SetAutonomy takes
+	// lifecycle.RecordWriter); nil falls back to the store's draft adapter.
+	Record lifecycle.RecordWriter
 }
 
 type gatesStore struct{ l *ladder.Ladder }
@@ -260,11 +262,11 @@ func (a Autonomy) SetAutonomy(ctx context.Context, gates types.AutonomyGates, ac
 	return applied, nil
 }
 
-func (a Autonomy) records() RecordWriter {
+func (a Autonomy) records() lifecycle.RecordWriter {
 	if a.Record != nil {
 		return a.Record
 	}
-	return a.Store
+	return DraftWriter{a.Store}
 }
 
 // Compile-time proof the bridges satisfy the dashboard's contracts.

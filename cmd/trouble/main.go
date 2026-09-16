@@ -48,7 +48,14 @@ default and ` + "`trouble config explain`" + ` shows which source won.
 
 func main() { os.Exit(run(os.Args[1:])) }
 
+// cfgPathOverride carries the --config value captured before dispatch.
+var cfgPathOverride string
+
 func run(args []string) int {
+	// --config is a GLOBAL flag: it is consumed here, before a verb's own flag
+	// set parses, because the verb's flags are parsed first and an unknown flag
+	// there is a usage error (the path is an input to resolution, not a key).
+	args = captureConfig(args)
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, usage)
 		return 2
@@ -99,20 +106,32 @@ func defaultConfigPath() string {
 	return filepath.Join(dir, "trouble", "config.toml")
 }
 
-// resolve loads the resolved config for a verb, consuming --config so no verb's
-// own flag set has to know about it. A config problem is exit 13.
-func resolve(args []string) (lifecycle.Resolved, int) {
-	cfgPath := defaultConfigPath()
-	rest := make([]string, 0, len(args))
+// captureConfig removes `--config <path>` / `--config=<path>` from argv and
+// remembers the path for resolve.
+func captureConfig(args []string) []string {
+	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--config" && i+1 < len(args) {
-			cfgPath = args[i+1]
+			cfgPathOverride = args[i+1]
 			i++
 			continue
 		}
-		rest = append(rest, args[i])
+		if v, ok := strings.CutPrefix(args[i], "--config="); ok {
+			cfgPathOverride = v
+			continue
+		}
+		out = append(out, args[i])
 	}
-	res, err := lifecycle.Resolve(rest, os.Environ(), cfgPath)
+	return out
+}
+
+// resolve loads the resolved config for a verb. A config problem is exit 13.
+func resolve(args []string) (lifecycle.Resolved, int) {
+	cfgPath := cfgPathOverride
+	if cfgPath == "" {
+		cfgPath = defaultConfigPath()
+	}
+	res, err := lifecycle.Resolve(captureConfig(args), os.Environ(), cfgPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		return lifecycle.Resolved{}, 13

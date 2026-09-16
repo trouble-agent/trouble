@@ -17,6 +17,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
@@ -43,6 +44,27 @@ type Store struct {
 // NewStore returns the adapter.
 func NewStore(l *ledger.Ledger, actor types.Actor, hostID string) *Store {
 	return &Store{L: l, Actor: actor, HostID: hostID, Source: "troubled", inKey: map[string]string{}}
+}
+
+// DraftWriter adapts Store to the draft-shaped writer interfaces the other
+// packages declare (lifecycle.RecordWriter and sensors.EmitFunc both take a
+// types.RecordDraft and hand back the written record). Two shapes exist because
+// the ladder's writer is kind/sig/inc/payload while the ledger's own API is a
+// draft; one adapter is cheaper than either package learning the other's shape.
+type DraftWriter struct{ S *Store }
+
+// Append writes one draft.
+func (w DraftWriter) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) {
+	if w.S == nil {
+		return types.Record{}, errors.New("app: DraftWriter has no store")
+	}
+	if d.Actor.ID == "" {
+		d.Actor = actorFrom(ctx, w.S.Actor)
+	}
+	if d.Origin.HostID == "" {
+		d.Origin = types.Origin{HostID: w.S.HostID, Source: w.S.Source}
+	}
+	return w.S.L.Append(ctx, d)
 }
 
 // Append writes one record of the requested kind (ladder.LedgerWriter).

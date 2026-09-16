@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
@@ -87,12 +88,34 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	started := time.Now()
 
 	// 1. config resolve (flag > env > file > default; 001/002).
-	cfgPath := defaultConfigPath()
-	res, err := lifecycle.Resolve(o.Args, o.Env, cfgPath)
+	//
+	// `--config <path>` is the operator's spelling of the `config_path` key; it is
+	// consumed here because the path is an INPUT to resolution, not a key
+	// resolution can already have read. The mechanical `--config-path` form works
+	// too (SPEC-12 §2.5) and is what Resolve itself would accept.
+	args, cfgPath := splitConfigFlag(o.Args, defaultConfigPath())
+	res, err := lifecycle.Resolve(args, o.Env, cfgPath)
 	if err != nil {
 		return nil, err
 	}
 	cfg := res.Config
+	// origin.host_id is the stable host identity SPEC-12 §3.7 requires (a derived
+	// id, never the hostname): the whole cross-host dedup path keys on it, so a
+	// hostname that changes with DHCP must not be able to create a second identity
+	// for the same machine. T1 is a hub with zero satellites, so hub_id defaults
+	// to the host id.
+	if cfg.Origin.HostID == "" {
+		cfg.Origin.HostID = stableHostID()
+	}
+	if cfg.Origin.HubID == "" {
+		cfg.Origin.HubID = cfg.Origin.HostID
+	}
+	res.Config = cfg
+	// The subsystems read the resolved key list, not the struct: a value derived
+	// after resolution (the host identity) has to be published into the list or
+	// the sensors will refuse to start for a missing key the daemon just computed.
+	res.Values = setResolved(res.Values, "origin.host_id", cfg.Origin.HostID, "derived", "derived:machine-id")
+	res.Values = setResolved(res.Values, "origin.hub_id", cfg.Origin.HubID, "derived", "derived:t1-zero-satellites")
 
 	// 2. state root + modes (004/005).
 	root, err := lifecycle.CheckStateRoot(cfg)
@@ -140,7 +163,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		Cfg:      cfg,
 		Resolved: res,
 		Ledger:   l,
-		Started:  started,
+		started:  started,
 		log:      log,
 		notify:   newNotifier(os.Getenv),
 		ready:    make(chan struct{}),
@@ -149,7 +172,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	d.Store = NewStore(l, actor, hostID)
 
 	// 6. the config record: the full redacted dump, one per boot/RELOAD.
-	if err := lifecycle.WriteConfigRecord(d.Store, res); err != nil {
+	if err := lifecycle.WriteConfigRecord(DraftWriter{d.Store}, res); err != nil {
 		_ = l.Close(ctx)
 		return nil, err
 	}
@@ -273,7 +296,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 
 	// 14. heartbeat + watchdog, then READY.
 	go func() {
-		if err := lifecycle.HeartbeatLoop(ctx, cfg, d.Store, d.sensorTimes); err != nil && !errors.Is(err, context.Canceled) {
+		if err := lifecycle.HeartbeatLoop(ctx, cfg, DraftWriter{d.Store}, d.sensorTimes); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("heartbeat", "err", err)
 		}
 	}()
@@ -343,7 +366,7 @@ func (d *Daemon) drain() error {
 	}
 	// A final heartbeat with stage="shutdown" so the checker never sees a fresh
 	// heartbeat on a dead daemon.
-	_ = lifecycle.WriteShutdownHeartbeat(d.Cfg, d.Store)
+	_ = lifecycle.WriteShutdownHeartbeat(d.Cfg, DraftWriter{d.Store})
 	d.notify.stopping("stopped")
 	close(d.stop)
 	if d.Ledger != nil {
@@ -570,7 +593,44 @@ func pidAlive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return p.Signal(syscallSignalZero) == nil
+	// Signal 0 asks the kernel "does this pid exist and may I signal it" without
+	// sending anything (SPEC-05 §3.6 liveness).
+	return p.Signal(syscall.Signal(0)) == nil
+}
+
+// setResolved publishes one resolved value into the ConfigValue list, replacing
+// the row for that key when it exists and appending one when it does not. The
+// provenance says where the value really came from, so `trouble config explain`
+// can show that the host identity was derived rather than set.
+func setResolved(vals []types.ConfigValue, key, value, source, sourceRef string) []types.ConfigValue {
+	row := types.ConfigValue{Key: key, Value: value, Source: source, SourceRef: sourceRef}
+	for i := range vals {
+		if vals[i].Key == key {
+			vals[i] = row
+			return vals
+		}
+	}
+	return append(vals, row)
+}
+
+// splitConfigFlag pulls `--config <path>` out of argv and returns the remaining
+// arguments plus the config path to resolve against.
+func splitConfigFlag(args []string, def string) ([]string, string) {
+	out := make([]string, 0, len(args))
+	path := def
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--config" && i+1 < len(args) {
+			path = args[i+1]
+			i++
+			continue
+		}
+		if v, ok := strings.CutPrefix(args[i], "--config="); ok {
+			path = v
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out, path
 }
 
 func defaultConfigPath() string {
@@ -590,7 +650,7 @@ func defaultConfigPath() string {
 // the only safe answer.
 func ladderCfgGates(d *Daemon) types.AutonomyGates {
 	if d == nil || d.Ladder == nil {
-		return types.AutonomyGates{Mode: types.ModeShadow, AllowDetect: true, AllowResearch: true, AllowAgent: true, AllowSpawn: true}
+		return types.AutonomyGates{Mode: types.AutoShadow, AllowDetect: true, AllowResearch: true, AllowAgent: true, AllowSpawn: true}
 	}
 	return d.Ladder.Gates()
 }

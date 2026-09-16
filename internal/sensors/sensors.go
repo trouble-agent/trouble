@@ -801,7 +801,7 @@ func (s *Sensors) recError(k types.SensorKind, code types.ErrorCode, detail stri
 		return
 	}
 	rt := s.rt[k]
-	if rt != nil && code.Is(types.ErrClassPermanent) {
+	if rt != nil && code.HasClass(types.ErrClassPermanent) {
 		rt.degraded.Store(true)
 		s.setReason(k, fmt.Sprintf("%s: %s", code, detail))
 	}

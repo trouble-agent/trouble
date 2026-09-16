@@ -139,7 +139,7 @@ func TestRefuseTargetReturnsNoPartialOutput(t *testing.T) {
 	if got := e.Stats().RefusedBytes - before; got != uint64(len(in)) {
 		t.Errorf("refused_bytes = %d, want %d", got, len(in))
 	}
-	if !types.CodeScrub003.Is(types.ErrClassTransient) {
+	if !types.CodeScrub003.HasClass(types.ErrClassTransient) {
 		t.Error("TROUBLE-SCRUB-003 is not classified transient")
 	}
 }
@@ -191,7 +191,7 @@ func TestRuleTimeoutFailsClosed(t *testing.T) {
 	if st.FailClosed != before.FailClosed+1 {
 		t.Errorf("fail_closed = %d, want %d", st.FailClosed, before.FailClosed+1)
 	}
-	if !types.CodeScrub005.Is(types.ErrClassTransient) {
+	if !types.CodeScrub005.HasClass(types.ErrClassTransient) {
 		t.Error("TROUBLE-SCRUB-005 is not classified transient")
 	}
 }
@@ -202,7 +202,7 @@ func TestRuleErrorFailsClosed(t *testing.T) {
 	if CodeOf(err) != types.CodeScrub004 {
 		t.Errorf("code = %s, want %s", CodeOf(err), types.CodeScrub004)
 	}
-	if !types.CodeScrub004.Is(types.ErrClassPermanent) {
+	if !types.CodeScrub004.HasClass(types.ErrClassPermanent) {
 		t.Error("TROUBLE-SCRUB-004 is not classified permanent")
 	}
 }

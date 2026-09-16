@@ -41,6 +41,13 @@ budgets, storm breakers and suppression windows, the host agent lease, and park/
 restarts. It owns the `incident`, `verify` and `breaker` record kinds.
 
 
+`internal/dashboard` — the read-mostly face of the ledger (SPEC-10): the §2.1 route table (20 rows
+plus one deterministic 404 rule), token/scope auth with CSRF on every POST, the seven htmx polling
+fragments with their stale-render guard, server-rendered pages for incidents, groups, rules and
+breakers, and the §2.9 budget discipline — no handler opens a ledger file, fragments fit an 8 KB cap,
+and compression concurrency is bounded. Import rule: stdlib + `internal/types`, with every subsystem
+arriving through `Deps`.
+
 ## The scrubbing contract
 
 The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to

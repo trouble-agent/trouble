@@ -23,34 +23,38 @@ const ratioGuardMax = 100
 
 // maxBodyOverread is the slack the limited reader allows past the decompressed
 // cap so that "over the cap" is detectable without buffering the rest
-// (§6.2): memory bound = cap + 64KB.
+// (§6.1/§6.2): memory bound = cap + 64KB. It is headroom for the read, never an
+// allowance: limit is the refusal threshold (§3.1 "decompressed ≤1MB", §3.7
+// "the decompressed cap is enforced by a limited reader").
 const maxBodyOverread = 64 * 1024
 
-// limitedReader reads at most limit+slack bytes and records whether the source
-// tried to go past limit. It is the memory bound for one request.
+// limitedReader reads at most limit+slack bytes and reports overCap as soon as
+// the source crosses limit. It is the memory bound for one request; the bytes
+// past limit are the reader's headroom, not an accepted payload.
 type limitedReader struct {
-	r         io.Reader
-	remaining int64
-	slack     int64
-	overCap   bool
-	total     int64
+	r       io.Reader
+	limit   int64
+	slack   int64
+	read    int64
+	overCap bool
 }
 
 func newLimitedReader(r io.Reader, limit, slack int64) *limitedReader {
-	return &limitedReader{r: r, remaining: limit, slack: slack}
+	if limit < 0 {
+		limit = 0
+	}
+	if slack < 0 {
+		slack = 0
+	}
+	return &limitedReader{r: r, limit: limit, slack: slack}
 }
 
 func (l *limitedReader) Read(p []byte) (int, error) {
-	if l.remaining > 0 {
-		if int64(len(p)) > l.remaining {
-			p = p[:l.remaining]
-		}
-	} else if l.slack > 0 {
-		if int64(len(p)) > l.slack {
-			p = p[:l.slack]
-		}
-	} else {
-		// Read one more byte to learn that the source is over the cap.
+	// budget is what the source may still hand out before the memory bound is
+	// spent.
+	budget := l.limit + l.slack - l.read
+	if budget <= 0 {
+		// Read one more byte to learn that the source is over the bound.
 		var one [1]byte
 		n, err := l.r.Read(one[:])
 		if n > 0 {
@@ -62,22 +66,26 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 		}
 		return 0, err
 	}
-	n, err := l.r.Read(p)
-	if int64(n) <= l.remaining {
-		l.remaining -= int64(n)
-	} else {
-		over := int64(n) - l.remaining
-		l.remaining = 0
-		l.slack -= over
-		if l.slack < 0 {
-			over += l.slack
-			n -= int(over)
-			l.overCap = true
-			err = errOverCap
-		}
+	if int64(len(p)) > budget {
+		p = p[:budget]
 	}
-	l.total += int64(n)
-	return n, err
+	n, err := l.r.Read(p)
+	if n <= 0 {
+		return n, err
+	}
+	l.read += int64(n)
+	if l.read <= l.limit {
+		return n, err
+	}
+	// Past the cap: hand back only the bytes inside it and report the refusal,
+	// so no caller can parse or persist the excess.
+	if excess := int(l.read - l.limit); excess < n {
+		n -= excess
+	} else {
+		n = 0
+	}
+	l.overCap = true
+	return n, errOverCap
 }
 
 var errOverCap = errors.New("sentinel: body exceeds the configured cap")

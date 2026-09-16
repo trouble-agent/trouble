@@ -47,13 +47,22 @@ explicit `length`; without it the envelope is `400` + `TROUBLE-SENTINEL-001`
 | Limit | Default | Failure |
 |---|---|---|
 | compressed envelope | 200 KB | `413` + `TROUBLE-SENTINEL-002` |
-| decompressed envelope | 1 MB (memory bound = cap + 64KB) | `413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`) |
+| decompressed envelope | 1 MB — refused at exactly the cap; `cap + 64KB` is the decompressor's memory bound, not an accepted payload | `413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`) |
 | compression ratio | > 100:1 once output passes 100 KB | `413` + `TROUBLE-SENTINEL-003` (cause `compression_ratio`); a payload that breaches both bounds reports whichever one the stream crosses first |
 | single item | 256 KB | `413` + `TROUBLE-SENTINEL-002` (cause `item_too_large`) |
 | header / item-header line | 8 KB | `400` + `TROUBLE-SENTINEL-001` |
 | body line (log lines) | 64 KB | truncated, `truncated_total` |
 | in-flight requests | 64 | queued ≤1s, then `429` + `1:error:global:overloaded:` |
 | per IP | 600/min, burst 60 | `429` + `1:error:ip:overloaded:` |
+
+The decompressed cap is enforced **at the cap**: a body of exactly `1048576`
+decompressed bytes is accepted (200) and `1048577` is refused, on `identity` and
+`gzip` alike — the 200 KB compressed cap is checked first and only masks this
+boundary for a payload that does not actually compress. `cap + 64KB` is the
+limited reader's *memory* bound — the headroom that makes "over the cap"
+detectable without buffering the rest of the stream (§6.1) — so the window
+between the cap and cap + 64KB is a refusal, never a payload.
+`TestDecompressedCapBoundary` asserts the boundary against this table's number.
 
 ## 4. SDK / client compatibility
 

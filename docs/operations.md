@@ -227,6 +227,19 @@ sustained rate above ~109 events/s the oldest ids are forgotten before the
 (`duplicate_events_total`). That bound exists so a hostile client cannot drive the
 resident set; it is a documented divergence in `docs/sentinel-compat.md` §5.
 
+### Envelope size refusals
+
+The decompressed cap is enforced **at the cap**, not at the reader's memory
+bound: a body of 1,048,576 decompressed bytes is admitted and 1,048,577 is
+`413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`), on `identity` and
+`gzip` alike, for any ratio under 100:1. `cap + 64KB` is headroom the limited
+reader may hold so "over the cap" is detectable mid-stream (§6.1) and is never
+accepted as payload; `TestDecompressedCapBoundary` pins the boundary against the
+number in `docs/sentinel-compat.md` §3. §6.1's phrase "a limited reader capped at
+1MB + 64KB" is read as that memory bound — the reading §3.1's caps table and
+§3.7's own bomb row require — and is worth pinning in the spec text at the next
+SPEC-04 revision so it cannot be read as an allowance.
+
 ### Load test
 
 `internal/sentinel/load_test.go` runs the §7 load test: 8 workers, ~4KB gzip'd

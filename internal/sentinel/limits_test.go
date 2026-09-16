@@ -7,7 +7,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -651,5 +653,189 @@ func TestResponseScratchIsPerRequest(t *testing.T) {
 			t.Errorf("attempt %d (unknown item: %v): X-Sentry-Error %q, want %q",
 				i, a.unknownItem, codes[i], want)
 		}
+	}
+}
+
+// lowEntropyFiller returns n printable bytes that gzip at a middling ratio:
+// small enough that the 200KB compressed cap can never be the bound, and far
+// under 100:1 so the ratio guard can never be the bound either, while the byte
+// count stays exact.
+func lowEntropyFiller(n, seed int) []byte {
+	out := make([]byte, n)
+	x := uint64(0x2545f4914f6cdd1d) + uint64(seed)*0x9e3779b97f4a7c15
+	for i := range out {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		if (x>>31)&1 == 0 {
+			out[i] = 'A'
+		} else {
+			out[i] = 'B'
+		}
+	}
+	return out
+}
+
+// envelopeOfDecompressedSize builds a valid envelope whose framing is exactly n
+// bytes. The items are attachments: each stays inside max_item_bytes, carries
+// lowEntropyFiller so neither the item cap nor the ratio guard can be the bound,
+// and is dropped without being scrubbed — so the case measures the reader's cap
+// rather than the scrubber's per-KiB budget, which is a separate timing property.
+func envelopeOfDecompressedSize(tb testing.TB, n int) []byte {
+	tb.Helper()
+	const items = 5
+	header := map[string]any{"event_id": "5c1a7b9d2e3f405162738495a6b7c8d9"}
+
+	build := func(filler []int) []byte {
+		fit := make([]envelopeFixtureItem, 0, len(filler))
+		for i, k := range filler {
+			fit = append(fit, envelopeFixtureItem{Type: "attachment", Body: lowEntropyFiller(k, i), Length: true})
+		}
+		return envelopeBytes(tb, header, fit...)
+	}
+
+	lens := make([]int, items)
+	for i := range lens {
+		lens[i] = n/items - 1024
+	}
+	env := build(lens)
+	// The message is plain 'A'/'B', so growing one filler by d grows the framing
+	// by exactly d; the item's length field is the only other thing that moves
+	// and it settles within a step or two of its digit count changing.
+	for i := 0; i < 8 && len(env) != n; i++ {
+		lens[0] += n - len(env)
+		env = build(lens)
+	}
+	if len(env) != n {
+		tb.Fatalf("built a %d-byte envelope, wanted %d", len(env), n)
+	}
+	for i, k := range lens {
+		if k <= 0 {
+			tb.Fatalf("item %d got a %d-byte filler", i, k)
+		}
+	}
+	return env
+}
+
+// compatRow returns the compat-matrix row whose first cell is exactly label.
+func compatRow(tb testing.TB, label string) string {
+	tb.Helper()
+	b, err := os.ReadFile(compatDocPath)
+	if err != nil {
+		tb.Fatalf("read %s: %v", compatDocPath, err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Split(line, "|")
+		if len(fields) > 2 && strings.TrimSpace(fields[1]) == label {
+			return line
+		}
+	}
+	tb.Fatalf("docs/sentinel-compat.md has no %q row", label)
+	return ""
+}
+
+// assertDecompressedCapRefusal checks the pinned refusal shape of §3.7/§5. It
+// takes the concrete *Error so a nil refusal cannot arrive as a non-nil error
+// interface and turn the assertion into a nil dereference.
+func assertDecompressedCapRefusal(tb testing.TB, what string, err *Error) {
+	tb.Helper()
+	if err == nil {
+		tb.Fatalf("%s: expected a refusal, got none", what)
+	}
+	if err.Code != types.CodeSentinel003 {
+		tb.Errorf("%s: code %q, want 003", what, err.Code)
+	}
+	if len(err.Causes) != 1 || err.Causes[0] != causeDecompressedCap {
+		tb.Errorf("%s: causes %v, want [%s]", what, err.Causes, causeDecompressedCap)
+	}
+}
+
+// TestDecompressedCapBoundary pins the decompressed cap to the number
+// docs/sentinel-compat.md §3 states: exactly MaxEnvelopeDecompressed bytes are
+// accepted and the first byte past it is 413/003 with cause decompressed_cap.
+// `cap + 64KB` is the reader's memory bound (§6.1) and never an accepted
+// payload, so the window between the two is a refusal, on both encodings.
+func TestDecompressedCapBoundary(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.close()
+	capBytes := ts.s.cfg.MaxEnvelopeDecompressed
+	if capBytes != 1<<20 {
+		t.Fatalf("default decompressed cap is %d, want 1MB", capBytes)
+	}
+
+	// The row has to state the number the server enforces, with the 64KB named
+	// as the memory bound rather than as part of the threshold.
+	row := compatRow(t, "decompressed envelope")
+	if !strings.Contains(row, "memory bound") {
+		t.Errorf("compat row does not name cap + 64KB as the memory bound: %s", row)
+	}
+	cell := strings.Fields(strings.TrimSpace(strings.Split(row, "|")[2]))
+	if len(cell) < 2 || cell[1] != "MB" {
+		t.Fatalf("compat row no longer states the cap in MB: %s", row)
+	}
+	stated, cerr := strconv.Atoi(cell[0])
+	if cerr != nil {
+		t.Fatalf("compat row's cap number %q is not an integer: %s", cell[0], row)
+	}
+	if int64(stated)<<20 != capBytes {
+		t.Errorf("compat row states %s MB but the server enforces %d bytes", cell[0], capBytes)
+	}
+
+	// Direct: gunzip is the bound under test, with ~1:1 output so the ratio
+	// guard cannot be the reason either way.
+	out, err := ts.s.gunzip(gzipBytes(t, incompressibleBytes(int(capBytes))), capBytes)
+	if err != nil {
+		t.Fatalf("exactly-cap decompressed payload was refused: %v", err)
+	}
+	if int64(len(out)) != capBytes {
+		t.Fatalf("accepted %d decompressed bytes, want %d", len(out), capBytes)
+	}
+	_, err = ts.s.gunzip(gzipBytes(t, incompressibleBytes(int(capBytes)+1)), capBytes)
+	assertDecompressedCapRefusal(t, "gunzip at cap+1", err)
+
+	// The wire: a valid envelope of exactly cap bytes is 200 …
+	auth := map[string]string{"X-Sentry-Auth": ts.authHeader("1"), "Content-Encoding": "gzip"}
+	atCap := envelopeOfDecompressedSize(t, int(capBytes))
+	gz := gzipBytes(t, atCap)
+	ratio := float64(len(atCap)) / float64(len(gz))
+	t.Logf("boundary fixture: %d bytes decompressed, %d gzipped (%.1f:1)", len(atCap), len(gz), ratio)
+	if int64(len(gz)) > ts.s.cfg.MaxEnvelopeCompressed || ratio >= float64(ratioGuardMax) {
+		t.Fatalf("fixture does not isolate the decompressed cap: %d compressed bytes (cap %d), ratio %.1f:1",
+			len(gz), ts.s.cfg.MaxEnvelopeCompressed, ratio)
+	}
+	resp := ts.post(t, "/api/1/envelope/", auth, gz)
+	if resp.StatusCode != 200 {
+		t.Fatalf("exactly %d decompressed bytes: status %d (%s)", capBytes, resp.StatusCode, readBody(t, resp))
+	}
+	// 200 alone is not enough: the envelope has to have parsed and been admitted.
+	if id := respID(t, resp); id != "5c1a7b9d2e3f405162738495a6b7c8d9" {
+		t.Errorf("exactly-cap envelope answered with id %q, want the header's event_id", id)
+	}
+
+	// … and one byte past it is refused — including cap + the reader's 64KB
+	// slack, the window that used to be accepted.
+	for _, over := range []int64{1, maxBodyOverread} {
+		resp := ts.post(t, "/api/1/envelope/", auth, gzipBytes(t, envelopeOfDecompressedSize(t, int(capBytes+over))))
+		body := readBody(t, resp)
+		if resp.StatusCode != 413 {
+			t.Fatalf("cap+%d: status %d, want 413 (%s)", over, resp.StatusCode, body)
+		}
+		if got := resp.Header.Get("X-Sentry-Error"); got != string(types.CodeSentinel003) {
+			t.Errorf("cap+%d: X-Sentry-Error %q, want 003", over, got)
+		}
+		if got := firstCause(t, body); got != causeDecompressedCap {
+			t.Errorf("cap+%d: cause %q, want %q", over, got, causeDecompressedCap)
+		}
+	}
+
+	// An identity body is refused at the same number, with the compressed cap
+	// raised so it cannot be the bound.
+	ts2 := newTestServer(t, func(c *Config) { c.MaxEnvelopeCompressed = capBytes + 1 })
+	defer ts2.close()
+	resp = ts2.post(t, "/api/1/envelope/", map[string]string{"X-Sentry-Auth": ts2.authHeader("1")},
+		envelopeOfDecompressedSize(t, int(capBytes)+1))
+	body := readBody(t, resp)
+	if resp.StatusCode != 413 || firstCause(t, body) != causeDecompressedCap {
+		t.Errorf("identity cap+1: %d cause %q, want 413/%q", resp.StatusCode, firstCause(t, body), causeDecompressedCap)
 	}
 }

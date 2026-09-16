@@ -113,18 +113,6 @@ type Breaker struct {
 	Reason    string       `json:"reason"`
 }
 
-// SourceLiveness is per-source liveness for verification (SPEC-TYPES §3.12).
-type SourceLiveness struct {
-	HostID        string  `json:"host_id"`
-	Source        string  `json:"source"`
-	Zone          string  `json:"zone"`
-	Expected      bool    `json:"expected"`
-	Alive         bool    `json:"alive"`
-	LastEventTS   string  `json:"last_event_ts"`
-	LastEventAgeS float64 `json:"last_event_age_s"`
-	MaxAgeS       float64 `json:"max_age_s"`
-}
-
 // ConfigValue is a resolved configuration entry (SPEC-TYPES §3.14). SPEC-12
 // owns precedence (flag > env > file > default); SPEC-03 consumes the resolved
 // set in New (SPEC-03 §2).

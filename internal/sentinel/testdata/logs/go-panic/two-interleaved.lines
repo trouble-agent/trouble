@@ -1,0 +1,12 @@
+panic: runtime error: index out of range [7] with length 3
+
+goroutine 1 [running]:
+main.first()
+	/app/main.go:10 +0x1a
+panic: runtime error: invalid memory address or nil pointer dereference
+
+goroutine 12 [running]:
+main.second()
+	/app/second.go:99 +0x2b
+main.third()
+	/app/third.go:5 +0x11

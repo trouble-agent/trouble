@@ -1,0 +1,11 @@
+2026-09-16T09:14:03Z daemon starting
+fatal error: concurrent map writes
+
+goroutine 1 [running]:
+github.com/totalwindupflightsystems/payment/worker.claim(0xc0000b4000, 0x2)
+	/srv/payment/worker.go:118 +0x1f6
+github.com/totalwindupflightsystems/payment/queue.get({0x0, 0x0}, 0x390)
+	/srv/payment/queue.go:44 +0x8c
+main.main()
+	/srv/payment/main.go:22 +0x1a4
+2026-09-16T09:14:04Z daemon degraded, restarting

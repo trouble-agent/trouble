@@ -7,3 +7,7 @@ dagger.db
 .scrub-e2e-*
 .scrub-ingest-*
 *.test
+
+.sentinel-e2e-*
+.sentinel-load-*
+.sentinel-dbg-*

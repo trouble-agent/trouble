@@ -960,9 +960,6 @@ func (l *Ladder) Advance(ctx context.Context, incID string, tr Transition) (type
 	if tr.Seq != 0 && tr.Seq == st.LastSeq {
 		return st.Inc, nil
 	}
-	if tr.Seq != 0 {
-		st.LastSeq = tr.Seq
-	}
 
 	e, err := l.resolveEdge(st, tr)
 	if err != nil {
@@ -1015,13 +1012,27 @@ func (l *Ladder) Advance(ctx context.Context, incID string, tr Transition) (type
 	if err := l.appendIncident(ctx, st, payload); err != nil {
 		return st.Inc, wrapErr(types.CodeLadder015, "", err)
 	}
+	// The seq is consumed only by an ACCEPTED transition: a refused attempt must
+	// stay retryable with the same seq (INV-5 dedups timers, not refusals).
+	if tr.Seq != 0 {
+		st.LastSeq = tr.Seq
+	}
 	st.Inc.State = e.To
 	st.LastEdge = e.ID
 	st.Inc.UpdatedTS = types.FormatUTC(l.now())
 	st.LastTransitionTS = st.Inc.UpdatedTS
 	st.Waiting = false
 	switch e.To {
-	case types.StResolved, types.StEscalated, types.StQuarantined:
+	case types.StResolved:
+		l.observeBreakerClosuresLocked(ctx, st)
+		delete(l.openBySig, st.Inc.Sig)
+		if st.InKey != "" {
+			delete(l.openByInKey, st.InKey)
+		}
+		if e.To != types.StQuarantined {
+			l.openSuppressionAfterTerminal(ctx, st, e.To)
+		}
+	case types.StEscalated, types.StQuarantined:
 		delete(l.openBySig, st.Inc.Sig)
 		if st.InKey != "" {
 			delete(l.openByInKey, st.InKey)

@@ -225,20 +225,29 @@ func (l *Ladder) openBreakerLocked(sig string, obs Observation) (string, bool) {
 	return "", false
 }
 
-// observeBreakerClosuresLocked closes a half-open breaker whose probe window
-// passed, and re-opens it when the probe failed (§3.8).
+// closeBreakersLocked closes the half-open breakers a passing verification
+// proves healthy: "Its window passing closes the breaker (closed, counter kept)"
+// (§3.8). The scopes come from the incident's own identity and the arrival paths
+// it was seen on — never from a guessed source.
 func (l *Ladder) observeBreakerClosuresLocked(ctx context.Context, st *incState) {
-	for _, scope := range []string{scopeSig + st.Inc.Sig, scopeRule + st.Rule, scopeSource + string(st.Inc.Severity)} {
+	scopes := []string{scopeSig + st.Inc.Sig}
+	if st.Rule != "" {
+		scopes = append(scopes, scopeRule+st.Rule)
+	}
+	for path := range st.ArrivalPaths {
+		scopes = append(scopes, scopeSource+path)
+	}
+	for _, scope := range scopes {
 		b, ok := l.breakers[scope]
 		if !ok || b.Breaker.State != types.BreakerHalfOpen {
 			continue
 		}
-		b.Trips = 0
+		// The counter is kept: a closed breaker remembers its trips.
 		b.Breaker.State = types.BreakerClosed
 		b.Breaker.OpenUntil = ""
 		b.Breaker.Reason = ""
 		b.HalfOpen = false
-		_ = l.appendBreaker(ctx, b, "")
+		_ = l.appendBreaker(ctx, b, st.Inc.ID)
 	}
 }
 

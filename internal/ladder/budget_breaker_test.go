@@ -397,8 +397,10 @@ func TestBreakerHalfOpenProbeClosesAndFailingProbeReopensDoubled(t *testing.T) {
 	if b.Breaker.State != types.BreakerClosed {
 		t.Fatalf("state after a passing probe = %q, want closed", string(b.Breaker.State))
 	}
-	if b.Trips != 0 || b.Breaker.OpenUntil != "" {
-		t.Errorf("closed breaker trips=%d open_until=%q, want 0/empty", b.Trips, b.Breaker.OpenUntil)
+	// §3.8: "Its window passing closes the breaker (closed, counter kept)" — the
+	// trip counter survives the close, only the window is cleared.
+	if b.Trips == 0 || b.Breaker.OpenUntil != "" {
+		t.Errorf("closed breaker trips=%d open_until=%q, want trips kept and open_until empty", b.Trips, b.Breaker.OpenUntil)
 	}
 	last := h.ledger.byKind(types.KBreaker)
 	if got := last[len(last)-1].Payload["state"]; got != string(types.BreakerClosed) {

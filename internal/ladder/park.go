@@ -85,6 +85,9 @@ func (l *Ladder) Park(ctx context.Context, reason ParkReason) (ParkReport, error
 		}
 		report.Records = append(report.Records, pr)
 	}
+	// Exactly one forced group commit is issued (§3.5 step 2): the park records
+	// written above ride the ledger's own Close path at process exit (SPEC-12),
+	// so the unflushed tail stays bounded by ledger.fsync_window_ms.
 	if flushErr != nil {
 		return report, wrapErr(types.CodeLadder015, reasonParkFailed, flushErr)
 	}

@@ -124,9 +124,10 @@ func (c Config) WithDefaults() Config {
 	fillInt64(&c.SpawnsPerDay, d.SpawnsPerDay)
 	fillDur(&c.CanaryInterval, d.CanaryInterval)
 	if !c.QuietClose {
-		// quiet_close defaults to TRUE, so an unset value must not read as false:
-		// the zero Config is the shadow default and this keeps §3.8's quiet-close
-		// working unless a caller explicitly disables it through FromValues.
+		// quiet_close defaults to TRUE, so an unset value must not read as false.
+		// A caller that wants it OFF expresses that through ladder.quiet_close
+		// = false in the resolved ConfigValues (FromValues, SPEC-12's precedence
+		// path); the zero Config is the boot default, not an override.
 		c.QuietClose = d.QuietClose
 	}
 	fillInt(&c.ReopenMax, d.ReopenMax)

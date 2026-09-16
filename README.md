@@ -22,6 +22,25 @@ the bundle/record/envelope entry points, and the persistence-boundary re-scan
 
 `internal/types` is the shared type source of truth.
 
+`internal/registry` — the daemon's entire action surface (SPEC-06): the frozen v1 module SDK
+(`Descriptor`/`Check`/`Apply`/`Verify`), the six-stage call contract
+(authorize → validate → dry-run → apply → verify → audit) with its intent/outcome audit pair, the
+generated draft 2020-12 schemas and their closed validator, plays as data with the shared `when:`
+condition language, the compiled-in do-not-touch floor (with additive merge and weakening refusal),
+the polkit install-time contract, the `testkit` conformance harness, and the thirteen shipped
+modules `config.{get,set,list}`, `service.{status,reload,restart}`, `file.{read,patch}`,
+`proc.{top,connections}` and `flow.{file_issue,create_task,comment}`. No module shells out: there is
+no `os/exec` anywhere in the package, and a module that accepts a `command`/`argv`/`shell` args key
+cannot register.
+
+`internal/ladder` — the state machine that decides what work a detection gets and is the only
+component allowed to declare a problem fixed (SPEC-05): the 19 pinned states, the 48-edge transition
+table plus 13 refused edges as data, the dedup/merge upsert keyed by `sig` and `inKey` (AC-22),
+verification as an `Evidence` tuple where a canary that did not land can never produce `passed`,
+budgets, storm breakers and suppression windows, the host agent lease, and park/re-adopt for daemon
+restarts. It owns the `incident`, `verify` and `breaker` record kinds.
+
+
 ## The scrubbing contract
 
 The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to

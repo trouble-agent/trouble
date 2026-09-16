@@ -215,3 +215,84 @@ inotify watches → disk/timers sweeps → D-Bus connections → `journalctl` (S
 process group, join with a 5 s bound, then SIGKILL) → PSI triggers → a final gap for any scope still
 degraded. It returns only after every goroutine has joined; the process never exits with an armed
 trigger or a live child. Measured on this host: **36 ms**.
+
+## 10. The ladder (SPEC-05)
+
+`internal/ladder` is the only component that decides what work a detection gets. Operationally it
+shows up in five places.
+
+**One incident per signature.** Admission is an idempotent upsert: an open incident for the same
+`sig` collects arrivals (a fold, never a second incident), two signatures that share an `inKey`
+share one incident across planes, and a recurrence after `resolved` reopens the *same* incident id
+up to `ladder.reopen_max` times. `trouble incidents` (SPEC-12's CLI) therefore shows one row per
+problem, not one per arrival path.
+
+**Verification is evidence, not absence.** A window is only `passed` when a canary landed, every
+expected source was alive inside the window, no gap record overlaps it and zero events were
+observed. A canary that did not land is `invalid` (`TROUBLE-LADDER-006`) — a flat graph because
+nothing is arriving must never read as fixed. This is the single most important operational rule in
+the daemon: if you see `invalid` with an empty `sources_missing`, check the canary cadence and the
+source liveness table before believing any resolution.
+
+**Budgets escalate instead of running.** Per host, per UTC day: `agent_runs` 20, `play_runs` 50,
+`research_requests` 30, `spawns` 5. Exhaustion escalates the incident with
+`TROUBLE-LADDER-013` and still fires the outlets, so a human always sees it. A rollover at midnight
+never aborts a run: the run is charged to the day it started.
+
+**Storm breakers and suppression windows.** Breakers are per `rule:`, `sig:`, `source:` and
+`global`, with half-open probes: after the window elapses exactly one incident is admitted as a
+probe; its window passing closes the breaker, its failure re-opens it with the doubled duration
+capped at 4h. A suppression window *is* an open `sig:` breaker with `reason=suppression_window`;
+arrivals inside it fold and never advance a rung. Quiet-close (`quiet_close` default true) resolves
+a suppressed incident only when the whole window was observed quiet **and** a canary landed.
+
+**Restarts.** `Park` writes one park record per in-flight play or agent run before exit (it never
+changes the incident's state), and `ReAdopt` resumes them oldest-first with at most one run in
+flight. An already-applied mutating call is never re-applied: the re-adopter re-runs the *check*,
+which is what makes resume safe. A lost agent run (dead pid, no completion record) becomes
+`agent:failed` with `failure_class=daemon_restart_lost` and does **not** consume a strike — a restart
+storm must not starve the agent rung.
+
+**The kill-switch** stops every stage entry and records each refusal as pending work; detection,
+scrubbing, ledger writes, canaries, liveness and verification keep running, so an outage is never
+blind. Clearing it resumes from the persisted state — no command or tool call is ever replayed.
+
+## 11. The registry (SPEC-06)
+
+`internal/registry` is the daemon's entire action surface: every state-changing act trouble performs
+is one typed tool call. Three operational facts matter.
+
+**Nothing shells out.** `internal/registry/**` contains zero `os/exec` references, enforced by
+`TestNoExecInRegistry` (a `go/parser` import scan, not a text grep), and no registered module may
+declare a `command`, `cmd`, `argv`, `shell` or `script` args key
+(`TestNoArbitraryCommandModule`). The registry reaches the outside world through exactly four typed
+channels: file IO inside an allow root, `/proc` reads, the systemd D-Bus API (mediated by polkit)
+and the in-process flow/issue subsystem.
+
+**Scripts-as-data are plays.** A play is TOML in `<state_root>/plays` (or a skill's
+`plays/`), resolved skill-local → local → embedded, with `retries` (0–3, transient only,
+1s/2s/4s backoff), `register` (forward-only), `on_fail` (`abort`/`continue`/`rollback`) and a
+`when:` expression evaluated by the **same** condition language the sensors use — there is no second
+dialect. A protected play never loads: a task whose literal args name a do-not-touch path or unit is
+refused at load time with `TROUBLE-REGISTRY-007`.
+
+**Do-not-touch cannot be weakened.** The compiled-in floor (`/etc/shadow`, `/etc/sudoers`,
+`/etc/ssh/**`, `/etc/polkit-1/**`, `/boot/**`, `/usr/**`, the state root, the daemon's own unit, …)
+is always applied; a file that sets `mandatory = false` or carries `remove = [...]` is refused with
+`TROUBLE-REGISTRY-006` (`reason=do_not_touch_weaken_refused`) and the daemon continues with maximum
+enforcement. Configuration can widen the deny set, never narrow it.
+
+**The polkit artifact is an install-time contract.** `contrib/polkit/49-trouble.rules` grants
+`org.freedesktop.systemd1.manage-units` for the `reload` and `restart` verbs, for the daemon user,
+on the configured unit allowlist (`registry.service_units`), from a local session. Without it the
+probe reports `capability=policy_refused` and `service.reload`/`service.restart` refuse at authorize
+with `TROUBLE-REGISTRY-006` (`reason=polkit_missing_policy`) — never a retry, always an escalation
+carrying the install command. `trouble registry policy` prints the probe's verdict and
+`contrib/polkit`'s install state.
+
+**Conformance gates every module.** `make conformance` runs the §2.4 commands: the whole package
+with `-race`, plus the three named tests that prove the harness *rejects* a deliberately
+non-idempotent module and a mutating module without a real dry run, and that every generated schema
+stays inside the closed draft 2020-12 keyword subset. A descriptor edit without a regenerated
+`internal/registry/schema/*.json` (`make schema`) fails the boot check with
+`TROUBLE-REGISTRY-014`.

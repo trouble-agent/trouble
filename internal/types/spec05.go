@@ -18,6 +18,48 @@ const (
 	ParkKillSwitch  ParkReason = "kill_switch"
 )
 
+// AutonomyMode is the autonomy gate matrix's mode (SPEC-TYPES §3.7).
+type AutonomyMode string
+
+const (
+	AutoShadow   AutonomyMode = "shadow"
+	AutoAssisted AutonomyMode = "assisted"
+	AutoFull     AutonomyMode = "full"
+)
+
+// Valid reports whether m is one of the three frozen modes.
+func (m AutonomyMode) Valid() bool {
+	switch m {
+	case AutoShadow, AutoAssisted, AutoFull:
+		return true
+	}
+	return false
+}
+
+// AutonomyGates is the operator state SPEC-05 §3.11 pins; the ladder is its
+// owner and every other package reads it.
+type AutonomyGates struct {
+	Mode             AutonomyMode `json:"mode"`
+	KillSwitch       bool         `json:"kill_switch"`
+	AllowDetect      bool         `json:"allow_detect"`
+	AllowResearch    bool         `json:"allow_research"`
+	AllowPlayMutate  bool         `json:"allow_play_mutate"`
+	AllowAgent       bool         `json:"allow_agent"`
+	AllowSpawn       bool         `json:"allow_spawn"`
+	AllowMerge       bool         `json:"allow_merge"`
+	AllowPromote     bool         `json:"allow_promote"`
+	AllowSkillAccept bool         `json:"allow_skill_accept"`
+	Grants           []string     `json:"grants"`
+	ChangedBy        string       `json:"changed_by"`
+	ChangedTS        string       `json:"changed_ts"`
+}
+
+// DefaultGates is the boot state: shadow, nothing granted, kill-switch clear
+// (SPEC-05 §3.11: shadow is the default in every install).
+func DefaultGates() AutonomyGates {
+	return AutonomyGates{Mode: AutoShadow}
+}
+
 // ParkRecord is a persisted park row (SPEC-TYPES §3.15.4). A park record is a
 // record, never a state: parking never changes LadderState.
 type ParkRecord struct {

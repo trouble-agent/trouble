@@ -1,0 +1,1 @@
+{"$id":"https://trouble.local/schema/registry/service.status@1","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"scope":{"default":"system","enum":["system","user"],"type":"string"},"unit":{"pattern":"^[A-Za-z0-9@._:\\-]{1,255}$","type":"string"}},"required":["unit"],"type":"object"}

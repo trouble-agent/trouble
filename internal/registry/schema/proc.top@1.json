@@ -1,0 +1,1 @@
+{"$id":"https://trouble.local/schema/registry/proc.top@1","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"n":{"default":15,"maximum":100,"minimum":1,"type":"integer"},"sort":{"default":"cpu","enum":["cpu","rss","io"],"type":"string"},"unit":{"type":"string"}},"type":"object"}

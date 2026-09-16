@@ -160,16 +160,19 @@ type DoNotTouch struct {
 
 // ToolCallRequest is the one input of Registry.Call (SPEC-TYPES §3.15.5).
 type ToolCallRequest struct {
-	Module    string         `json:"module"`
-	Args      map[string]any `json:"args"`
-	Mode      string         `json:"mode"`
-	IdemKey   string         `json:"idem_key"`
-	Grants    []string       `json:"grants"`
-	Source    string         `json:"source"`
-	Inc       string         `json:"inc"`
-	Rule      string         `json:"rule"`
-	Actor     Actor          `json:"actor"`
-	DeadlineS int            `json:"deadline_s"`
+	Module  string         `json:"module"`
+	Args    map[string]any `json:"args"`
+	Mode    string         `json:"mode"`
+	IdemKey string         `json:"idem_key"`
+	Grants  []string       `json:"grants"`
+	Source  string         `json:"source"`
+	Inc     string         `json:"inc"`
+	Rule    string         `json:"rule"`
+	// Sig is part of the runner's bound base (SPEC-06 §2.2 names it) because a
+	// play_run record is a sig-required spine kind (SPEC-01 §3.1).
+	Sig       string `json:"sig"`
+	Actor     Actor  `json:"actor"`
+	DeadlineS int    `json:"deadline_s"`
 }
 
 // PlayRun is the run-level audit record (SPEC-TYPES §3.15.5).

@@ -1,0 +1,1 @@
+{"$id":"https://trouble.local/schema/registry/service.restart@1","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"mode":{"default":"replace","enum":["replace","fail"],"type":"string"},"scope":{"default":"system","enum":["system","user"],"type":"string"},"unit":{"type":"string"}},"required":["unit"],"type":"object"}

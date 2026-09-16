@@ -1,0 +1,1 @@
+{"$id":"https://trouble.local/schema/registry/flow.comment@1","$schema":"https://json-schema.org/draft/2020-12/schema","additionalProperties":false,"properties":{"body":{"maxLength":65536,"type":"string"},"ref":{"type":"string"},"sig":{"type":"string"}},"required":["body","sig"],"type":"object"}

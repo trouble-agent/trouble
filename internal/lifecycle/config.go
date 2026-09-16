@@ -1,0 +1,954 @@
+package lifecycle
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/totalwindupflightsystems/trouble/internal/types"
+)
+
+// Config is the single flat resolved config (SPEC-12 §3.1) plus the nested
+// DashboardConfig that lifecycle resolves and the composition root maps onto
+// dashboard.Config.
+type Config struct {
+	StateRoot  string `toml:"state_root"`
+	ConfigPath string `toml:"config_path"`
+
+	Secrets struct {
+		EnvironmentFile string `toml:"environment_file"`
+	} `toml:"secrets"`
+
+	Lifecycle struct {
+		SystemdScope        string         `toml:"systemd_scope"`
+		UnitName            string         `toml:"unit_name"`
+		EscalateUnit        string         `toml:"escalate_unit"`
+		CheckerUnit         string         `toml:"checker_unit"`
+		Sandbox             string         `toml:"sandbox"`
+		User                string         `toml:"user"`
+		HeartbeatPath       string         `toml:"heartbeat_path"`
+		HeartbeatInterval   types.Duration `toml:"heartbeat_interval"`
+		HeartbeatStaleAfter types.Duration `toml:"heartbeat_stale_after"`
+		IdleHeartbeatInterval types.Duration `toml:"idle_heartbeat_interval"`
+		WatchdogSec         types.Duration `toml:"watchdog_sec"`
+		DrainTimeout        types.Duration `toml:"drain_timeout"`
+		UpgradeReadyTimeout types.Duration `toml:"upgrade_ready_timeout"`
+		RollbackDepth       int            `toml:"rollback_depth"`
+		SelfRSSWarn         string         `toml:"self_rss_warn"` // e.g. "80MB"
+		ClockSkewTolerance  types.Duration `toml:"clock_skew_tolerance"`
+	} `toml:"lifecycle"`
+
+	Stall struct {
+		MaxSeqAge types.Duration `toml:"max_seq_age"`
+	} `toml:"stall"`
+
+	Checker struct {
+		Interval    types.Duration `toml:"interval"`
+		ConfirmRuns int            `toml:"confirm_runs"`
+		StateFile   string         `toml:"state_file"`
+		AlarmFile   string         `toml:"alarm_file"`
+		AlarmCommand []string      `toml:"alarm_command"`
+	} `toml:"checker"`
+
+	Ingest struct {
+		Bind           string `toml:"bind"`
+		AdvertisedHost string `toml:"advertised_host"`
+		Auth           struct {
+			LoopbackDSN        bool   `toml:"loopback_dsn"`
+			NonloopbackMode    string `toml:"nonloopback_mode"`
+			PublicRequireProxy bool   `toml:"public_require_proxy"`
+		} `toml:"auth"`
+	} `toml:"ingest"`
+
+	Dashboard DashboardConfig `toml:"dashboard"`
+
+	Hub struct {
+		Mode              string         `toml:"mode"`
+		URL               string         `toml:"url"`
+		ForwardProjectID  string         `toml:"forward_project_id"`
+		Token             string         `toml:"token"`
+		ProtocolVersion   int            `toml:"protocol_version"`
+		ForwardBatchRecords int          `toml:"forward_batch_records"`
+		ForwardBatchBytes int            `toml:"forward_batch_bytes"`
+		RetryBase         types.Duration `toml:"retry_base"`
+		RetryMax          types.Duration `toml:"retry_max"`
+		DedupLRU          int            `toml:"dedup_lru"`
+	} `toml:"hub"`
+
+	Spool struct {
+		BudgetBytes     int64  `toml:"budget_bytes"`
+		GapReserveBytes int64  `toml:"gap_reserve_bytes"`
+		Fsync           string `toml:"fsync"`
+		FsyncWindowMS   int    `toml:"fsync_window_ms"`
+	} `toml:"spool"`
+
+	Verify struct {
+		ZoneWindows map[string]types.Duration `toml:"zone_windows"`
+	} `toml:"verify"`
+
+	Escalate struct {
+		Channels [][]string     `toml:"channels"`
+		Timeout  types.Duration `toml:"timeout"`
+	} `toml:"escalate"`
+
+	FS struct {
+		ForbiddenStateRoots []string `toml:"forbidden_state_roots"`
+		RemoteTypes         []string `toml:"remote_types"`
+	} `toml:"fs"`
+
+	Origin struct {
+		HostID string `toml:"host_id"`
+		HubID  string `toml:"hub_id"`
+	} `toml:"origin"`
+
+	Migrate struct {
+		DowngradeOK bool `toml:"downgrade_ok"`
+	} `toml:"lifecycle.migrate"`
+}
+
+// DashboardConfig holds the dashboard.* keys (SPEC-10 §3.4) resolved by
+// lifecycle and passed to dashboard by the composition root.
+type DashboardConfig struct {
+	Bind string `toml:"bind"`
+	Auth struct {
+		Transport       string         `toml:"transport"`
+		IdentityProvider string        `toml:"identity_provider"`
+		SessionTTL      types.Duration `toml:"session_ttl"`
+	} `toml:"auth"`
+}
+
+// Resolved is the output of Resolve: the typed config, every ConfigValue with
+// provenance, plus the non-fatal records that must be mirrored into the ledger.
+type Resolved struct {
+	Config     Config
+	Values     []types.ConfigValue
+	Conflicts  []types.ConfigValue // one row per conflict (code 002)
+	UnknownEnv []types.ConfigValue // unknown TROUBLE_* env vars with optional hint
+	Warnings   []error
+}
+
+// keyMeta describes one known config key, its default and how to set it.
+type keyMeta struct {
+	key        string
+	section    string
+	name       string
+	defaultVal any
+	setter     func(*Config, any) error
+}
+
+func defaults() *Config {
+	c := &Config{}
+	c.StateRoot = defaultStateRoot()
+	c.ConfigPath = defaultConfigPath()
+	c.Secrets.EnvironmentFile = defaultEnvFile()
+	c.Lifecycle.SystemdScope = defaultSystemdScope()
+	c.Lifecycle.UnitName = "trouble.service"
+	c.Lifecycle.EscalateUnit = "trouble-escalate@.service"
+	c.Lifecycle.CheckerUnit = "trouble-stall.service"
+	c.Lifecycle.Sandbox = "standard"
+	c.Lifecycle.HeartbeatPath = ""
+	c.Lifecycle.HeartbeatInterval = "30s"
+	c.Lifecycle.HeartbeatStaleAfter = "90s"
+	c.Lifecycle.IdleHeartbeatInterval = "60s"
+	c.Lifecycle.WatchdogSec = "60s"
+	c.Lifecycle.DrainTimeout = "30s"
+	c.Lifecycle.UpgradeReadyTimeout = "30s"
+	c.Lifecycle.RollbackDepth = 2
+	c.Lifecycle.SelfRSSWarn = "80MB"
+	c.Lifecycle.ClockSkewTolerance = "5s"
+	c.Stall.MaxSeqAge = "300s"
+	c.Checker.Interval = "60s"
+	c.Checker.ConfirmRuns = 2
+	c.Checker.StateFile = ""
+	c.Checker.AlarmFile = ""
+	c.Checker.AlarmCommand = nil
+	c.Ingest.Bind = "127.0.0.1:7643"
+	c.Ingest.AdvertisedHost = ""
+	c.Ingest.Auth.LoopbackDSN = true
+	c.Ingest.Auth.NonloopbackMode = "token"
+	c.Ingest.Auth.PublicRequireProxy = true
+	c.Dashboard.Bind = "127.0.0.1:7644"
+	c.Dashboard.Auth.Transport = "cookie"
+	c.Dashboard.Auth.IdentityProvider = ""
+	c.Dashboard.Auth.SessionTTL = "24h"
+	c.Hub.Mode = "hub"
+	c.Hub.URL = ""
+	c.Hub.ForwardProjectID = ""
+	c.Hub.Token = ""
+	c.Hub.ProtocolVersion = 1
+	c.Hub.ForwardBatchRecords = 200
+	c.Hub.ForwardBatchBytes = 524288
+	c.Hub.RetryBase = "2s"
+	c.Hub.RetryMax = "5m"
+	c.Hub.DedupLRU = 65536
+	c.Spool.BudgetBytes = 268435456
+	c.Spool.GapReserveBytes = 2097152
+	c.Spool.Fsync = "group"
+	c.Spool.FsyncWindowMS = 200
+	c.Verify.ZoneWindows = map[string]types.Duration{
+		"loopback": "10m",
+		"lan":      "15m",
+		"tailnet":  "20m",
+		"public":   "30m",
+	}
+	c.Escalate.Channels = nil
+	c.Escalate.Timeout = "10s"
+	c.FS.ForbiddenStateRoots = []string{"/tmp", "/var/tmp"}
+	c.FS.RemoteTypes = []string{"nfs", "nfs4", "cifs", "smb", "sshfs", "fuse.sshfs"}
+	c.Origin.HostID = ""
+	c.Origin.HubID = ""
+	c.Migrate.DowngradeOK = false
+	return c
+}
+
+func defaultStateRoot() string {
+	base := os.Getenv("XDG_STATE_HOME")
+	if base != "" {
+		return filepath.Join(base, "trouble")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/var/lib/trouble"
+	}
+	return filepath.Join(home, ".local", "state", "trouble")
+}
+
+func defaultConfigPath() string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base != "" {
+		return filepath.Join(base, "trouble", "config.toml")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/etc/trouble/config.toml"
+	}
+	return filepath.Join(home, ".config", "trouble", "config.toml")
+}
+
+func defaultEnvFile() string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base != "" {
+		return filepath.Join(base, "trouble", "trouble.env")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/etc/trouble/trouble.env"
+	}
+	return filepath.Join(home, ".config", "trouble", "trouble.env")
+}
+
+func defaultSystemdScope() string {
+	if os.Getenv("XDG_RUNTIME_DIR") != "" {
+		return "user"
+	}
+	return "system"
+}
+
+func asString(v any) (string, error) {
+	switch x := v.(type) {
+	case string:
+		return x, nil
+	case types.Duration:
+		return string(x), nil
+	case bool:
+		return strconv.FormatBool(x), nil
+	case int64:
+		return strconv.FormatInt(x, 10), nil
+	case int:
+		return strconv.Itoa(x), nil
+	case []any:
+		parts := make([]string, len(x))
+		for i, e := range x {
+			s, err := asString(e)
+			if err != nil {
+				return "", err
+			}
+			parts[i] = s
+		}
+		return strings.Join(parts, ","), nil
+	default:
+		return "", fmt.Errorf("expected string, got %T", v)
+	}
+}
+
+func asStringSlice(v any) ([]string, error) {
+	switch x := v.(type) {
+	case []any:
+		out := make([]string, len(x))
+		for i, e := range x {
+			s, err := asString(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = s
+		}
+		return out, nil
+	case []string:
+		return x, nil
+	case string:
+		if x == "" {
+			return nil, nil
+		}
+		return strings.Split(x, ","), nil
+	case nil:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("expected array, got %T", v)
+	}
+}
+
+func asBool(v any) (bool, error) {
+	switch x := v.(type) {
+	case bool:
+		return x, nil
+	case string:
+		return strconv.ParseBool(x)
+	default:
+		return false, fmt.Errorf("expected bool, got %T", v)
+	}
+}
+
+func asInt(v any) (int, error) {
+	switch x := v.(type) {
+	case int64:
+		return int(x), nil
+	case int:
+		return x, nil
+	case string:
+		i, err := strconv.ParseInt(x, 10, 64)
+		return int(i), err
+	default:
+		return 0, fmt.Errorf("expected int, got %T", v)
+	}
+}
+
+func asInt64(v any) (int64, error) {
+	switch x := v.(type) {
+	case int64:
+		return x, nil
+	case int:
+		return int64(x), nil
+	case string:
+		return strconv.ParseInt(x, 10, 64)
+	default:
+		return 0, fmt.Errorf("expected int64, got %T", v)
+	}
+}
+
+func asDuration(v any) (types.Duration, error) {
+	s, err := asString(v)
+	if err != nil {
+		return "", err
+	}
+	return types.Duration(s), nil
+}
+
+func applyToMapStringDuration(m map[string]types.Duration, v any) error {
+	switch x := v.(type) {
+	case map[string]types.Duration:
+		for k, d := range x {
+			m[k] = d
+		}
+		return nil
+	case map[string]any:
+		for k, e := range x {
+			d, err := asDuration(e)
+			if err != nil {
+				return err
+			}
+			m[k] = d
+		}
+		return nil
+	case string:
+		// "loopback=10m lan=15m ..."
+		for _, part := range strings.Fields(x) {
+			kv := strings.SplitN(part, "=", 2)
+			if len(kv) != 2 {
+				return fmt.Errorf("bad zone_windows pair %q", part)
+			}
+			m[kv[0]] = types.Duration(kv[1])
+		}
+		return nil
+	default:
+		return fmt.Errorf("expected map, got %T", v)
+	}
+}
+
+// registry lists every known key, its default and a typed setter.
+func registry(c *Config) []keyMeta {
+	return []keyMeta{
+		{"state_root", "", "state_root", c.StateRoot, func(cfg *Config, v any) error { s, err := asString(v); cfg.StateRoot = s; return err }},
+		{"config_path", "", "config_path", c.ConfigPath, func(cfg *Config, v any) error { s, err := asString(v); cfg.ConfigPath = s; return err }},
+		{"secrets.environment_file", "secrets", "environment_file", c.Secrets.EnvironmentFile, func(cfg *Config, v any) error { s, err := asString(v); cfg.Secrets.EnvironmentFile = s; return err }},
+		{"lifecycle.systemd_scope", "lifecycle", "systemd_scope", c.Lifecycle.SystemdScope, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.SystemdScope = s; return err }},
+		{"lifecycle.unit_name", "lifecycle", "unit_name", c.Lifecycle.UnitName, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.UnitName = s; return err }},
+		{"lifecycle.escalate_unit", "lifecycle", "escalate_unit", c.Lifecycle.EscalateUnit, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.EscalateUnit = s; return err }},
+		{"lifecycle.checker_unit", "lifecycle", "checker_unit", c.Lifecycle.CheckerUnit, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.CheckerUnit = s; return err }},
+		{"lifecycle.sandbox", "lifecycle", "sandbox", c.Lifecycle.Sandbox, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.Sandbox = s; return err }},
+		{"lifecycle.user", "lifecycle", "user", c.Lifecycle.User, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.User = s; return err }},
+		{"lifecycle.heartbeat_path", "lifecycle", "heartbeat_path", c.Lifecycle.HeartbeatPath, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.HeartbeatPath = s; return err }},
+		{"lifecycle.heartbeat_interval", "lifecycle", "heartbeat_interval", c.Lifecycle.HeartbeatInterval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.HeartbeatInterval = d; return err }},
+		{"lifecycle.heartbeat_stale_after", "lifecycle", "heartbeat_stale_after", c.Lifecycle.HeartbeatStaleAfter, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.HeartbeatStaleAfter = d; return err }},
+		{"lifecycle.idle_heartbeat_interval", "lifecycle", "idle_heartbeat_interval", c.Lifecycle.IdleHeartbeatInterval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.IdleHeartbeatInterval = d; return err }},
+		{"lifecycle.watchdog_sec", "lifecycle", "watchdog_sec", c.Lifecycle.WatchdogSec, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.WatchdogSec = d; return err }},
+		{"lifecycle.drain_timeout", "lifecycle", "drain_timeout", c.Lifecycle.DrainTimeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.DrainTimeout = d; return err }},
+		{"lifecycle.upgrade_ready_timeout", "lifecycle", "upgrade_ready_timeout", c.Lifecycle.UpgradeReadyTimeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.UpgradeReadyTimeout = d; return err }},
+		{"lifecycle.rollback_depth", "lifecycle", "rollback_depth", c.Lifecycle.RollbackDepth, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Lifecycle.RollbackDepth = i; return err }},
+		{"lifecycle.self_rss_warn", "lifecycle", "self_rss_warn", c.Lifecycle.SelfRSSWarn, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.SelfRSSWarn = s; return err }},
+		{"lifecycle.clock_skew_tolerance", "lifecycle", "clock_skew_tolerance", c.Lifecycle.ClockSkewTolerance, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.ClockSkewTolerance = d; return err }},
+		{"stall.max_seq_age", "stall", "max_seq_age", c.Stall.MaxSeqAge, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Stall.MaxSeqAge = d; return err }},
+		{"checker.interval", "checker", "interval", c.Checker.Interval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Checker.Interval = d; return err }},
+		{"checker.confirm_runs", "checker", "confirm_runs", c.Checker.ConfirmRuns, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Checker.ConfirmRuns = i; return err }},
+		{"checker.state_file", "checker", "state_file", c.Checker.StateFile, func(cfg *Config, v any) error { s, err := asString(v); cfg.Checker.StateFile = s; return err }},
+		{"checker.alarm_file", "checker", "alarm_file", c.Checker.AlarmFile, func(cfg *Config, v any) error { s, err := asString(v); cfg.Checker.AlarmFile = s; return err }},
+		{"checker.alarm_command", "checker", "alarm_command", c.Checker.AlarmCommand, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.Checker.AlarmCommand = ss; return err }},
+		{"ingest.bind", "ingest", "bind", c.Ingest.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Ingest.Bind = s; return err }},
+		{"ingest.advertised_host", "ingest", "advertised_host", c.Ingest.AdvertisedHost, func(cfg *Config, v any) error { s, err := asString(v); cfg.Ingest.AdvertisedHost = s; return err }},
+		{"ingest.auth.loopback_dsn", "ingest", "loopback_dsn", c.Ingest.Auth.LoopbackDSN, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Ingest.Auth.LoopbackDSN = b; return err }},
+		{"ingest.auth.nonloopback_mode", "ingest", "nonloopback_mode", c.Ingest.Auth.NonloopbackMode, func(cfg *Config, v any) error { s, err := asString(v); cfg.Ingest.Auth.NonloopbackMode = s; return err }},
+		{"ingest.auth.public_require_proxy", "ingest", "public_require_proxy", c.Ingest.Auth.PublicRequireProxy, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Ingest.Auth.PublicRequireProxy = b; return err }},
+		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
+		{"dashboard.auth.transport", "dashboard", "transport", c.Dashboard.Auth.Transport, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Auth.Transport = s; return err }},
+		{"dashboard.auth.identity_provider", "dashboard", "identity_provider", c.Dashboard.Auth.IdentityProvider, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Auth.IdentityProvider = s; return err }},
+		{"dashboard.auth.session_ttl", "dashboard", "session_ttl", c.Dashboard.Auth.SessionTTL, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Dashboard.Auth.SessionTTL = d; return err }},
+		{"hub.mode", "hub", "mode", c.Hub.Mode, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.Mode = s; return err }},
+		{"hub.url", "hub", "url", c.Hub.URL, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.URL = s; return err }},
+		{"hub.forward_project_id", "hub", "forward_project_id", c.Hub.ForwardProjectID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.ForwardProjectID = s; return err }},
+		{"hub.token", "hub", "token", c.Hub.Token, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.Token = s; return err }},
+		{"hub.protocol_version", "hub", "protocol_version", c.Hub.ProtocolVersion, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.ProtocolVersion = i; return err }},
+		{"hub.forward_batch_records", "hub", "forward_batch_records", c.Hub.ForwardBatchRecords, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.ForwardBatchRecords = i; return err }},
+		{"hub.forward_batch_bytes", "hub", "forward_batch_bytes", c.Hub.ForwardBatchBytes, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.ForwardBatchBytes = i; return err }},
+		{"hub.retry_base", "hub", "retry_base", c.Hub.RetryBase, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryBase = d; return err }},
+		{"hub.retry_max", "hub", "retry_max", c.Hub.RetryMax, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryMax = d; return err }},
+		{"hub.dedup_lru", "hub", "dedup_lru", c.Hub.DedupLRU, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.DedupLRU = i; return err }},
+		{"spool.budget_bytes", "spool", "budget_bytes", c.Spool.BudgetBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Spool.BudgetBytes = i; return err }},
+		{"spool.gap_reserve_bytes", "spool", "gap_reserve_bytes", c.Spool.GapReserveBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Spool.GapReserveBytes = i; return err }},
+		{"spool.fsync", "spool", "fsync", c.Spool.Fsync, func(cfg *Config, v any) error { s, err := asString(v); cfg.Spool.Fsync = s; return err }},
+		{"spool.fsync_window_ms", "spool", "fsync_window_ms", c.Spool.FsyncWindowMS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Spool.FsyncWindowMS = i; return err }},
+		{"verify.zone_windows", "verify", "zone_windows", c.Verify.ZoneWindows, func(cfg *Config, v any) error { return applyToMapStringDuration(cfg.Verify.ZoneWindows, v) }},
+		{"escalate.channels", "escalate", "channels", c.Escalate.Channels, func(cfg *Config, v any) error {
+			switch x := v.(type) {
+			case []any:
+				out := make([][]string, len(x))
+				for i, e := range x {
+					switch y := e.(type) {
+					case []any:
+						row := make([]string, len(y))
+						for j, ee := range y {
+							s, err := asString(ee)
+							if err != nil {
+								return err
+							}
+							row[j] = s
+						}
+						out[i] = row
+					case string:
+						out[i] = strings.Fields(y)
+					default:
+						return fmt.Errorf("expected argv array, got %T", e)
+					}
+				}
+				cfg.Escalate.Channels = out
+				return nil
+			case [][]string:
+				cfg.Escalate.Channels = x
+				return nil
+			case string:
+				if x == "" {
+					cfg.Escalate.Channels = nil
+					return nil
+				}
+				cfg.Escalate.Channels = [][]string{strings.Fields(x)}
+				return nil
+			case nil:
+				cfg.Escalate.Channels = nil
+				return nil
+			default:
+				return fmt.Errorf("expected channels array, got %T", v)
+			}
+		}},
+		{"escalate.timeout", "escalate", "timeout", c.Escalate.Timeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Escalate.Timeout = d; return err }},
+		{"fs.forbidden_state_roots", "fs", "forbidden_state_roots", c.FS.ForbiddenStateRoots, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.FS.ForbiddenStateRoots = ss; return err }},
+		{"fs.remote_types", "fs", "remote_types", c.FS.RemoteTypes, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.FS.RemoteTypes = ss; return err }},
+		{"origin.host_id", "origin", "host_id", c.Origin.HostID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Origin.HostID = s; return err }},
+		{"origin.hub_id", "origin", "hub_id", c.Origin.HubID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Origin.HubID = s; return err }},
+		{"lifecycle.migrate.downgrade_ok", "lifecycle.migrate", "downgrade_ok", c.Migrate.DowngradeOK, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Migrate.DowngradeOK = b; return err }},
+	}
+}
+
+// Resolve builds a Resolved config from flags, env, file and defaults.
+func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
+	def := defaults()
+	known := make(map[string]keyMeta)
+	for _, m := range registry(def) {
+		known[m.key] = m
+	}
+
+	resolved := Resolved{Config: *def}
+	values := make(map[string]types.ConfigValue)
+
+	// defaults
+	for _, m := range registry(def) {
+		values[m.key] = types.ConfigValue{
+			Key:        m.key,
+			Value:      m.defaultVal,
+			Source:     "default",
+			SourceRef:  "builtin",
+			Redacted:   redacted(m.key),
+		}
+	}
+
+	// file
+	if cfgPath == "" {
+		cfgPath = def.ConfigPath
+	}
+	fileVals, err := parseTOMLFile(cfgPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return Resolved{}, fmt.Errorf("%w: %v", types.CodeLifecycle001, err)
+	}
+	for k, fv := range fileVals {
+		if _, ok := known[k]; !ok {
+			return Resolved{}, fmt.Errorf("%w: unknown file key %q", types.CodeLifecycle001, k)
+		}
+		values[k] = types.ConfigValue{
+			Key:        k,
+			Value:      fv,
+			Source:     "file",
+			SourceRef:  cfgPath,
+			Redacted:   redacted(k),
+		}
+	}
+
+	// env
+	rev := make(map[string]string, len(known))
+	for k := range known {
+		rev[envName(k)] = k
+	}
+	envMap := parseEnv(env, rev, known, &resolved)
+	for k, ev := range envMap {
+		values[k] = types.ConfigValue{
+			Key:        k,
+			Value:      ev,
+			Source:     "env",
+			SourceRef:  envName(k),
+			Redacted:   redacted(k),
+		}
+	}
+
+	// flags
+	flagMap, err := parseArgs(args, known)
+	if err != nil {
+		return Resolved{}, err
+	}
+	for k, fv := range flagMap {
+		values[k] = types.ConfigValue{
+			Key:        k,
+			Value:      fv,
+			Source:     "flag",
+			SourceRef:  "--" + flagName(k),
+			Redacted:   redacted(k),
+		}
+	}
+
+	// detect conflicts: a lower-precedence source also set the key to a different value
+	for k, win := range values {
+		if win.Source == "default" {
+			continue
+		}
+		lower := lowerSources(win.Source)
+		for _, src := range lower {
+			if src == "default" {
+				if !equalValues(win.Value, known[k].defaultVal) {
+					resolved.Conflicts = append(resolved.Conflicts, types.ConfigValue{
+						Key:        k,
+						Value:      "TROUBLE-LIFECYCLE-002",
+						Source:     "conflict",
+						SourceRef:  fmt.Sprintf("%s vs default", win.SourceRef),
+						Redacted:   false,
+					})
+				}
+				continue
+			}
+			var other types.ConfigValue
+			switch src {
+			case "file":
+				if v, ok := fileVals[k]; ok {
+					other = types.ConfigValue{Key: k, Value: v, Source: "file", SourceRef: cfgPath}
+				}
+			case "env":
+				if v, ok := envMap[k]; ok {
+					other = types.ConfigValue{Key: k, Value: v, Source: "env", SourceRef: envName(k)}
+				}
+			case "flag":
+				if v, ok := flagMap[k]; ok {
+					other = types.ConfigValue{Key: k, Value: v, Source: "flag", SourceRef: "--" + flagName(k)}
+				}
+			}
+			if other.Source != "" && !equalValues(win.Value, other.Value) {
+				resolved.Conflicts = append(resolved.Conflicts, types.ConfigValue{
+					Key:        k,
+					Value:      "TROUBLE-LIFECYCLE-002",
+					Source:     "conflict",
+					SourceRef:  fmt.Sprintf("%s vs %s", win.SourceRef, other.SourceRef),
+					Redacted:   false,
+				})
+			}
+		}
+	}
+
+	// apply values to Config
+	for _, m := range registry(&resolved.Config) {
+		cv := values[m.key]
+		if err := m.setter(&resolved.Config, cv.Value); err != nil {
+			return Resolved{}, fmt.Errorf("%w: key %q: %v", types.CodeLifecycle001, m.key, err)
+		}
+		cv.Value = redactValue(cv)
+		resolved.Values = append(resolved.Values, cv)
+	}
+
+	// post-resolve path defaults that depend on state_root
+	resolved.Config = postResolve(resolved.Config)
+	for i := range resolved.Values {
+		cv := &resolved.Values[i]
+		switch cv.Key {
+		case "lifecycle.heartbeat_path":
+			cv.Value = resolved.Config.Lifecycle.HeartbeatPath
+		case "checker.state_file":
+			cv.Value = resolved.Config.Checker.StateFile
+		case "checker.alarm_file":
+			cv.Value = resolved.Config.Checker.AlarmFile
+		}
+	}
+
+	return resolved, nil
+}
+
+func lowerSources(src string) []string {
+	switch src {
+	case "flag":
+		return []string{"env", "file", "default"}
+	case "env":
+		return []string{"file", "default"}
+	case "file":
+		return []string{"default"}
+	}
+	return nil
+}
+
+func equalValues(a, b any) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	as, _ := asString(a)
+	bs, _ := asString(b)
+	return as == bs
+}
+
+func redactValue(cv types.ConfigValue) any {
+	if cv.Redacted {
+		return "[REDACTED:config]"
+	}
+	return cv.Value
+}
+
+func redacted(key string) bool {
+	lower := strings.ToLower(key)
+	if strings.HasPrefix(lower, "secrets.") {
+		return true
+	}
+	if strings.HasSuffix(lower, ".token") || strings.HasSuffix(lower, ".secret") || strings.HasSuffix(lower, "_key") {
+		return true
+	}
+	if lower == "dsn.secret" {
+		return true
+	}
+	if strings.HasSuffix(lower, ".public_key") {
+		return false
+	}
+	return false
+}
+
+func postResolve(c Config) Config {
+	if c.Lifecycle.HeartbeatPath == "" {
+		c.Lifecycle.HeartbeatPath = filepath.Join(c.StateRoot, "heartbeat.json")
+	}
+	if c.Checker.StateFile == "" {
+		c.Checker.StateFile = filepath.Join(c.StateRoot, "checker.state.json")
+	}
+	if c.Checker.AlarmFile == "" {
+		c.Checker.AlarmFile = filepath.Join(c.StateRoot, "checker.alarm")
+	}
+	if c.Ingest.AdvertisedHost == "" && isLoopbackBind(c.Ingest.Bind) {
+		c.Ingest.AdvertisedHost = "localhost"
+	}
+	return c
+}
+
+func isLoopbackBind(bind string) bool {
+	host, _, err := splitHostPort(bind)
+	if err != nil {
+		return false
+	}
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
+func envName(key string) string {
+	return "TROUBLE_" + strings.ToUpper(strings.ReplaceAll(strings.ReplaceAll(key, ".", "_"), "-", "_"))
+}
+
+func flagName(key string) string {
+	return strings.ReplaceAll(key, ".", "-")
+}
+
+func parseEnv(env []string, rev map[string]string, known map[string]keyMeta, r *Resolved) map[string]any {
+	out := make(map[string]any)
+	for _, e := range env {
+		if !strings.HasPrefix(e, "TROUBLE_") {
+			continue
+		}
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		name := parts[0]
+		key, ok := rev[name]
+		if !ok {
+			key = envToKey(name)
+		}
+		if m, ok := known[key]; ok {
+			out[key] = coerceEnvValue(parts[1], m.defaultVal)
+		} else {
+			cv := types.ConfigValue{Key: key, Value: parts[1], Source: "env_unknown", SourceRef: name}
+			if hint := nearestKey(key, known); hint != "" {
+				cv.Value = map[string]any{"value": parts[1], "hint": hint}
+			}
+			r.UnknownEnv = append(r.UnknownEnv, cv)
+		}
+	}
+	return out
+}
+
+func envToKey(name string) string {
+	s := strings.TrimPrefix(name, "TROUBLE_")
+	s = strings.ToLower(s)
+	return strings.ReplaceAll(s, "_", ".")
+}
+
+func coerceEnvValue(s string, def any) any {
+	switch def.(type) {
+	case bool:
+		b, _ := strconv.ParseBool(s)
+		return b
+	case int, int64:
+		i, _ := strconv.ParseInt(s, 10, 64)
+		return i
+	case []string, [][]string:
+		return strings.Split(s, ",")
+	}
+	return s
+}
+
+func nearestKey(key string, known map[string]keyMeta) string {
+	best := ""
+	bestd := 3
+	for k := range known {
+		d := editDistance(key, k)
+		if d < bestd {
+			bestd = d
+			best = k
+		}
+	}
+	if bestd <= 2 {
+		return best
+	}
+	return ""
+}
+
+func editDistance(a, b string) int {
+	if a == b {
+		return 0
+	}
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	for j := 0; j <= len(b); j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
+func parseArgs(args []string, known map[string]keyMeta) (map[string]any, error) {
+	out := make(map[string]any)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if !strings.HasPrefix(arg, "--") {
+			continue
+		}
+		key := strings.TrimPrefix(arg, "--")
+		key = strings.ReplaceAll(key, "-", ".")
+		var val string
+		if strings.Contains(key, "=") {
+			parts := strings.SplitN(key, "=", 2)
+			key = parts[0]
+			val = parts[1]
+		} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+			val = args[i+1]
+			i++
+		} else {
+			val = "true"
+		}
+		if _, ok := known[key]; !ok {
+			return nil, fmt.Errorf("%w: unknown flag %q", types.CodeLifecycle001, arg)
+		}
+		out[key] = val
+	}
+	return out, nil
+}
+
+// parseTOMLFile is a minimal TOML subset reader: sections, key = value,
+// strings, ints, bools, arrays of strings.
+func parseTOMLFile(path string) (map[string]any, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	vals := make(map[string]any)
+	section := ""
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.Trim(line, "[]")
+			continue
+		}
+		if !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		key := strings.TrimSpace(parts[0])
+		valStr := strings.TrimSpace(parts[1])
+		if section != "" {
+			key = section + "." + key
+		}
+		v, err := parseTOMLValue(valStr)
+		if err != nil {
+			return nil, fmt.Errorf("%s: key %q: %w", path, key, err)
+		}
+		vals[key] = v
+	}
+	return vals, sc.Err()
+}
+
+func parseTOMLValue(s string) (any, error) {
+	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
+		inner := strings.TrimSpace(s[1 : len(s)-1])
+		if inner == "" {
+			return []any{}, nil
+		}
+		var out []any
+		for _, part := range splitArray(inner) {
+			v, err := parseTOMLValue(strings.TrimSpace(part))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	}
+	if (strings.HasPrefix(s, `"`) && strings.HasSuffix(s, `"`)) ||
+		(strings.HasPrefix(s, `'`) && strings.HasSuffix(s, `'`)) {
+		return unquote(s), nil
+	}
+	if s == "true" {
+		return true, nil
+	}
+	if s == "false" {
+		return false, nil
+	}
+	if i, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return i, nil
+	}
+	if f, err := strconv.ParseFloat(s, 64); err == nil {
+		return f, nil
+	}
+	// Bare string (TOML allows bare keys but we accept bare values too for simple strings)
+	return s, nil
+}
+
+func splitArray(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inQuote := false
+	quoteChar := rune(0)
+	for _, r := range s {
+		if inQuote {
+			cur.WriteRune(r)
+			if r == quoteChar {
+				inQuote = false
+			}
+			continue
+		}
+		if r == '"' || r == '\'' {
+			inQuote = true
+			quoteChar = r
+			cur.WriteRune(r)
+			continue
+		}
+		if r == ',' {
+			out = append(out, cur.String())
+			cur.Reset()
+			continue
+		}
+		cur.WriteRune(r)
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+func unquote(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	q := s[0]
+	if s[len(s)-1] != q {
+		return s
+	}
+	return strings.ReplaceAll(s[1:len(s)-1], "\\"+string(q), string(q))
+}
+
+func splitHostPort(s string) (string, string, error) {
+	if s == "" {
+		return "", "", fmt.Errorf("empty bind")
+	}
+	i := strings.LastIndex(s, ":")
+	if i < 0 || i == len(s)-1 {
+		return "", "", fmt.Errorf("missing port in %q", s)
+	}
+	return s[:i], s[i+1:], nil
+}

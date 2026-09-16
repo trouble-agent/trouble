@@ -257,6 +257,43 @@ storm must not starve the agent rung.
 scrubbing, ledger writes, canaries, liveness and verification keep running, so an outage is never
 blind. Clearing it resumes from the persisted state — no command or tool call is ever replayed.
 
+## 12. Lifecycle, config and the watchdog chain (SPEC-12)
+
+`internal/lifecycle` owns whether the daemon is allowed to run and replaceable
+without losing work.
+
+**Config precedence.** flag > env > file > default. `trouble config explain` prints
+one row per key with its source and source_ref; secret-class keys are replaced by
+`[REDACTED:config]`. There is no reveal flag. Unknown keys in the config file are
+fatal (TROUBLE-LIFECYCLE-001); stray `TROUBLE_*` environment variables are ignored
+with a near-miss hint when the name is close to a real key.
+
+**State root.** The daemon refuses to start if `state_root` resolves under `/tmp`
+or `/var/tmp`, is on a remote filesystem, or is not `0700`. Secret-bearing files
+must be `0600`; `CheckSecretFiles` reports every offender in one pass.
+
+**Bind preflight.** `PreflightBinds` resolves both listeners, validates the bind
+matrix, and keeps the sockets open so a live listener is detected as `EADDRINUSE`.
+A public `ingest.bind` without proxy mode is refused before any HTTP response is
+served.
+
+**Watchdog chain.** Four independent links: systemd `WatchdogSec=60`, the atomic
+`heartbeat.json`, the ledger sequence (made unconditional by the idle-tick rule),
+and the external `trouble-stall.service`. The checker alarms on ledger-sequence
+stall (TROUBLE-LIFECYCLE-009), not process liveness, because a wedged ledger
+writer can keep heartbeating.
+
+**Upgrades.** `trouble upgrade` stages `<bin>.new`, self-checks, parks in-flight
+plays, hardlinks the previous binary into `backups/bin/`, then `rename()`s over
+the live path. A park failure aborts with zero renames. The ETXTBSY trap is
+avoided by never opening the live binary for writing.
+
+**Satellite forwarding.** Records are queued in `spool/forward/NNNNNNNNNN.fwd`
+segments with a CRC footer, batched (≤200 records, ≤512 KiB decompressed), gzip'd,
+and forwarded as a Sentry-shaped envelope. Acks trim sealed segments; budget
+overflow drops the oldest whole segment and writes an exact `gap` record, leaving
+the 2 MiB gap reserve untouched.
+
 ## 11. The registry (SPEC-06)
 
 `internal/registry` is the daemon's entire action surface: every state-changing act trouble performs

@@ -1,0 +1,7 @@
+[Unit]
+Description=trouble external stall checker
+
+[Service]
+Type=oneshot
+EnvironmentFile=-__ENVFILE__
+ExecStart=__EXEC__ check-stall --config __CONFIG__

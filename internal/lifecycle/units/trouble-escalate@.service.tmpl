@@ -1,0 +1,8 @@
+[Unit]
+Description=trouble escalation for %i (out-of-band; does not depend on trouble)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=30
+EnvironmentFile=-__ENVFILE__
+ExecStart=__EXEC__ escalate --unit %i --config __CONFIG__

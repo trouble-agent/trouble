@@ -125,8 +125,10 @@ var CodeClass = map[ErrorCode]ErrorClass{
 	CodeSentinel022: ErrClassPermanent,
 }
 
-// Is reports whether the code's class matches class.
-func (e ErrorCode) Is(class ErrorClass) bool { return CodeClass[e] == class }
+// HasClass reports whether the code's class matches class. (Named HasClass, not
+// Is: an error-typed receiver with an `Is` method of a non-error signature trips
+// go vet's stdmethods check, and the repo's `make vet` runs it.)
+func (e ErrorCode) HasClass(class ErrorClass) bool { return CodeClass[e] == class }
 
 // Error renders the code.
 func (e ErrorCode) Error() string { return string(e) }

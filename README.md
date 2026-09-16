@@ -59,6 +59,30 @@ arriving through `Deps`.
 
 ## The scrubbing contract
 
+`internal/issues` — the issue desk (SPEC-09): the frozen four-method driver contract
+(`Name`/`Healthcheck`/`EnsureBySig`/`Comment`/`Close`), the anchor index keyed by
+`(driver, sig, project)` — one issue per sig for the life of the state root, with a fold inside the
+dedup window and a full recurrence block outside it — the sig/project/global caps that stop a
+chatty app or a flappy rule from spraying, the bounded spool (64 MiB / 20 000 entries / 72 h TTL)
+with its drop-oldest floor and its replay order, quiet-close with the five gates and the
+reopen-or-supersede branch, and two shipped drivers: `github` (search-first create so a lost 201
+adopts instead of duplicating, read-back verification, the exact §3.9.4 markers, the §3.9.5
+status→code table, a 0600 token file and argv refusal) and `duckbrain` (a KV layout with one key per
+comment and a write-then-read-back contract). It owns the `issue` record kind and is one of the five
+`gap` emitters. No module here shells out and no page is ever read: two HTTP APIs, one classified
+error per call.
+
+`internal/skills` — the skill loop (SPEC-11): a strict artifact schema with no field in which
+arbitrary code could be written (an unknown key, a `[stats]` table or an `exec`/`shell` key is a
+refusal, not a warning), a canonical signed byte form (`trouble.skill.v1` + a deterministic JSON
+projection + the play payload digest) verified against a config-listed ed25519 signer set, the
+version/floor/module/canary/approve gate chain, a pull-only distribution path (argv-only git reads:
+no push, no commit, no gc), the local candidate loop (draft → review → promote, signed with the
+host's own key), and the resolver that answers a recurrence with an exact sig match and refuses
+ambiguity. It owns the `skill` record kind.
+
+
+
 The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to
 disk, to the ledger, to the spool, to the skills-local directory, to an issue driver or to a board
 row before its content has passed through `internal/scrub`. Every signature, fingerprint and dedup
@@ -189,6 +213,8 @@ facts that surprise people) lives in `docs/operations.md` §12 and §13.
 * `specs/SPEC-INDEX.md` — suite map, the AC-to-spec matrix and the frozen v0.1 cut line.
 * `specs/SPEC-01-ledger.md` — the ledger, in full.
 * `specs/SPEC-03-sensors.md` — the detection plane, in full.
+* `specs/SPEC-09-issues.md` — the issue desk, in full.
+* `specs/SPEC-11-skills.md` — the skill loop, in full.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
 ## Build and test

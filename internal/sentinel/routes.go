@@ -170,6 +170,7 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 	}
 
 	rateHeader := ""
+	var firstRefusal *Error
 	for _, item := range env.Items {
 		ev, accErr := s.acceptEnvelopeItem(r, auth, item, env)
 		if accErr == nil && ev != nil {
@@ -178,12 +179,14 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 			_, accErr = s.admitEvent(r.Context(), auth.entry, ev, "event", "envelope")
 		}
 		if accErr != nil {
-			if s.refusal(w, accErr) {
-				return
+			// §6.10: a single envelope larger than quota_epm is admitted to
+			// quota_epm items and the remainder follows the loss policy — so the
+			// loop keeps going (every refused item writes its own drop record)
+			// and the first refusal is the response.
+			if firstRefusal == nil {
+				firstRefusal = accErr
 			}
-			s.countReject(auth.entry, accErr)
-			s.writeError(w, accErr)
-			return
+			continue
 		}
 		if ev != nil && validEventID(ev.ID) {
 			eventID = ev.ID
@@ -191,6 +194,14 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 		if h := s.pendingRateHeader(); h != "" {
 			rateHeader = h
 		}
+	}
+	if firstRefusal != nil {
+		if s.refusal(w, firstRefusal) {
+			return
+		}
+		s.countReject(auth.entry, firstRefusal)
+		s.writeError(w, firstRefusal)
+		return
 	}
 	s.noteAccept(auth.entry)
 	if rateHeader != "" {
@@ -204,6 +215,14 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 
 // pendingRateHeader reports the proactive-backoff header for the last decision,
 // if any (§3.9: 200 + header at 95% of quota).
+// attachRateHeader emits the proactive-backoff header (200 + header at 95% of
+// quota, §3.9) on any successful response.
+func (s *Server) attachRateHeader(w http.ResponseWriter) {
+	if h := s.pendingRateHeader(); h != "" {
+		w.Header().Set("X-Sentry-Rate-Limits", h)
+	}
+}
+
 func (s *Server) pendingRateHeader() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -328,6 +347,7 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request, projectID, 
 		return
 	}
 	s.noteAccept(auth.entry)
+	s.attachRateHeader(w)
 	w.Header().Set("X-Sentry-Deprecated", "store")
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": rec.Payload["native_id"]})
 }
@@ -377,6 +397,7 @@ func (s *Server) handleGeneric(w http.ResponseWriter, r *http.Request, projectID
 		return
 	}
 	s.noteAccept(auth.entry)
+	s.attachRateHeader(w)
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": rec.Payload["native_id"]})
 }
 

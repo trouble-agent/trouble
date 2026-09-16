@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"math"
 	"time"
 
@@ -31,6 +32,11 @@ type lossOutcome struct {
 	headers     map[string]string
 	errorCode   types.ErrorCode
 	sampleRate  float64
+	// respCode is the code the HTTP response carries. It is 010 for a project
+	// quota breach and 011 for the disk budget (§3.9's header table); the event
+	// record carries `error_code` = 014 instead, because that is the loss
+	// policy's own code (§5).
+	respCode types.ErrorCode
 }
 
 // applyLoss implements the three loss policies of §3.9 for one event the
@@ -77,14 +83,15 @@ func (s *Server) applyLoss(entry *projectEntry, ev *rawEvent, sig string, decisi
 	default: // drop-with-counter
 		out.disposition = dispDropped
 		out.status = 429
+		out.respCode = types.CodeSentinel010
 		headers := map[string]string{
 			"Retry-After":          itoa(decision.RetryAfterS),
 			"X-Sentry-Rate-Limits": decision.Header,
 			"X-Sentry-Error":       string(types.CodeSentinel010),
 		}
 		if decision.Reason == causeDiskBudget {
+			out.respCode = types.CodeSentinel011
 			headers["X-Sentry-Error"] = string(types.CodeSentinel011)
-			out.errorCode = types.CodeSentinel011
 			headers["X-Sentry-Rate-Limits"] = diskBudgetHeader
 			headers["Retry-After"] = "300"
 		}
@@ -140,6 +147,11 @@ func (s *Server) spoolEvent(entry *projectEntry, ev *rawEvent, reason string) (k
 	}
 	dropped, err := s.spool.Append(se)
 	if err != nil {
+		if errors.Is(err, ErrSpoolFull) {
+			// The spool budget could not be made to fit this entry: the event is
+			// dropped with TROUBLE-SENTINEL-015 (§3.9).
+			return false, dropped
+		}
 		// A failed spool write is TROUBLE-SENTINEL-020 and a loud log: the event
 		// is counted dropped, never silently lost.
 		s.counters.spoolWriteFail.Add(1)

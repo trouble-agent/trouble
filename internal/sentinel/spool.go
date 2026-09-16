@@ -156,6 +156,11 @@ func (s *Spool) Append(e SpoolEntry) (dropped int, err error) {
 	binary.LittleEndian.PutUint32(frame[12:16], crc32.Checksum(body, crcTable))
 	copy(frame[spoolEntryHeader:], body)
 
+	if s.budget > 0 && int64(len(frame)) > s.budget {
+		// Not even an empty spool can hold this entry: drop-oldest cannot help,
+		// so the caller reports TROUBLE-SENTINEL-015 (§3.9).
+		return 0, ErrSpoolFull
+	}
 	if s.budget > 0 && s.bytes+int64(len(frame)) > s.budget {
 		dropped = s.dropOldestLocked(s.bytes + int64(len(frame)) - s.budget)
 	}

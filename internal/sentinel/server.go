@@ -107,6 +107,7 @@ type counters struct {
 	canaryObserved  atomicCounter
 	canaryMissing   atomicCounter
 	spooled         atomicCounter
+	sampled         atomicCounter
 	replayed        atomicCounter
 	droppedQuota    atomicCounter
 	spoolWriteFail  atomicCounter
@@ -179,6 +180,7 @@ func (c *counters) snapshot() map[string]any {
 		"canary_observed_total":  c.canaryObserved.Get(),
 		"canary_missing_total":   c.canaryMissing.Get(),
 		"spooled_total":          c.spooled.Get(),
+		"sampled_total":          c.sampled.Get(),
 		"spool_replayed_total":   c.replayed.Get(),
 		"dropped_quota_total":    c.droppedQuota.Get(),
 		"spool_write_failed":     c.spoolWriteFail.Get(),
@@ -844,6 +846,9 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 			ev.ClockSkewS = skew
 		}
 	}
+	// §3.4: the release is trimmed and capped at 200 characters before it can
+	// become part of a group's identity.
+	ev.Release = releaseFromHeader(ev.Release)
 	if ev.AuthForm != "" {
 		entry.observeForm(ev.AuthForm)
 	}
@@ -906,7 +911,7 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 	}
 	if !outcome.keep {
 		// The refused event still writes its own record: sig + disposition, so
-		// the loss is auditable and verification for that sig is invalid.
+		// the loss is auditable and verification for that sig is invalid (§3.9).
 		payload := eventRecordPayload(ev, sig, itemType, redactions, map[string]any{
 			"disposition": disposition,
 			"error_code":  string(outcome.errorCode),
@@ -919,16 +924,28 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		if err != nil {
 			return types.Record{}, err
 		}
-		s.noteReject(entry)
-		_ = rec
-		return types.Record{}, &Error{
-			Code:        outcome.errorCode,
-			Status:      outcome.status,
-			Causes:      []string{disposition},
-			Msg:         "event refused by the loss policy",
-			RetryAfterS: decision.RetryAfterS,
-			Header:      decision.Header,
+		if outcome.status == 429 {
+			s.noteReject(entry)
+			code := outcome.respCode
+			if code == "" {
+				code = outcome.errorCode
+			}
+			return types.Record{}, &Error{
+				Code:        code,
+				Status:      outcome.status,
+				Causes:      []string{disposition},
+				Msg:         "event refused by the loss policy",
+				RetryAfterS: decision.RetryAfterS,
+				Header:      decision.Header,
+			}
 		}
+		// 200-level disposals (sampled, spooled, spool-full) answer 200 with the
+		// event id: the SDK keeps sending, and the record carries the truth.
+		s.counters.events.Add(1)
+		entry.mu.Lock()
+		entry.eventsTotal++
+		entry.mu.Unlock()
+		return rec, nil
 	}
 
 	// Group folding (§3.3).
@@ -971,6 +988,7 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 	entry.mu.Unlock()
 	if disposition == dispSampled {
 		s.groups.markDropped(digest, 1, outcome.sampleRate)
+		s.counters.sampled.Add(1)
 	}
 
 	// Group records: create / release / the 100-event flush. The watermark is

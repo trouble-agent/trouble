@@ -70,7 +70,7 @@ func (g *groupIndex) observe(sig types.Sig, digest string, ts, release, title st
 				LastSeenTS:   ts,
 				Count:        1,
 				Counters:     types.GroupCounters{Events: 1, Redacted: uint64(redactions)},
-				ReleaseRange: []string{release},
+				ReleaseRange: []string{release, release},
 			},
 			lastRelease: release,
 			created:     true,

@@ -92,7 +92,8 @@ func compareReleases(a, b string) (int, bool) {
 			return 1, true
 		}
 	}
-	return 0, false
+	// Every comparable segment matched (e.g. `v2.4.1` vs `2.4.1`): equal.
+	return 0, true
 }
 
 // splitRelease splits a release into dot/dash-separated segments.
@@ -305,16 +306,32 @@ type ReleaseDiffResult struct {
 	Regressed []types.Group
 	Coverage  bool // canary coverage of the `to` release for the project
 	To        string
+	From      string // the newest release that orders before `to`, if any
 }
 
 // ReleaseDiff composes the release-diff view inputs for a project and a target
-// release. SPEC-10 renders them; sentinel owns the coverage rule, so the
-// comparison happens here rather than in the dashboard.
+// release (§3.4's AC-19 rows). SPEC-10 renders them; sentinel owns the coverage
+// rule, so the comparison happens here rather than in the dashboard.
+//
+// `from` is the newest release observed for the project that orders before `to`
+// (an unorderable pair yields no `from`, so nothing is claimed as fixed).
 func (s *Server) ReleaseDiff(projectID, to string) ReleaseDiffResult {
 	out := ReleaseDiffResult{To: to}
 	coverage, _ := s.ReleaseCoverage(projectID, to)
 	out.Coverage = coverage
-	origin := to
+
+	from := ""
+	for _, rel := range s.releases.releasesFor(projectID) {
+		if rel == to {
+			continue
+		}
+		if cmp, ok := compareReleases(rel, to); ok && cmp < 0 {
+			from = rel
+			break
+		}
+	}
+	out.From = from
+
 	for _, g := range s.groups.snapshot() {
 		first := releaseAt(g.ReleaseRange, 0)
 		last := releaseAt(g.ReleaseRange, 1)
@@ -322,12 +339,16 @@ func (s *Server) ReleaseDiff(projectID, to string) ReleaseDiffResult {
 		case first == to:
 			out.NewIn = append(out.NewIn, g)
 			continue
-		case last == origin && s.regressionOf(g.Sig) == regressionConfirmed:
-			out.Regressed = append(out.Regressed, g)
+		case last == to:
+			if s.regressionOf(g.Sig) == regressionConfirmed {
+				out.Regressed = append(out.Regressed, g)
+				continue
+			}
+			out.StillOpen = append(out.StillOpen, g)
 			continue
-		}
-		if last == origin && first != to {
-			// Seen at `from`, never at `to`: fixed_in only with proven coverage.
+		case last != "" && last == from:
+			// Seen at `from`, never at `to`: fixed_in only with proven coverage;
+			// coverage without a canary is UNKNOWN, not fixed (§3.4).
 			if coverage {
 				out.FixedIn = append(out.FixedIn, g)
 			} else {

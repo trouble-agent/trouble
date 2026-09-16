@@ -133,10 +133,15 @@ func (s *Server) gunzip(b []byte, limit int64) ([]byte, *Error) {
 		n, rerr := lr.Read(buf)
 		if n > 0 {
 			out = append(out, buf[:n]...)
-			if lr.overCap || (int64(len(out)) > ratioGuardFloor &&
-				int64(len(out)) > int64(len(b))*ratioGuardMax) {
-				return nil, errf(types.CodeSentinel003, "decompressed payload exceeds the cap or the ratio guard",
+			// §3.7 pins the two causes separately, so the response names which
+			// bound bit: the absolute decompressed cap, or the bomb heuristic.
+			if lr.overCap {
+				return nil, errf(types.CodeSentinel003, "decompressed payload exceeds the cap",
 					causeDecompressedCap)
+			}
+			if int64(len(out)) > ratioGuardFloor && int64(len(out)) > int64(len(b))*ratioGuardMax {
+				return nil, errf(types.CodeSentinel003, "decompressed payload exceeds the 100:1 compression ratio guard",
+					causeCompressionRatio)
 			}
 		}
 		if rerr != nil {

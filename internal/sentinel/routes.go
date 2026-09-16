@@ -67,6 +67,9 @@ func (s *Server) routes() http.Handler {
 // route handler.
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.counters.requests.Add(1)
+	// Every response-scoped value (the proactive backoff header, the 200-level
+	// code) lives on the request, never on the server.
+	r = withRespScratch(r)
 	rt, projectID, ok := parseRoute(r.URL.Path)
 	if !ok {
 		s.counters.ingest404.Add(1)
@@ -192,7 +195,7 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 		if ev != nil && validEventID(ev.ID) {
 			eventID = ev.ID
 		}
-		if h := s.pendingRateHeader(); h != "" {
+		if h := s.pendingRateHeader(r.Context()); h != "" {
 			rateHeader = h
 		}
 	}
@@ -208,28 +211,18 @@ func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectI
 	if rateHeader != "" {
 		w.Header().Set("X-Sentry-Rate-Limits", rateHeader)
 	}
-	if soft := s.takeSoftCode(); soft != "" {
+	if soft := s.takeSoftCode(r.Context()); soft != "" {
 		w.Header().Set("X-Sentry-Error", soft)
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": eventID})
 }
 
-// pendingRateHeader reports the proactive-backoff header for the last decision,
-// if any (§3.9: 200 + header at 95% of quota).
 // attachRateHeader emits the proactive-backoff header (200 + header at 95% of
 // quota, §3.9) on any successful response.
-func (s *Server) attachRateHeader(w http.ResponseWriter) {
-	if h := s.pendingRateHeader(); h != "" {
+func (s *Server) attachRateHeader(w http.ResponseWriter, r *http.Request) {
+	if h := s.pendingRateHeader(r.Context()); h != "" {
 		w.Header().Set("X-Sentry-Rate-Limits", h)
 	}
-}
-
-func (s *Server) pendingRateHeader() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	h := s.lastRateHeader
-	s.lastRateHeader = ""
-	return h
 }
 
 // acceptEnvelopeItem applies the per-item policy of §3.2. It returns the
@@ -288,7 +281,7 @@ func (s *Server) acceptEnvelopeItem(r *http.Request, auth authOutcome, item enve
 	default:
 		// Unknown item type: 200-and-drop plus TROUBLE-SENTINEL-013. An
 		// unsupported type NEVER fails the envelope (§3.2).
-		s.setSoftCode(string(types.CodeSentinel013))
+		s.setSoftCode(r.Context(), string(types.CodeSentinel013))
 		s.counters.unknownItems.Add(1)
 		s.counters.countItemType(item.Type)
 		auth.entry.mu.Lock()
@@ -350,7 +343,7 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request, projectID, 
 		return
 	}
 	s.noteAccept(auth.entry)
-	s.attachRateHeader(w)
+	s.attachRateHeader(w, r)
 	w.Header().Set("X-Sentry-Deprecated", "store")
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": rec.Payload["native_id"]})
 }
@@ -401,7 +394,7 @@ func (s *Server) handleGeneric(w http.ResponseWriter, r *http.Request, projectID
 		return
 	}
 	s.noteAccept(auth.entry)
-	s.attachRateHeader(w)
+	s.attachRateHeader(w, r)
 	s.writeJSON(w, http.StatusOK, map[string]any{"id": rec.Payload["native_id"]})
 }
 

@@ -36,7 +36,14 @@ func TestGzipBombIsRefused(t *testing.T) {
 	if got := resp.Header.Get("X-Sentry-Error"); got != string(types.CodeSentinel003) {
 		t.Fatalf("gzip bomb code = %q, want 003", got)
 	}
-	_ = readBody(t, resp)
+	// 4MB of zeros compresses to ~4KB, so the ratio guard's threshold (~410KB
+	// of output) is crossed long before the 1MB cap: the stream reports the
+	// ratio branch. §3.7 pins the two causes separately and the response has to
+	// name the one that bit.
+	respBody := readBody(t, resp)
+	if cause := firstCause(t, respBody); cause != causeCompressionRatio {
+		t.Errorf("gzip bomb cause = %q, want %q (%s)", cause, causeCompressionRatio, respBody)
+	}
 	if ts.s.counters.countersReason("decompressed") == 0 {
 		t.Error("reject_total{reason=decompressed} did not move")
 	}
@@ -61,7 +68,12 @@ func TestRatioGuardRefusesHighlyCompressiblePayload(t *testing.T) {
 	if got := resp.Header.Get("X-Sentry-Error"); got != string(types.CodeSentinel003) {
 		t.Fatalf("ratio-guard code = %q, want 003", got)
 	}
-	_ = readBody(t, resp)
+	// 900KB of a repeated byte stays under the 1MB cap, so the only bound that
+	// can refuse it is the ratio guard: the cause must say so (§3.7).
+	ratioBody := readBody(t, resp)
+	if cause := firstCause(t, ratioBody); cause != causeCompressionRatio {
+		t.Errorf("ratio-guard cause = %q, want %q (%s)", cause, causeCompressionRatio, ratioBody)
+	}
 }
 
 // TestInvalidGzipStreamIs004 pins §5's gzip row.
@@ -515,4 +527,129 @@ func gzipRoundTrip(tb testing.TB, b []byte) []byte {
 		tb.Fatalf("gzip close: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// incompressibleBytes returns n bytes with no exploitable repetition, so a
+// gzip round trip stays near 1:1 and only the absolute cap can refuse it.
+func incompressibleBytes(n int) []byte {
+	out := make([]byte, n)
+	var x uint64 = 0x9e3779b97f4a7c15
+	for i := range out {
+		x ^= x << 13
+		x ^= x >> 7
+		x ^= x << 17
+		out[i] = byte(x >> 24)
+	}
+	return out
+}
+
+// TestGunzipCausePerBranch pins §3.7's two causes to the two bounds, one branch
+// at a time, and ties them to the compat doc: the doc-text check alone cannot
+// catch a branch that reports the wrong cause.
+func TestGunzipCausePerBranch(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.close()
+
+	// Cap branch: output past limit + the 64KB overread slack, with a ratio of
+	// ~1:1, so the ratio guard can never be the reason.
+	big := incompressibleBytes(int(maxBodyOverread) + 8*1024)
+	_, err := ts.s.gunzip(gzipBytes(t, big), 1024)
+	if err == nil {
+		t.Fatal("cap branch: expected a refusal")
+	}
+	if err.Code != types.CodeSentinel003 {
+		t.Errorf("cap branch: code %q, want 003", err.Code)
+	}
+	if len(err.Causes) != 1 || err.Causes[0] != causeDecompressedCap {
+		t.Errorf("cap branch: causes %v, want [%s]", err.Causes, causeDecompressedCap)
+	}
+
+	// Ratio branch: 900KB of a repeated byte is under the cap but far past
+	// 100:1, so the only bound that can refuse it is the ratio guard.
+	_, err = ts.s.gunzip(gzipBytes(t, bytes.Repeat([]byte("A"), 900*1024)), 1<<20)
+	if err == nil {
+		t.Fatal("ratio branch: expected a refusal")
+	}
+	if err.Code != types.CodeSentinel003 {
+		t.Errorf("ratio branch: code %q, want 003", err.Code)
+	}
+	if len(err.Causes) != 1 || err.Causes[0] != causeCompressionRatio {
+		t.Errorf("ratio branch: causes %v, want [%s]", err.Causes, causeCompressionRatio)
+	}
+
+	doc := readCompatDoc(t)
+	for _, cause := range []string{causeDecompressedCap, causeCompressionRatio} {
+		if !strings.Contains(doc, "`"+cause+"`") {
+			t.Errorf("docs/sentinel-compat.md does not document the shipped cause %q", cause)
+		}
+	}
+}
+
+// TestResponseScratchIsPerRequest pins the response-scoped state of §3.2/§3.9:
+// the 200-level 013 code (like the proactive backoff header) belongs to the
+// request that produced it, so concurrent envelopes must never trade codes —
+// the answer a caller reads has to describe the caller's own items.
+func TestResponseScratchIsPerRequest(t *testing.T) {
+	ts := newTestServer(t, nil)
+	defer ts.close()
+	auth := ts.authHeader("1")
+	url := ts.ts.URL + "/api/1/envelope/"
+
+	type attempt struct {
+		body        []byte
+		unknownItem bool
+	}
+	const rounds = 24
+	attempts := make([]attempt, 0, rounds*2)
+	for i := 0; i < rounds; i++ {
+		cleanID := fmt.Sprintf("%032x", i+1)
+		cleanBody := eventJSON(t, func(o map[string]any) { o["event_id"] = cleanID })
+		attempts = append(attempts, attempt{body: envelopeBytes(t, map[string]any{"event_id": cleanID},
+			envelopeFixtureItem{Type: "event", Body: cleanBody, Length: true})})
+
+		mixedID := fmt.Sprintf("%032x", 1000+i+1)
+		mixedBody := eventJSON(t, func(o map[string]any) { o["event_id"] = mixedID })
+		attempts = append(attempts, attempt{unknownItem: true,
+			body: envelopeBytes(t, map[string]any{"event_id": mixedID},
+				envelopeFixtureItem{Type: "check_in", Body: []byte(`{"check_in_id":"x"}`), Length: true},
+				envelopeFixtureItem{Type: "event", Body: mixedBody, Length: true})})
+	}
+
+	codes := make([]string, len(attempts))
+	statuses := make([]int, len(attempts))
+	var wg sync.WaitGroup
+	for i, a := range attempts {
+		wg.Add(1)
+		go func(i int, a attempt) {
+			defer wg.Done()
+			req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(a.body))
+			if err != nil {
+				return
+			}
+			req.Header.Set("X-Sentry-Auth", auth)
+			resp, err := ts.ts.Client().Do(req)
+			if err != nil {
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			codes[i] = resp.Header.Get("X-Sentry-Error")
+			statuses[i] = resp.StatusCode
+		}(i, a)
+	}
+	wg.Wait()
+
+	for i, a := range attempts {
+		if statuses[i] != http.StatusOK {
+			t.Fatalf("attempt %d: status %d, want 200", i, statuses[i])
+		}
+		want := ""
+		if a.unknownItem {
+			want = string(types.CodeSentinel013)
+		}
+		if codes[i] != want {
+			t.Errorf("attempt %d (unknown item: %v): X-Sentry-Error %q, want %q",
+				i, a.unknownItem, codes[i], want)
+		}
+	}
 }

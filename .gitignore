@@ -6,3 +6,6 @@ dagger.db
 *.db-wal
 .scrub-e2e-*
 .scrub-ingest-*
+.sentinel-e2e-*
+.sentinel-load-*
+.sentinel-dbg-*

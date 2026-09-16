@@ -276,6 +276,22 @@ func respID(tb testing.TB, resp *http.Response) string {
 	return body.ID
 }
 
+// firstCause decodes the first cause of a pinned error body
+// (`{"causes":[...],"detail":"…"}`).
+func firstCause(tb testing.TB, body []byte) string {
+	tb.Helper()
+	var out struct {
+		Causes []string `json:"causes"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		tb.Fatalf("error body is not JSON: %v (%s)", err, body)
+	}
+	if len(out.Causes) == 0 {
+		return ""
+	}
+	return out.Causes[0]
+}
+
 // gzipBytes compresses b.
 func gzipBytes(tb testing.TB, b []byte) []byte {
 	tb.Helper()

@@ -48,7 +48,7 @@ explicit `length`; without it the envelope is `400` + `TROUBLE-SENTINEL-001`
 |---|---|---|
 | compressed envelope | 200 KB | `413` + `TROUBLE-SENTINEL-002` |
 | decompressed envelope | 1 MB (memory bound = cap + 64KB) | `413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`) |
-| compression ratio | > 100:1 once output passes 100 KB | `413` + `TROUBLE-SENTINEL-003` (cause `compression_ratio`) |
+| compression ratio | > 100:1 once output passes 100 KB | `413` + `TROUBLE-SENTINEL-003` (cause `compression_ratio`); a payload that breaches both bounds reports whichever one the stream crosses first |
 | single item | 256 KB | `413` + `TROUBLE-SENTINEL-002` (cause `item_too_large`) |
 | header / item-header line | 8 KB | `400` + `TROUBLE-SENTINEL-001` |
 | body line (log lines) | 64 KB | truncated, `truncated_total` |

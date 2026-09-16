@@ -230,13 +230,6 @@ type Server struct {
 	dups        map[string]time.Time
 	dupOrder    []string
 
-	// lastRateHeader carries the proactive-backoff header of the most recent
-	// decision (§3.9: 200 + header at 95% of quota).
-	lastRateHeader string
-	// lastSoftCode carries a 200-level code (013) that the response reports
-	// without failing the envelope.
-	lastSoftCode string
-
 	// rejectWindows is the per-project reject-rate accounting behind
 	// `ingest_reject_storm` (§5).
 	rejectMu      sync.Mutex
@@ -658,25 +651,91 @@ func (s *Server) CanarySig() types.Sig {
 }
 
 // IsReservedSig reports whether a sig belongs to the reserved set (the canary):
-// it never opens an incident and never reaches the ladder (§3.8).
+// it never opens an incident and never reaches the ladder (§3.8). The canary's
+// sig is the only reserved value — sentinel mints no other out-of-band identity.
 func (s *Server) IsReservedSig(sig string) bool {
-	return sig == s.CanarySig().String() || strings.HasPrefix(sig, "sentinel:sha256v1:") && false
+	return sig == s.CanarySig().String()
+}
+
+// respScratch is the per-request response scratch: the proactive-backoff header
+// of §3.9 (200 + header at 95% of quota) and the 200-level X-Sentry-Error code
+// of §3.2 (013, an item type was dropped). It rides the request context, so two
+// requests in flight at once can never hand each other their pending header or
+// code — a bare server field made that possible.
+type respScratch struct {
+	mu         sync.Mutex
+	rateHeader string
+	softCode   string
+}
+
+// respScratchKey keys the scratch value inside a request context.
+type respScratchKey struct{}
+
+// withRespScratch attaches a fresh scratch to an inbound request.
+func withRespScratch(r *http.Request) *http.Request {
+	if r.Context().Value(respScratchKey{}) != nil {
+		return r
+	}
+	return r.WithContext(context.WithValue(r.Context(), respScratchKey{}, &respScratch{}))
+}
+
+// scratchFrom returns the request's scratch, or nil for a caller that has none
+// (collector-driven admission, which serves no response).
+func scratchFrom(ctx context.Context) *respScratch {
+	sc, _ := ctx.Value(respScratchKey{}).(*respScratch)
+	return sc
+}
+
+// noteRateHeader records the proactive-backoff header of §3.9 for the response
+// this request is about to write.
+func (s *Server) noteRateHeader(ctx context.Context, header string) {
+	if header == "" {
+		return
+	}
+	sc := scratchFrom(ctx)
+	if sc == nil {
+		return
+	}
+	sc.mu.Lock()
+	sc.rateHeader = header
+	sc.mu.Unlock()
+}
+
+// pendingRateHeader reports and clears the proactive-backoff header.
+func (s *Server) pendingRateHeader(ctx context.Context) string {
+	sc := scratchFrom(ctx)
+	if sc == nil {
+		return ""
+	}
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	h := sc.rateHeader
+	sc.rateHeader = ""
+	return h
 }
 
 // setSoftCode records a 200-level code for the response (013: an item type was
 // dropped). It never fails the envelope.
-func (s *Server) setSoftCode(code string) {
-	s.mu.Lock()
-	s.lastSoftCode = code
-	s.mu.Unlock()
+func (s *Server) setSoftCode(ctx context.Context, code string) {
+	sc := scratchFrom(ctx)
+	if sc == nil {
+		return
+	}
+	sc.mu.Lock()
+	sc.softCode = code
+	sc.mu.Unlock()
 }
 
 // takeSoftCode reads and clears the pending 200-level code.
-func (s *Server) takeSoftCode() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	c := s.lastSoftCode
-	s.lastSoftCode = ""
+func (s *Server) takeSoftCode(ctx context.Context) string {
+	sc := scratchFrom(ctx)
+	if sc == nil {
+		return ""
+	}
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	c := sc.softCode
+	sc.softCode = ""
 	return c
 }
 
@@ -891,9 +950,7 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		}
 	}
 	if decision.Header != "" && decision.Allowed && !over {
-		s.mu.Lock()
-		s.lastRateHeader = decision.Header
-		s.mu.Unlock()
+		s.noteRateHeader(ctx, decision.Header)
 	}
 	disposition := dispAdmitted
 	outcome := lossOutcome{keep: true, disposition: dispAdmitted, status: 200}

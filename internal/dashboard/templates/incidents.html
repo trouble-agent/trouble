@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="panel">
+<h2>open incidents ({{len .Incidents}})</h2>
+<table class="rows">
+<thead><tr><th>title</th><th>severity</th><th>state</th><th>rung</th><th>age</th><th>last event</th></tr></thead>
+{{template "partial-incident-rows" .}}
+</table>
+</section>
+{{end}}

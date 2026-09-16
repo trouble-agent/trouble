@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="panel">
+<h2>breakers ({{len .Breakers}})</h2>
+<table class="rows">
+<thead><tr><th>scope</th><th>state</th><th>open until</th><th>trips</th><th>reason</th></tr></thead>
+{{template "partial-breaker-rows" .}}
+</table>
+</section>
+{{end}}

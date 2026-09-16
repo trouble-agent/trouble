@@ -1,0 +1,45 @@
+{{define "content"}}
+<section class="panel">
+<h2>counters</h2>
+<ul class="counters">
+<li><span>incidents open</span><strong>{{.Counters.IncidentsOpen}}</strong></li>
+<li><span>groups open</span><strong>{{.Counters.GroupsOpen}}</strong></li>
+<li><span>events/min</span><strong>{{printf "%.1f" .Counters.EventsPerMin}}</strong></li>
+</ul>
+</section>
+<section class="panel">
+<h2>autonomy</h2>
+<form class="action" method="post" action="/api/autonomy" hx-post="/api/autonomy" hx-target="#health-strip" hx-swap="outerHTML">
+<label for="mode">mode</label>
+<select id="mode" name="mode"{{if not .CanAutonomy}} disabled{{end}}>
+<option value="shadow"{{if eq .AutonomyMode "shadow"}} selected{{end}}>shadow</option>
+<option value="assisted"{{if eq .AutonomyMode "assisted"}} selected{{end}}>assisted</option>
+<option value="full"{{if eq .AutonomyMode "full"}} selected{{end}}>full</option>
+</select>
+<label for="kill">kill switch</label>
+<select id="kill" name="kill_switch"{{if not .CanAutonomy}} disabled{{end}}>
+<option value="true"{{if .KillSwitch}} selected{{end}}>on</option>
+<option value="false"{{if not .KillSwitch}} selected{{end}}>off</option>
+</select>
+<label for="grants">grants (comma separated)</label>
+<input id="grants" name="grants" type="text" maxlength="200"{{if not .CanAutonomy}} disabled{{end}}>
+<button type="submit" data-requires="autonomy"{{if not .CanAutonomy}} disabled{{end}}>apply</button>
+{{if not .CanAutonomy}}<small class="why">requires an autonomy-scope token (this session has {{.Scope}}){{if .ReadOnly}} · this dashboard is read-only{{end}}</small>{{end}}
+</form>
+<p class="note">The kill switch is always allowed to turn <em>on</em>; clearing it needs allow_resume, and mode <em>full</em> needs allow_full — both are configuration decisions, not phone clicks.</p>
+</section>
+<section class="panel">
+<h2>open incidents</h2>
+<table class="rows">
+<thead><tr><th>title</th><th>severity</th><th>state</th><th>rung</th><th>age</th><th>last event</th></tr></thead>
+{{template "partial-incident-rows" .}}
+</table>
+</section>
+<section class="panel">
+<h2>groups by rate</h2>
+<table class="rows">
+<thead><tr><th>sig</th><th>title</th><th>count</th><th>rate</th><th>last seen</th><th>releases</th></tr></thead>
+{{template "partial-group-rows" .}}
+</table>
+</section>
+{{end}}

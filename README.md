@@ -169,6 +169,21 @@ Two more rules the code enforces rather than documents: a journal seek failure i
 gap record), and this class of host keeps its application units in **user** managers — watching only
 the system manager is an ALL-GREEN lie, so the user manager is resolved and watched too.
 
+## The research rung and the flow subsystem
+
+`internal/research` (SPEC-07) is the Off-by-One rung: class-slug derivation from a
+signature plus its facts, discover → corpus grep → submit → poll, the agent prompt
+with and without a brief, and the degrade matrix that guarantees the ladder is
+never held. `internal/flow` (SPEC-08) files one board row per `(sig, board)` —
+append-only, never a rewrite — proves the target project is ticked by the
+scheduler before writing a byte, and requests a foreman spawn inside a git
+worktree through the scheduler's own admission path, with a durable queue behind
+it. Both are configuration-only clients: no lab layout, board path, repo list or
+model pin is compiled in.
+
+Operational detail (what to look at when one of them misbehaves, and the runbook
+facts that surprise people) lives in `docs/operations.md` §12 and §13.
+
 ## Read the specs
 
 * `specs/SPEC-INDEX.md` — suite map, the AC-to-spec matrix and the frozen v0.1 cut line.

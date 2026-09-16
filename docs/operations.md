@@ -670,3 +670,122 @@ pinned by `internal/types/id_test.go` (`TestNewIDIsUniqueAndIncreasing` — 512 
 minted in one call, all distinct, strictly increasing;
 `TestEncodeULIDLayout`). Any package that mints ids (ledger `rec_id`, sentinel
 `event_id`, group `grp_`) inherits the fix.
+
+## 12. The research rung (SPEC-07)
+
+The research rung asks Off-by-One for a pre-solved answer before an agent is
+spent. It is **best effort by contract**: the lab being unreachable, slow,
+rejecting, unavailable or silent never blocks the rung above it. Every failure
+path returns an outcome the ladder can proceed past, plus a ledger record; five
+conditions additionally write a `gap` record with `est_lost = -1` (research
+loses an enrichment, never evidence).
+
+What to look at:
+
+| Signal | Where | What it means |
+|---|---|---|
+| `state` | `research` record | `requested` (queued, a poller owns it) · `returned` · `degraded` · `skipped` |
+| `error_code` | `research` record | `TROUBLE-RESEARCH-001..010`; `""` on the clean path and on every budget decision |
+| `degraded_reason` | `research` record | `lab_unreachable`, `solver_unavailable`, `strict_decoder_reject`, `poll_timeout` |
+| `skip_reason` | `research` record | `driver_none`, `driver_capability_missing`, `class_unknown`, `brief_invalid`, `budget_exhausted`, `kill_switch` |
+| `corpus_grep_hit` / `corpus_path` | `research` record | the answer came from the corpus, not from discover — the `found:false` trap |
+| `cost` | `research` record | requests by kind, bytes, polls, submits, corpus greps, tokens saved |
+| `fence` | `Snapshot()` / dashboard | `submit_disabled`: three consecutive strict-decoder rejects opened the fuse |
+| `cooldown_until` | `Snapshot()` / dashboard | three consecutive transport failures closed the lab conversation |
+| `capability` | `Snapshot()` | `full` or `discover_only` (a route is missing from `/openapi.json`) |
+
+Three runbook facts that surprise people:
+
+1. **`found:false` is not absence.** The lab's lookup key is class + env + lang +
+   version, so a verified answer whose signatures carry empty
+   environment/language/version is invisible to a narrowed probe. The corpus grep
+   (D3) is mandatory for exactly this reason, and `corpus_grep_hit:true` records
+   which probe found it.
+2. **A submitted class is never cancelled.** There is no cancel endpoint; a poll
+   timeout leaves the submission queued and the next incident for that class finds
+   the answer on the cheap D1 path. `poll_timeout` is a budget decision, not a
+   leak.
+3. **The daily counter survives a restart.** It is rebuilt at boot by replaying
+   today's `research` records (`Service.Replay`), so a crash cannot reset the
+   request budget. The driver's `requests_per_day` (200) is deliberately above the
+   ladder's `research_per_day` (30), so the policy gate is always the binding one.
+
+Operating it:
+
+```
+trouble research status            # driver, capability, cooldown, fence, queue depth
+trouble research outcomes <sig>    # the rung history for a signature, newest first
+trouble research prompt <res_id>   # the prompt the agent would have seen (and its digest)
+```
+
+The class table (`research.table`) is configuration. A malformed table is a
+**config-load** refusal, never a rung failure: if a hot reload is rejected, the
+active table stays in place and SPEC-12 reports it. A fallback slug
+(`Fallback=true`, `TROUBLE-RESEARCH-005`) still runs the corpus grep but does not
+submit unless `allow_unknown_class_submit=true` — submitting under `unknown`
+pollutes a cache shared with every other trouble host.
+
+## 13. The flow subsystem (SPEC-08)
+
+`internal/flow` turns a finding into work: one board row per `(sig, board)`
+through the `board-jsonl` or `task-router` driver, and — for a confirmed code bug
+on an enabled host — a foreman inside an isolated git worktree.
+
+Invariants worth memorising, because each one is a fleet failure class:
+
+1. **trouble is a create-only writer of a board.** It appends one row + one
+   `task_created` event per `(sig, board)` and never mutates a row afterwards. A
+   recurrence is a `task_comment` event on the existing row, never a second row.
+   The `boardctl`-style full-file `update` path is deliberately unused: a second
+   writer with a full-file rewrite over a git-tracked JSONL board is the
+   documented dirty-board class.
+2. **Never file into an unregistered project.** The registration proof is a probe
+   against the scheduler (`GET {flow.scheduler_endpoint}/projects`), and filing
+   refuses with `TROUBLE-FLOW-018` and **zero bytes written** when the project is
+   absent, disabled, points at another board path, or the proof went stale past
+   `registration_stale_max`. A row the scheduler does not tick is a row nobody
+   works.
+3. **One fix per signature, host-wide.** The sig lease (`lease_ttl`, default 30m)
+   is the only authority for a second attempt; a second incident gets
+   `TROUBLE-FLOW-009` plus a cross-ref comment on the existing row. Two foremen on
+   one sig are two patches for one bug and two chances to corrupt a repo.
+4. **The repo's owner creates the worktree.** trouble sends the repo, the base and
+   the task id; `router_spawn` performs `git worktree add` and the untracked-input
+   copy. trouble never runs git against a repo the scheduler owns, and a foreman
+   worktree carries a hard ban on `git fetch`/`gc`/`prune`/`worktree` mutation.
+5. **A spawn failure is never silent.** `requested` is written before the router
+   call; no acknowledgement becomes `spawn_pending` plus a durable-queue entry;
+   the reconciled pending count is the first number of the dashboard's budget
+   panel. Retries are bounded (5s/15s/45s/2m/5m); a permanent refusal is terminal
+   with its reason recorded.
+6. **The 60s trigger→spawn budget is measured per spawn** (`trig_to_spawn_ms`,
+   `budget_exceeded`), not asserted once. Over budget, the run still completes and
+   the miss is recorded with `stage="budget"`.
+
+What to look at:
+
+| Signal | Where | What it means |
+|---|---|---|
+| `decision` | `flow` record | `created` · `commented` · `dispatched` · `skipped` · `drafted` · `failed` · `promoted` · `discarded` · `pending_human` |
+| `stage` | `flow` record | `file`, `comment`, `dispatch`, `gate`, `budget`, `promote`, `rollback`, `reap` |
+| `validate_rc` / `validate_findings` | `flow` record | the board's own validator: 0 clean, 1 with our id = `TROUBLE-FLOW-003` (quarantine the id), 1 without our id = a pre-existing board finding |
+| `state` | `spawn` record | `requested` → `accepted`/`spawn_pending` → `leased` → `promoted`/`discarded` |
+| `worktree_mode` | `spawn` record | `owner_created`, or `owner_serialized` for a `worktree_exempt` repo |
+| `brief_sha256` | `spawn` record | proves what the foreman was told |
+| `QueueDepth()` | dashboard budget panel | spawn requests still pending on the durable queue |
+
+Operating it:
+
+```
+trouble flow reconcile             # worktrees-meta vs the router registry vs the boards
+trouble flow hotfix status --json  # lanes, leases, queue depth, budget hits
+trouble flow explain <sig>         # which rows, leases and dispatches this sig produced
+trouble flow promote <sp_id>       # the human decision: merges through the repo's own PR
+```
+
+`flow.hotfix.enabled` defaults to **false** and the default is printed by
+`trouble config explain`. Turning it on is a per-host decision, and `flow.hotfix.
+allowed_repos` is the list it may touch. Promotion in `human` mode is the default
+in every autonomy mode including `full`; `auto-after-verify` additionally requires
+`AutonomyGates.AllowPromote`, so an assisted host cannot auto-merge by
+configuration alone.

@@ -1,0 +1,64 @@
+# examples/config/20-research.toml — EXAMPLE [research] table (SPEC-07 §4.3).
+#
+# Every value below is an example; the defaults live in internal/research. The
+# only fleet-shaped value is the lab URL, and a lab is not a fleet fact.
+#
+# Nothing compiled in: lab_url, lab_data_dir and corpus_roots are configuration,
+# so nothing about a particular lab is baked into the binary.
+
+[research]
+enabled = true
+driver = "off-by-one"                # off-by-one | none | webhook
+lab_url = "http://127.0.0.1:8766"
+lab_data_dir = "./data"
+corpus_roots = ["answers"]           # resolved against lab_data_dir; absolute allowed
+corpus_glob = "*.json"
+corpus_max_files = 5000
+corpus_max_bytes_per_file = 1048576
+corpus_timeout = "3s"
+
+# Transport budgets: the ladder never waits on these.
+connect_timeout = "2s"
+request_timeout = "5s"
+submit_timeout = "10s"
+
+# Polling: the lab has no webhook push, so polling is the only result channel.
+poll_interval = "15s"
+poll_jitter_pct = 0.20
+poll_timeout = "12m"                 # 4× the measured ~3m mean solve
+poll_max_requests = 48
+duplicate_recheck_interval = "3m"
+queue_depth_skip = 25
+
+max_inflight = 4
+cooldown_failures = 3
+cooldown = "5m"
+health_probe_interval = "60s"
+capability_probe_interval = "1h"
+submit_fuse_400s = 3
+
+# Caps: a flood cannot turn a brief into a ledger bomb.
+brief_max_bytes = 65536
+prompt_brief_max_bytes = 16384
+prompt_max_bytes = 32768
+
+# Budget and cadence: the driver's inner ceiling sits deliberately above the
+# ladder's own research_per_day, so the policy gate is always the binding limit.
+requests_per_day = 200
+cadence = "end-of-day"
+cadence_ladder = ["end-of-day", "post-debug", "pre-phase"]
+
+fallback_slug = "unknown"
+allow_unknown_class_submit = false   # submitting under `unknown` pollutes a shared cache
+apply_brief_as_play = false          # true attaches a PlayTask-shaped draft to the brief
+table = "research-classes.toml"
+unit_kind = {}                       # subject → unit | container | script | unknown
+container_markers = ["docker", "podman", "containerd"]
+
+# The PRD's agent budget, recorded as SAVED when a brief resolves the incident.
+agent_tokens_saved_in = 25000
+agent_tokens_saved_out = 8000
+
+# Only for driver = "webhook": an operator's own lab behind a gateway.
+webhook_url = ""
+webhook_poll_url = ""

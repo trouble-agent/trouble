@@ -33,6 +33,7 @@ type dashRec struct {
 	Inc      string
 	ActorID  string
 	ErrCode  string
+	InKey    string
 	Summary  string
 	Rendered time.Time
 }
@@ -61,6 +62,7 @@ func (r *dashRing) add(rec *types.Record, ts time.Time) {
 		Inc:      rec.Inc,
 		ActorID:  rec.Actor.ID,
 		ErrCode:  payloadString(rec.Payload, "error_code"),
+		InKey:    payloadString(rec.Payload, "inKey"),
 		Summary:  summarize(rec),
 		Rendered: ts,
 	}
@@ -212,7 +214,7 @@ func summarize(rec *types.Record) string {
 	if st := payloadString(p, "stage"); st != "" {
 		parts = append(parts, st)
 	}
-	for _, k := range []string{"rule", "reason", "resolution", "detail"} {
+	for _, k := range []string{"rule", "reason", "resolution"} {
 		if v := payloadString(p, k); v != "" {
 			parts = append(parts, v)
 			break
@@ -378,6 +380,7 @@ func (d *dashReader) RecordsForIncident(inc string, since uint64, limit int) []t
 			Payload: map[string]any{
 				"summary":    r.Summary,
 				"error_code": r.ErrCode,
+				"inKey":      r.InKey,
 			},
 		})
 	}

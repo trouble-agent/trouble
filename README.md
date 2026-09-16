@@ -46,6 +46,13 @@ bytes and exact `by_rule`), `fixedpoint_test.go`, `shield_test.go`, `config_test
 `conformance_test.go`, `limits_test.go`, `dsn_test.go`, `e2e_ledger_test.go`, `corpus_test.go`,
 `bench_test.go` and `bench_ingest_test.go`.
 
+`internal/sensors` — the detection plane (SPEC-03): six sensors (PSI, journald, D-Bus, disk, timers,
+inotify), the shared condition language, the rule TOML schema and its atomic hot reload, storm
+breakers with per-scope caps, and liveness. Sensors are detection-only: they normalize an
+observation, evaluate rules against it, and emit `event`/`gap`/`canary` records through the ledger's
+`Append`. They never call the registry, never hold a tool handle and never spawn anything except
+`journalctl`.
+
 ## The durability contract
 
 A record is durable the moment `Append` returns. Records already written to the ledger file but not yet fsynced are lost on **power loss or kernel panic**; the maximum loss window is `ledger.fsync_window_ms`, default **200 ms**, measured from the last successful fsync completion. A process crash (SIGKILL), a daemon restart or a warm OS reboot loses nothing: those records are already in the running kernel's page cache.
@@ -72,10 +79,37 @@ exists at all — so the amortized mode's advantage cannot be optimised away sil
 Plain JSONL only — the ledger is the audit artifact and must stay `jq`/`grep`/`tail`-able.
 Compression lives in `backups/`, never in `ledger/`.
 
+## What the sensors measure, and what they refuse to assume
+
+The PSI contract is measured, not documented, and every number below was re-measured on the host
+that runs the tests (kernel 7.0.0-30-generic, uid in `adm`):
+
+| Fact | Measured |
+|---|---|
+| only legal trigger write | `"some 150000 2000000\n\x00"` — 21 bytes, terminated with NUL |
+| write without the terminator | `EINVAL` (the kernel overwrites the last byte, so a 20-byte write loses its last digit) |
+| window grammar | multiples of 2 s ≥ 2 s: 2 s/4 s/6 s/8 s/10 s accepted, 1 s/5 s/12 s/20 s refused |
+| second write on an armed fd | `EBUSY` |
+| notification rate limit | 1 per window (wakeups observed at 1.95 s and 4.00 s) |
+| an **unarmed** fd polled with a zero timeout | 338,711 hits in 200 ms — a 100 % CPU busy loop, which is why an unarmed fd is never placed in an epoll set |
+| window ceiling on this kernel | 10 s (the spec's "20 s is accepted" note does not hold here) |
+
+Because the ceiling and the privilege answer differ per host, the daemon **probes** them at boot
+(`trouble sensors probe`): one real arm, a downward ceiling sweep `20s → 10s → 2s`, and a `stall=0`
+probe that must be refused. The result selects `triggers+sampling` or `sampling-only`, is written to
+the ledger as one `capability_probe` record, and is repeated verbatim in `/health.json`. Trigger
+arming is never attempted speculatively again after the probe.
+
+Two more rules the code enforces rather than documents: a journal seek failure is never "no logs"
+(`Failed to seek to cursor: Invalid argument` → `TROUBLE-SENSORS-007` + a `--since` fallback + one
+gap record), and this class of host keeps its application units in **user** managers — watching only
+the system manager is an ALL-GREEN lie, so the user manager is resolved and watched too.
+
 ## Read the specs
 
 * `specs/SPEC-INDEX.md` — suite map, the AC-to-spec matrix and the frozen v0.1 cut line.
-* `specs/SPEC-01-ledger.md` — this package, in full.
+* `specs/SPEC-01-ledger.md` — the ledger, in full.
+* `specs/SPEC-03-sensors.md` — the detection plane, in full.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
 ## Build and test

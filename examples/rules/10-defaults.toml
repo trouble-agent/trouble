@@ -1,0 +1,197 @@
+# trouble shipped default rules (SPEC-03 §3.5) — examples only, no host-specific values.
+# Installed to <config>/rules.d/10-defaults.toml by trouble install.
+
+[[rule]]
+name = "psi_cpu_some_avg10_high"
+enabled = true
+source = "psi"
+for = "60s"
+entry_rung = "play"
+severity = "medium"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "scope"
+op = "in"
+value = "[\"cpu\"]"
+value_type = "string"
+
+[[rule.match]]
+field = "some_avg10"
+op = ">="
+value = "25"
+value_type = "number"
+
+[[rule]]
+name = "psi_io_some_avg10_high"
+enabled = true
+source = "psi"
+for = "30s"
+entry_rung = "play"
+severity = "high"
+cooldown = "10m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = ["proc.top", "proc.connections"]
+hotfix = false
+
+[[rule.match]]
+field = "scope"
+op = "in"
+value = "[\"io\"]"
+value_type = "string"
+
+[[rule.match]]
+field = "some_avg10"
+op = ">="
+value = "35"
+value_type = "number"
+
+[[rule]]
+name = "self_memory_pressure"
+enabled = true
+source = "psi"
+for = "30s"
+entry_rung = "play"
+severity = "high"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = ["proc.top"]
+hotfix = false
+
+[[rule.match]]
+field = "scope"
+op = "in"
+value = "[\"memory\"]"
+value_type = "string"
+
+[[rule.match]]
+field = "some_avg10"
+op = ">="
+value = "8"
+value_type = "number"
+
+[[rule]]
+name = "dbus_unit_failed"
+enabled = true
+source = "dbus"
+for = "0s"
+entry_rung = "play"
+severity = "high"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = ["service.reload"]
+hotfix = false
+
+[[rule.match]]
+field = "unit_substate"
+op = "=="
+value = "failed"
+value_type = "string"
+
+[[rule]]
+name = "dbus_crash_loop"
+enabled = true
+source = "dbus"
+for = "0s"
+entry_rung = "research"
+severity = "critical"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "crash_loop"
+op = "=="
+value = "true"
+value_type = "bool"
+
+[[rule]]
+name = "disk_space_low"
+enabled = true
+source = "disk"
+for = "5m"
+entry_rung = "record"
+severity = "high"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "free_pct"
+op = "<"
+value = "10"
+value_type = "number"
+
+[[rule]]
+name = "disk_inode_low"
+enabled = true
+source = "disk"
+for = "5m"
+entry_rung = "record"
+severity = "medium"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "inode_free_pct"
+op = ">="
+value = "0"
+value_type = "number"
+
+[[rule.match]]
+field = "inode_free_pct"
+op = "<"
+value = "10"
+value_type = "number"
+
+[[rule]]
+name = "timers_run_missed"
+enabled = true
+source = "timers"
+for = "0s"
+entry_rung = "record"
+severity = "medium"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "missed_runs"
+op = ">="
+value = "2"
+value_type = "number"
+
+[[rule]]
+name = "inotify_queue_overflow"
+enabled = true
+source = "inotify"
+for = "0s"
+entry_rung = "record"
+severity = "low"
+cooldown = "5m"
+max_runs = 2
+verify_window = "10m"
+auto_grants = []
+hotfix = false
+
+[[rule.match]]
+field = "overflow"
+op = "=="
+value = "true"
+value_type = "bool"

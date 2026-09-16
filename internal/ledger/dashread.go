@@ -154,6 +154,32 @@ func (r *dashRing) eventsPerMin(now time.Time) float64 {
 	return n
 }
 
+// countBetween counts event/canary records for sig with TS inside [fromTS, toTS]
+// (an empty bound is unbounded). TS comparisons are string comparisons on the
+// canonical RFC3339 UTC form, which is monotonic in this layout.
+func (r *dashRing) countBetween(sig, fromTS, toTS string) int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	n := 0
+	for i := 0; i < r.n; i++ {
+		rec := r.at(i)
+		if rec.Sig != sig {
+			continue
+		}
+		if rec.Kind != types.KEvent && rec.Kind != types.KCanary {
+			continue
+		}
+		if fromTS != "" && rec.TS < fromTS {
+			continue
+		}
+		if toTS != "" && rec.TS > toTS {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 // lastTS returns the TS of the newest projected record, "" when the ring is empty.
 func (r *dashRing) lastTS() string {
 	r.mu.RLock()
@@ -236,6 +262,10 @@ type DashReader interface {
 	RecordsForIncident(inc string, since uint64, limit int) []types.Record
 	// LastEventAge is the age in seconds of the newest event for sig.
 	LastEventAge(sig string, now time.Time) (float64, bool)
+	// EventsBetween counts the event/canary records projected for sig whose TS
+	// falls inside [fromTS, toTS] (empty bound = unbounded). It is the ladder's
+	// verification input, served from the same bounded ring.
+	EventsBetween(sig, fromTS, toTS string) int
 }
 
 // DashReader returns the dashboard read surface (SPEC-10 §3.3).
@@ -356,6 +386,10 @@ func (d *dashReader) RecordsForIncident(inc string, since uint64, limit int) []t
 
 func (d *dashReader) LastEventAge(sig string, now time.Time) (float64, bool) {
 	return d.l.idx.dash.lastEventAge(sig, now)
+}
+
+func (d *dashReader) EventsBetween(sig, fromTS, toTS string) int {
+	return d.l.idx.dash.countBetween(sig, fromTS, toTS)
 }
 
 // lastRefSeq returns the newest seq recorded for an incident (0 when none).

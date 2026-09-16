@@ -38,14 +38,18 @@ type dashRec struct {
 }
 
 // dashRing is the bounded recent-record ring plus the counters the dashboard and
-// the health aggregator read.
+// the health aggregator read. It is a fixed-size circular buffer: appending is
+// O(1) at the cap (no slice shifting), because a boot rebuild projects every
+// record in the ledger and must not turn that into an O(records × cap) walk.
 type dashRing struct {
 	mu   sync.RWMutex
-	recs []dashRec // oldest → newest, capped at dashRingCap
+	buf  []dashRec
+	n    int // records currently held (≤ len(buf))
+	head int // index of the oldest record once the ring is full
 }
 
 // newDashRing returns an empty ring.
-func newDashRing() *dashRing { return &dashRing{recs: make([]dashRec, 0, 1024)} }
+func newDashRing() *dashRing { return &dashRing{buf: make([]dashRec, dashRingCap)} }
 
 // add projects one record into the ring.
 func (r *dashRing) add(rec *types.Record, ts time.Time) {
@@ -61,13 +65,18 @@ func (r *dashRing) add(rec *types.Record, ts time.Time) {
 		Rendered: ts,
 	}
 	r.mu.Lock()
-	if len(r.recs) >= dashRingCap {
-		copy(r.recs, r.recs[len(r.recs)-dashRingCap+1:])
-		r.recs = r.recs[:dashRingCap-1]
+	if r.n < len(r.buf) {
+		r.buf[(r.head+r.n)%len(r.buf)] = d
+		r.n++
+	} else {
+		r.buf[r.head] = d
+		r.head = (r.head + 1) % len(r.buf)
 	}
-	r.recs = append(r.recs, d)
 	r.mu.Unlock()
 }
+
+// at returns the i-th record counting from the oldest (caller holds the lock).
+func (r *dashRing) at(i int) *dashRec { return &r.buf[(r.head+i)%len(r.buf)] }
 
 // since returns up to limit records with Seq > since, oldest first.
 func (r *dashRing) since(since uint64, limit int) []dashRec {
@@ -77,9 +86,9 @@ func (r *dashRing) since(since uint64, limit int) []dashRec {
 		limit = 100
 	}
 	out := make([]dashRec, 0, 16)
-	for i := len(r.recs) - 1; i >= 0 && len(out) < limit; i-- {
-		if r.recs[i].Seq > since {
-			out = append(out, r.recs[i])
+	for i := r.n - 1; i >= 0 && len(out) < limit; i-- {
+		if rec := r.at(i); rec.Seq > since {
+			out = append(out, *rec)
 		}
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -98,9 +107,9 @@ func (r *dashRing) forIncident(inc string, since uint64, limit int) []dashRec {
 		limit = 100
 	}
 	out := make([]dashRec, 0, 16)
-	for i := len(r.recs) - 1; i >= 0 && len(out) < limit; i-- {
-		if r.recs[i].Inc == inc && r.recs[i].Seq > since {
-			out = append(out, r.recs[i])
+	for i := r.n - 1; i >= 0 && len(out) < limit; i-- {
+		if rec := r.at(i); rec.Inc == inc && rec.Seq > since {
+			out = append(out, *rec)
 		}
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
@@ -114,14 +123,15 @@ func (r *dashRing) forIncident(inc string, since uint64, limit int) []dashRec {
 func (r *dashRing) lastEventAge(sig string, now time.Time) (float64, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for i := len(r.recs) - 1; i >= 0; i-- {
-		if r.recs[i].Sig != sig {
+	for i := r.n - 1; i >= 0; i-- {
+		rec := r.at(i)
+		if rec.Sig != sig {
 			continue
 		}
-		if r.recs[i].Kind != types.KEvent && r.recs[i].Kind != types.KCanary {
+		if rec.Kind != types.KEvent && rec.Kind != types.KCanary {
 			continue
 		}
-		return now.Sub(r.recs[i].Rendered).Seconds(), true
+		return now.Sub(rec.Rendered).Seconds(), true
 	}
 	return 0, false
 }
@@ -132,11 +142,12 @@ func (r *dashRing) eventsPerMin(now time.Time) float64 {
 	defer r.mu.RUnlock()
 	cut := now.Add(-time.Minute)
 	var n float64
-	for i := len(r.recs) - 1; i >= 0; i-- {
-		if r.recs[i].Rendered.Before(cut) {
+	for i := r.n - 1; i >= 0; i-- {
+		rec := r.at(i)
+		if rec.Rendered.Before(cut) {
 			break
 		}
-		if r.recs[i].Kind == types.KEvent || r.recs[i].Kind == types.KCanary {
+		if rec.Kind == types.KEvent || rec.Kind == types.KCanary {
 			n++
 		}
 	}
@@ -147,10 +158,10 @@ func (r *dashRing) eventsPerMin(now time.Time) float64 {
 func (r *dashRing) lastTS() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if len(r.recs) == 0 {
+	if r.n == 0 {
 		return ""
 	}
-	return r.recs[len(r.recs)-1].TS
+	return r.at(r.n - 1).TS
 }
 
 // payloadString reads a string payload key.

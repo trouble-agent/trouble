@@ -126,7 +126,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if rec := recover(); rec != nil {
 			// No handler may panic on a request path (contract quality bar):
 			// this net keeps a bug from taking the listener down.
-			s.counters.renderErr.Add(1)
+			s.counters.panics.Add(1)
 			if s.logger != nil {
 				s.logger.Error("dashboard handler panic", "method", r.Method, "path_len", len(r.URL.Path))
 			}

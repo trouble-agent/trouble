@@ -69,6 +69,7 @@ type counters struct {
 	bodyTooBig atomic.Uint64 // 413 + TROUBLE-DASHBOARD-011
 	urlToken   atomic.Uint64 // 400 + TROUBLE-DASHBOARD-005
 	writeOk    atomic.Uint64 // successful POST actions
+	panics     atomic.Uint64 // recovered handler panics (defensive net)
 }
 
 // stallState is the server-side stale-render tracker (§3.1, §2.6): three

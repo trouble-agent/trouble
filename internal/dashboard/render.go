@@ -150,7 +150,9 @@ func parseTemplates() (map[string]*templateSetImpl, map[string]templateEntry, er
 	if err != nil {
 		return nil, nil, err
 	}
-	sets := make(map[string]*templateSetImpl, len(pageFiles))
+	sets := make(map[string]*templateSetImpl, len(pageFiles)+1)
+	// The shell set carries the 7 fragments every page needs.
+	sets["shell"] = &templateSetImpl{tpl: base}
 	for _, page := range pageFiles {
 		clone, err := base.Clone()
 		if err != nil {

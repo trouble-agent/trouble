@@ -94,8 +94,12 @@ make bin       # the two binaries, version-stamped (SPEC-12 §3.4 ldflags) into 
 make test      # the full suite
 make check     # the suite's self-consistency loop + schema + vet + internal tests
 make smoke     # version, config explain, topology against the real binaries
+make smoke-e2e # the live operator smoke: 24 assertions against bin/trouble + bin/troubled
+make ac-matrix # every AC in the SPEC-INDEX matrix against the evidence in the tree
 ```
 
 An unstamped build is visibly degraded rather than silently fine: `/health.json`
 reports `status="degraded"` with `detail.reason="unstamped_build"`, and
-`trouble install` refuses to enable the unit unless `--force`.
+`trouble install` refuses to enable the unit unless `--force` — which
+`tests/e2e/cli_smoke.sh` proves by building an unstamped binary and watching both
+answers.

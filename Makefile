@@ -73,5 +73,14 @@ smoke: bin
 	$(BIN)/trouble config explain --json | head -5
 	$(BIN)/trouble topology | head -5
 
+# The live operator smoke: 24 assertions against the two shipped binaries, from
+# the version triple to the checker's exit 0 → exit 8 transition (tests/e2e/).
+smoke-e2e: bin
+	bash tests/e2e/cli_smoke.sh $(BIN)
+
+# The v0.1 exit gate: the AC matrix over the SPEC-INDEX contract.
+ac-matrix:
+	python3 specs/tools/ac_matrix.py
+
 clean:
 	rm -rf $(BIN)

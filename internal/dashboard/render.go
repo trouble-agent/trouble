@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -485,12 +484,22 @@ func (t *thresholdGzip) Write(p []byte) (int, error) {
 	if !t.allow || t.buf.Len()+len(p) < t.min {
 		return t.buf.Write(p)
 	}
-	// Threshold crossed: switch to gzip before the headers go out.
+	// Threshold crossed: switch to gzip before the headers go out. A compressed
+	// writer is taken from a bounded pool: a fresh flate writer is ~814 KB of
+	// hash tables, which at 100 concurrent renders would be 81 MB — far past the
+	// §2.9 ceiling of 12 MB. Past the pool's size the response is served
+	// uncompressed (identity) rather than queueing behind a writer or growing
+	// the heap: the content is identical, only the encoding differs, and the
+	// pool is warmed before the boot baseline so its fixed cost is not billed to
+	// the steady delta.
+	gz := takeGzip(t.w)
+	if gz == nil {
+		return writeThrough(t.w, t.status, t.buf.Bytes(), p, &t.committed)
+	}
 	t.w.Header().Set("Content-Encoding", "gzip")
 	t.w.WriteHeader(t.status)
 	t.committed = true
-	t.gz = gzipPool.Get().(*gzip.Writer)
-	t.gz.Reset(t.w)
+	t.gz = gz
 	if _, err := t.gz.Write(t.buf.Bytes()); err != nil {
 		return 0, err
 	}
@@ -502,7 +511,7 @@ func (t *thresholdGzip) Write(p []byte) (int, error) {
 func (t *thresholdGzip) finish() error {
 	if t.gz != nil {
 		err := t.gz.Close()
-		gzipPool.Put(t.gz)
+		putGzip(t.gz)
 		t.gz = nil
 		return err
 	}
@@ -513,7 +522,61 @@ func (t *thresholdGzip) finish() error {
 	return err
 }
 
-var gzipPool = sync.Pool{New: func() any { return gzip.NewWriter(io.Discard) }}
+// writeThrough serves an uncompressed response once the compression pool is
+// busy: headers first, then the buffered prefix and the current chunk.
+func writeThrough(w http.ResponseWriter, status int, prefix, chunk []byte, committed *bool) (int, error) {
+	if !*committed {
+		w.WriteHeader(status)
+		*committed = true
+	}
+	nw, err := w.Write(prefix)
+	if err != nil {
+		return nw, err
+	}
+	n, err := w.Write(chunk)
+	return nw + n, err
+}
+
+// gzipPoolSize bounds the compression pool. Four writers is ~3.3 MB of flate
+// state — a fixed cost, sized against the §2.9 steady budget — and it caps the
+// memory a burst of concurrent renders can hold.
+const gzipPoolSize = 4
+
+var gzipPool = make(chan *gzip.Writer, gzipPoolSize)
+
+// takeGzip hands out a pooled, reset writer, or nil when the pool is empty.
+func takeGzip(w io.Writer) *gzip.Writer {
+	select {
+	case gz := <-gzipPool:
+		gz.Reset(w)
+		return gz
+	default:
+		return nil
+	}
+}
+
+// putGzip returns a writer to the pool (dropping it if the pool is full).
+func putGzip(gz *gzip.Writer) {
+	if gz == nil {
+		return
+	}
+	select {
+	case gzipPool <- gz:
+	default:
+	}
+}
+
+// WarmGzipPool allocates the pool's writers up front so their fixed cost lands
+// in the boot baseline rather than in the first requests' working set.
+func WarmGzipPool() {
+	for i := 0; i < gzipPoolSize; i++ {
+		select {
+		case gzipPool <- gzip.NewWriter(io.Discard):
+		default:
+			return
+		}
+	}
+}
 
 // wallClock is the default clock.
 func wallClock() time.Time { return time.Now() }

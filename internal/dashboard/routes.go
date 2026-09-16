@@ -134,6 +134,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	s.counters.served.Add(1)
+
 	if s.urlTokenRefusal(w, r) {
 		return
 	}

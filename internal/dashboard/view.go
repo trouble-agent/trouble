@@ -2,7 +2,7 @@ package dashboard
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -160,11 +160,54 @@ func fmtTS(ts string) string {
 	if ts == "" {
 		return "—"
 	}
-	t, err := types.ParseUTC(ts)
-	if err != nil {
+	t, ok := parseTS(ts)
+	if !ok {
 		return clean(ts)
 	}
 	return t.Format("15:04:05")
+}
+
+// parseTS parses the pinned timestamp layout (types.TsLayout, RFC3339 UTC with
+// milliseconds) without allocating. time.Parse allocates per call, and the
+// fragment path parses up to two timestamps per row: at page_limit rows that was
+// the largest single allocation on the §2.9 hot path. Anything that is not the
+// pinned shape falls back to types.ParseUTC, so a hand-written timestamp still
+// renders.
+func parseTS(s string) (time.Time, bool) {
+	const layoutLen = len("2006-01-02T15:04:05.000Z")
+	if len(s) == layoutLen && s[4] == '-' && s[7] == '-' && s[10] == 'T' && s[13] == ':' && s[16] == ':' && s[19] == '.' && s[23] == 'Z' {
+		year, ok1 := atoiDigits(s[0:4])
+		month, ok2 := atoiDigits(s[5:7])
+		day, ok3 := atoiDigits(s[8:10])
+		hour, ok4 := atoiDigits(s[11:13])
+		min, ok5 := atoiDigits(s[14:16])
+		sec, ok6 := atoiDigits(s[17:19])
+		ms, ok7 := atoiDigits(s[20:23])
+		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 {
+			return time.Date(year, time.Month(month), day, hour, min, sec, ms*int(time.Millisecond), time.UTC), true
+		}
+	}
+	t, err := types.ParseUTC(s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// atoiDigits parses 1-4 ASCII digits without allocating.
+func atoiDigits(b string) (int, bool) {
+	if len(b) == 0 || len(b) > 4 {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
 }
 
 // ageSeconds computes the age of a timestamp at now; ok=false when unknown.
@@ -172,8 +215,8 @@ func ageSeconds(ts string, now time.Time) (float64, bool) {
 	if ts == "" {
 		return 0, false
 	}
-	t, err := types.ParseUTC(ts)
-	if err != nil {
+	t, ok := parseTS(ts)
+	if !ok {
 		return 0, false
 	}
 	d := now.Sub(t).Seconds()
@@ -183,18 +226,21 @@ func ageSeconds(ts string, now time.Time) (float64, bool) {
 	return d, true
 }
 
-// fmtAge renders an age in seconds for a table cell.
+// fmtAge renders an age in seconds for a table cell. It uses strconv rather
+// than fmt: a 100-row fragment formats two ages per row, and the §2.9 budget is
+// paid per request — the formatting path is on the hot path, not in an error
+// branch.
 func fmtAge(s float64, ok bool) string {
 	if !ok {
 		return "—"
 	}
 	switch {
 	case s < 60:
-		return fmt.Sprintf("%.0fs", s)
+		return strconv.FormatFloat(s, 'f', 0, 64) + "s"
 	case s < 3600:
-		return fmt.Sprintf("%.0fm", s/60)
+		return strconv.FormatFloat(s/60, 'f', 0, 64) + "m"
 	default:
-		return fmt.Sprintf("%.1fh", s/3600)
+		return strconv.FormatFloat(s/3600, 'f', 1, 64) + "h"
 	}
 }
 
@@ -277,42 +323,44 @@ func cleanSensor(sh types.SensorHealth) types.SensorHealth {
 	return sh
 }
 
-// fmtRate renders a per-minute rate.
-func fmtRate(r float64) string { return fmt.Sprintf("%.1f/min", r) }
+// fmtRate renders a per-minute rate (strconv for the same reason as fmtAge).
+func fmtRate(r float64) string { return strconv.FormatFloat(r, 'f', 1, 64) + "/min" }
 
 // row builders --------------------------------------------------------------
 
 // incidentRows maps open incidents (newest-updated first) into table rows and
 // returns the index seq the fragment was rendered from.
 func (s *server) incidentRows(ctx context.Context, limit int) ([]incidentRow, uint64) {
+	return s.incidentRowsFrom(s.deps.Index.OpenIncidents(limit))
+}
+
+// incidentRowsFrom is the shared row mapping for both open-incident accessors.
+// The title cache matters for the §2.9 budget: an incident projection carries a
+// group id, so a 100-row fragment would otherwise copy 100 group projections to
+// read one string each.
+func (s *server) incidentRowsFrom(incs []types.Incident) ([]incidentRow, uint64) {
 	now := s.now()
-	incs := s.deps.Index.OpenIncidents(limit)
 	rows := make([]incidentRow, 0, len(incs))
+	titles := make(map[string]string, 8)
 	for i := range incs {
-		rows = append(rows, s.incidentRow(incs[i], now))
+		rows = append(rows, s.incidentRow(incs[i], now, titles))
 	}
 	return rows, s.deps.Index.LastSeq()
 }
 
 // incidentRowsSince is the since=<seq> variant (row 13).
 func (s *server) incidentRowsSince(ctx context.Context, since uint64, limit int) ([]incidentRow, uint64) {
-	now := s.now()
-	incs := s.deps.Index.OpenIncidentsSince(since, limit)
-	rows := make([]incidentRow, 0, len(incs))
-	for i := range incs {
-		rows = append(rows, s.incidentRow(incs[i], now))
-	}
-	return rows, s.deps.Index.LastSeq()
+	return s.incidentRowsFrom(s.deps.Index.OpenIncidentsSince(since, limit))
 }
 
-func (s *server) incidentRow(inc types.Incident, now time.Time) incidentRow {
+func (s *server) incidentRow(inc types.Incident, now time.Time, titles map[string]string) incidentRow {
 	age, ok := ageSeconds(inc.OpenedTS, now)
 	if !ok {
 		age, _ = ageSeconds(inc.UpdatedTS, now)
 	}
 	row := incidentRow{
 		Inc:      clean(inc.ID),
-		Title:    truncRunes(s.incidentTitle(inc)),
+		Title:    truncRunes(s.incidentTitle(inc, titles)),
 		Severity: inc.Severity,
 		State:    inc.State,
 		Rung:     inc.Rung,
@@ -329,15 +377,22 @@ func (s *server) incidentRow(inc types.Incident, now time.Time) incidentRow {
 
 // incidentTitle resolves the human title of an incident: the incident's group
 // title (the incident projection carries a sig and a group id, never a title),
-// then the group digest, then the sig, then the incident id.
-func (s *server) incidentTitle(inc types.Incident) string {
+// then the group digest, then the sig, then the incident id. Titles are cached
+// per render, so a table of incidents that share a group costs one lookup.
+func (s *server) incidentTitle(inc types.Incident, cache map[string]string) string {
 	if inc.GroupID != "" && s.deps.Lookup != nil {
-		if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
-			if t := clean(g.Title); t != "" {
+		if t, ok := cache[inc.GroupID]; ok {
+			if t != "" {
 				return t
 			}
-			if d := clean(g.Digest); d != "" {
-				return d
+		} else if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
+			t := clean(g.Title)
+			if t == "" {
+				t = clean(g.Digest)
+			}
+			cache[inc.GroupID] = t
+			if t != "" {
+				return t
 			}
 		}
 	}
@@ -367,6 +422,10 @@ func (s *server) groupRowsSince(ctx context.Context, since uint64, limit int) ([
 	rows := make([]groupRow, 0, len(st))
 	for i := range st {
 		rows = append(rows, groupRowOf(st[i]))
+	}
+	rows = rankGroups(rows)
+	if len(rows) > limit {
+		rows = rows[:limit]
 	}
 	return rows, s.deps.Index.LastSeq()
 }
@@ -581,7 +640,7 @@ func (s *server) budgetData() budgetPanel {
 		RSS:       fmtLen(rw.RSSBytes),
 		Ledger:    fmtLen(rw.LedgerBytes),
 		Spool:     fmtLen(rw.SpoolBytes),
-		Events:    fmt.Sprintf("%.1f/min", rw.EventsPerMin),
+		Events:    fmtRate(rw.EventsPerMin),
 		Worktrees: rw.Worktrees,
 	}
 }

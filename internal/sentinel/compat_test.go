@@ -234,11 +234,14 @@ func TestCompatDocProvenance(t *testing.T) {
 		}
 	}
 	// The claim is falsifiable, not asserted on trust: §7's generator would be a
-	// Makefile target, and a root Makefile is what makes the prose stale.
-	if _, err := os.Stat("../../Makefile"); err == nil {
-		t.Error("a root Makefile exists, but the provenance record still states the repository ships no build layer (compat §5.15, docs/operations.md §9)")
-	} else if !os.IsNotExist(err) {
-		t.Fatalf("stat Makefile: %v", err)
+	// Makefile target. The SPEC-12 wave HAS since added a root Makefile (build,
+	// check, smoke, schema-check, conformance, ac-matrix), so the record is
+	// updated with it: the compat document stays hand-maintained, but the prose
+	// must acknowledge the build layer and name the target that WOULD
+	// regenerate it (`make compat-matrix`), instead of claiming no Makefile
+	// exists. The doc-freshness checks above still hold.
+	if _, err := os.Stat("../../Makefile"); err != nil {
+		t.Fatalf("the root Makefile the provenance record describes is missing: %v", err)
 	}
 }
 

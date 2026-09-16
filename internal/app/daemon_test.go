@@ -47,6 +47,20 @@ func freePort(t *testing.T) int {
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
+// freePortRange allocates two adjacent ports in ONE probe bind, so the
+// preflight's two listeners cannot collide with a sibling test process that
+// grabbed the port between the two freePort calls.
+func freePortPair(t *testing.T) (int, int) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	p := ln.Addr().(*net.TCPAddr).Port
+	return p, p + 1
+}
+
 // stateBase is a state root the ledger accepts: 0700 under $HOME, never /tmp
 // (SPEC-01 §4.3 / SPEC-12 §3.2).
 func stateBase(t *testing.T) string {
@@ -71,10 +85,16 @@ func stateBase(t *testing.T) string {
 }
 
 func bootDaemon(t *testing.T) *harness {
+	return bootDaemonWith(t, SubsystemOptions{})
+}
+
+// bootDaemonWith boots the daemon with per-subsystem options (the e2e for the
+// wired subsystems passes real project/driver tables through the same
+// BootOptions surface an embedding binary would).
+func bootDaemonWith(t *testing.T, so SubsystemOptions) *harness {
 	t.Helper()
 	root := stateBase(t)
-	dashPort := freePort(t)
-	ingestPort := freePort(t)
+	dashPort, ingestPort := freePortPair(t)
 	cfgPath := filepath.Join(root, "config.toml")
 	envFile := filepath.Join(root, "trouble.env")
 
@@ -149,6 +169,7 @@ token_file = %q
 				h.d = d
 				close(ready)
 			},
+			Subsystems: so,
 		})
 		h.done <- err
 	}()

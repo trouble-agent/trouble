@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
@@ -111,29 +112,58 @@ func (l Lookup) Evidence(inc string) (*types.Evidence, bool) {
 	return nil, false
 }
 
-// Story assembles the extra panels of /incidents/{id}. Every field comes from a
-// record the owning subsystem wrote, so an absent panel means "no such record",
-// never "not wired".
+// Story assembles the extra panels of /incidents/{id}. The refs come from the
+// incident projection (the ladder sets them when its own outlet stage runs);
+// the research/spawn/skill panels come from the owning subsystem's FULL
+// records via the evidence query — the SPEC-07/08/11 payload key set
+// (research: res_id/state, flow: spawn_id + decision, skills: candidate_id).
+// An absent panel means "no such record", never "not wired".
 func (l Lookup) Story(inc types.Incident) dashboard.Story {
 	st := dashboard.Story{
 		IssueRef:   inc.IssueID,
 		BoardRow:   inc.TaskID,
 		ResearchID: inc.ResearchID,
 	}
-	rows := l.L.DashReader().RecordsForIncident(inc.ID, 0, 200)
-	st.Records = rows
-	for _, rec := range rows {
+	bundle, err := l.L.Query().Evidence(inc.ID, 200)
+	if err != nil {
+		st.Records = l.L.DashReader().RecordsForIncident(inc.ID, 0, 200)
+		return st
+	}
+	st.Records = bundle.Records
+	for _, rec := range bundle.Records {
 		if rec.Payload == nil {
 			continue
 		}
-		if v, ok := rec.Payload["promotion"].(string); ok && v != "" {
-			st.Promotion = v
+		// SPEC-07: the rung's machine brief lands in `research` records.
+		if rec.Kind == types.KResearch {
+			if v, ok := rec.Payload["res_id"].(string); ok && v != "" && st.ResearchID == "" {
+				st.ResearchID = v
+			}
+			if v, ok := rec.Payload["state"].(string); ok && v != "" {
+				st.Research = v
+			}
 		}
-		if v, ok := rec.Payload["candidate"].(string); ok && v != "" {
-			st.Candidate = v
+		// SPEC-08: one `spawn` record per state change carries the spawn id
+		// and the promotion decision.
+		if rec.Kind == types.KSpawn {
+			if v, ok := rec.Payload["spawn_id"].(string); ok && v != "" {
+				st.SpawnID = v
+			}
+			if v, ok := rec.Payload["decision"].(string); ok && v != "" {
+				st.Promotion = v
+			}
+			if v, ok := rec.Payload["pr_url"].(string); ok && v != "" {
+				st.Promotion = strings.TrimSpace(st.Promotion + " " + v)
+			}
 		}
-		if v, ok := rec.Payload["outcome"].(string); ok && v != "" && rec.Kind == types.KResearch {
-			st.Research = v
+		// SPEC-11: the candidate loop's draft/review/promote records.
+		if rec.Kind == types.KSkill {
+			if v, ok := rec.Payload["candidate_id"].(string); ok && v != "" {
+				st.Candidate = v
+			}
+			if v, ok := rec.Payload["state"].(string); ok && v != "" {
+				st.Candidate = strings.TrimSpace(st.Candidate + " " + v)
+			}
 		}
 	}
 	return st

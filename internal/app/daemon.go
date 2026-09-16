@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +49,11 @@ type BootOptions struct {
 	// OnReady is called once the daemon serves (the binary sends sd_notify
 	// READY=1 here); tests use it to proceed deterministically.
 	OnReady func(d *Daemon)
+
+	// Subsystems carries the optional per-subsystem config tables. Nil fields
+	// select each package's defaults; SentinelProjects non-nil (even empty)
+	// is the operator's statement about the sentinel's project set.
+	Subsystems SubsystemOptions
 }
 
 // Daemon is the assembled process.
@@ -63,12 +69,18 @@ type Daemon struct {
 	Spool      *lifecycle.Spool
 	DashConfig dashboard.Config
 	HealthURL  string
+	// Subsystems holds the late-landing subsystems (SPEC-04/07/08/09/11). A
+	// nil member means "not built": the reason is one lifecycle record
+	// (stage=subsystem_not_built), never silence.
+	Subsystems *Subsystems
 
 	log     *slog.Logger
 	notify  *notifier
 	started time.Time
 	ready   chan struct{}
 	stop    chan struct{}
+	// sentinelLn is the ingest listener while the sentinel server owns it.
+	sentinelLn net.Listener
 
 	rulesOnce   sync.Once
 	rules       map[string]types.Rule
@@ -189,16 +201,22 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		_ = l.Close(ctx)
 		return nil, err
 	}
-	var dashLn net.Listener
+	var dashLn, ingestLn net.Listener
 	for _, p := range probes {
-		if p.Name == "dashboard" {
+		switch p.Name {
+		case "dashboard":
 			dashLn = p.Listener
+		case "ingest":
+			ingestLn = p.Listener
 		}
 	}
 	if dashLn == nil {
 		_ = l.Close(ctx)
 		return nil, fmt.Errorf("bind preflight returned no dashboard listener")
 	}
+	// The ingest listener is handed to the SPEC-04 server below; when no
+	// project is configured the sentinel is not built and the listener is
+	// closed here, recorded, so the port never lies open.
 	d.HealthURL = "http://" + dashLn.Addr().String() + "/health.json"
 
 	// 8. the scrubber (SPEC-02) is a shared boundary, not a per-call construction.
@@ -217,7 +235,21 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 
 	// 10. registry (SPEC-06) then ladder (SPEC-05): the ladder is the only caller
 	// of the registry's six-stage contract, and the registry's module deps come
-	// from the resolved config.
+	// from the resolved config. The five late-landing subsystems are built
+	// first: the registry's flow modules and the ladder's outlets hand their
+	// work to them.
+	d.Subsystems = buildSubsystems(d, hostID, o.Subsystems)
+
+	// The ingest listener: held for the sentinel when one was built, closed
+	// when not — the refusal reason is the one record buildSubsystems wrote,
+	// and the port never lies open (SPEC-12 §3.2 keeps the fd for one owner).
+	if d.Subsystems.Sentinel != nil {
+		d.sentinelLn = ingestLn
+	} else if ingestLn != nil {
+		_ = ingestLn.Close()
+		ingestLn = nil
+	}
+
 	reg, err := registry.New(registry.RegistryDeps{
 		Append: func(rec types.Record) (types.Record, error) {
 			return l.Append(ctx, types.RecordDraft{
@@ -236,11 +268,20 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 			_, sr, err := d.Scrubber.ScrubBytes(ctx, types.ScrubTarget(target), "", in)
 			return sr, err
 		},
-		Gates:  func() types.AutonomyGates { return ladderCfgGates(d) },
-		Config: res.Values,
-		HostID: hostID,
-		Actor:  actor,
-		Now:    time.Now,
+		Gates: func() types.AutonomyGates { return ladderCfgGates(d) },
+		// The flow modules' external effect (§3.8/§3.9) goes through the wired
+		// issue desk and flow; when a subsystem did not build the closure
+		// refuses and the six-stage contract records it — the same honest
+		// refusal the unwired case had, now narrowed to the one subsystem that
+		// is actually absent.
+		FileIssue:      registryFileIssue(d),
+		CreateTask:     registryCreateTask(d),
+		Comment:        registryComment(d),
+		SkillAuthorize: registrySkillAuthorize(d),
+		Config:         res.Values,
+		HostID:         hostID,
+		Actor:          actor,
+		Now:            time.Now,
 	})
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)
@@ -253,6 +294,8 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		Ledger:   d.Store,
 		Index:    d.Store,
 		Registry: NewPlayEngine(reg),
+		Research: researchPortAdapter{svc: d.Subsystems.research()},
+		Outlets:  deskOutlet{desk: d.Subsystems.issues(), flow: d.Subsystems.flow()},
 		Clock:    NewClock(started),
 		Eval:     NewEvaluator(),
 		Cfg:      ladder.DefaultConfig(),
@@ -293,6 +336,41 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 			log.Error("dashboard", "err", err)
 		}
 	}()
+
+	// 13b. the sentinel, on the ingest listener the preflight held. Serve is
+	// mounted here so the boot order stays: ledger → scrub → sensors → ladder
+	// → sentinel (a group record arriving before the ladder exists would find
+	// no admission path; the sentinel's own LedgerWait backpressure covers the
+	// residual race, and Drain stops ingest first).
+	if d.Subsystems.Sentinel != nil && d.sentinelLn != nil {
+		if err := d.Subsystems.Sentinel.Start(ctx); err != nil {
+			d.bootFailure(ctx, types.CodeLifecycle003, err)
+			return nil, err
+		}
+		go func() {
+			srv := &http.Server{Handler: d.Subsystems.Sentinel.Handler()}
+			if err := srv.Serve(d.sentinelLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("sentinel", "err", err)
+			}
+		}()
+	}
+
+	// 13c. the background loops of research (capability probe), the issue desk
+	// (healthchecks, quiet-close sweep, spool replay) and the flow (the spawn
+	// queue's durable drain, the registration probe).
+	if d.Subsystems.Research != nil {
+		if err := d.Subsystems.Research.Start(ctx); err != nil {
+			log.Warn("research start", "err", err)
+		}
+	}
+	if d.Subsystems.Issues != nil {
+		go d.Subsystems.Issues.Run(ctx)
+	}
+	if d.Subsystems.Flow != nil {
+		if err := d.Subsystems.Flow.Start(ctx); err != nil {
+			log.Warn("flow start", "err", err)
+		}
+	}
 
 	// 14. heartbeat + watchdog, then READY.
 	go func() {
@@ -347,6 +425,27 @@ func (d *Daemon) drain() error {
 	ctx, cancel := context.WithTimeout(context.Background(), d.Cfg.Lifecycle.DrainTimeout.Std())
 	defer cancel()
 
+	// Stop accepting ingest first: a drain must never fold a group that
+	// arrives after the sensors stopped (the record would find no admission
+	// path). The sentinel's Drain is bounded by 5s internally.
+	if d.Subsystems != nil && d.Subsystems.Sentinel != nil {
+		if err := d.Subsystems.Sentinel.Drain(ctx); err != nil {
+			d.log.Warn("sentinel drain", "err", err)
+		}
+	}
+	if d.sentinelLn != nil {
+		_ = d.sentinelLn.Close()
+	}
+	if d.Subsystems != nil {
+		if d.Subsystems.Flow != nil {
+			_ = d.Subsystems.Flow.Stop(ctx)
+		}
+		if d.Subsystems.Research != nil {
+			_ = d.Subsystems.Research.Close()
+		}
+		// The issue desk's Run loop rides ctx; its spool state is written
+		// below together with the lifecycle spool's.
+	}
 	if d.Sensors != nil {
 		_ = d.Sensors.Stop(ctx)
 	}

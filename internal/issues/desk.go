@@ -356,11 +356,28 @@ func (d *Desk) AnchorAt(driver, sig string) (types.IssueRef, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, a := range d.anchors {
-		if a.sig == sig && a.driver == driver && a.ref.ExternalID != "" {
+		if a.driver == driver && a.sig == sig && a.ref.ExternalID != "" {
 			return a.ref, true
 		}
 	}
 	return types.IssueRef{}, false
+}
+
+// EnqueueSpool places one foreign payload on the desk's durable queue: the
+// export of §3.7 to the collaborators that hand work over (the flow's own
+// pending-spawn replay rides the same store, so a restart replays both).
+// A drop event is one gap record on the desk's own record path.
+func (d *Desk) EnqueueSpool(ctx context.Context, e types.SpoolEntry) error {
+	if d == nil || d.spool == nil {
+		return newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "spool not built")
+	}
+	drops, err := d.spool.Put("issue", e)
+	for range drops {
+		_, _ = d.record(ctx, types.KGap, "", "", map[string]any{
+			"est_lost": 1, "cause": types.CauseQueueOverflow, "subsystem": "issues", "scope": "spool",
+		})
+	}
+	return err
 }
 
 // EntryFor returns the anchor entry (read-only) for diagnostics and tests.

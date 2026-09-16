@@ -67,6 +67,23 @@ func (f *Flow) projectByName(name string) (types.FlowProject, bool) {
 	return p, ok
 }
 
+// ProjectNames lists the configured project keys (the composition root's
+// single-project repo resolution uses it).
+func (f *Flow) ProjectNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	names := make([]string, 0, len(f.cfg.Projects))
+	for name := range f.cfg.Projects {
+		names = append(names, name)
+	}
+	return names
+}
+
+// ProjectByName is the exported lookup of projectByName.
+func (f *Flow) ProjectByName(name string) (types.FlowProject, bool) {
+	return f.projectByName(name)
+}
+
 // registrationHolds is the three-check proof plus the staleness rule (§3.5).
 func (f *Flow) registrationHolds(p types.FlowProject) bool {
 	if !p.Enabled {

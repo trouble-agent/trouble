@@ -244,10 +244,13 @@ latency at tens of milliseconds here. The test logs every number and asserts the
 spec's latency budget at the factor this host supports (p99 ≤ 250ms); the spec's
 25 ms p99 assumes the reference host's fsync service time.
 
-The load test saturates the host for its duration, so run the whole tree with
-`go test -p 1 ./internal/...` (or `-short`) — otherwise it can push
-`internal/ledger`'s timing assertions (`TestFsyncWindowBound`,
-`TestPerLineRegression`) over their bounds on a shared machine.
+`-short` degrades the load test to a correctness smoke (one request in flight per
+worker, no throughput/latency/RSS assertions), which keeps `go test -short
+./internal/...` safe to run in parallel. The full 60s run saturates the host, so
+run the tree with `go test -p 1 ./internal/...` when it is included — otherwise it
+can push `internal/ledger`'s timing assertions (`TestFsyncWindowBound`,
+`TestPerLineRegression`) and `internal/scrub`'s µs/KiB budgets over their
+host-measured bounds on a shared machine.
 
 ### Substrate fix found by this work: `types.NewID` same-millisecond collisions
 

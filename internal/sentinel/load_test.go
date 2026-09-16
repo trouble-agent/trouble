@@ -91,10 +91,16 @@ func TestLoadIngestThroughput(t *testing.T) {
 		t.Skip("the load test measures throughput and RSS: run it without -race")
 	}
 	dur := time.Duration(loadEnvInt("LOAD_DURATION_S", int(loadDuration/time.Second))) * time.Second
-	if testing.Short() {
-		dur = loadDurationShort
-	}
 	pipeline := loadEnvInt("LOAD_PIPELINE", loadPipeline)
+	if testing.Short() {
+		// The `-short` run is a smoke check, not the measurement: it keeps the
+		// same path but a single request in flight per worker, so a parallel
+		// `go test ./internal/...` cannot push a sibling package's host-measured
+		// budgets (internal/scrub's µs/KiB numbers, internal/ledger's fsync window)
+		// over their bounds.
+		dur = loadDurationShort
+		pipeline = 1
+	}
 
 	root := t.TempDir()
 	cfg := testConfig(t, func(c *Config) {
@@ -272,11 +278,15 @@ func TestLoadIngestThroughput(t *testing.T) {
 	// on purpose: they catch a stall or a pile-up (an order of magnitude past the
 	// 60-530ms p99 measured across runs), while the measured values against the
 	// spec's numbers are logged above, which is the honest form of the check.
-	if p99 > loadP99HostBudget {
+	shortRun := testing.Short()
+	if shortRun {
+		t.Logf("-short: correctness smoke only (1 request in flight per worker); run without -short for §7's throughput/latency/RSS measurement")
+	}
+	if !shortRun && p99 > loadP99HostBudget {
 		t.Errorf("p99 = %s, want <= %s (spec budget %s; see the ledger-only ceiling note)",
 			p99.Round(time.Microsecond), loadP99HostBudget, loadP99Budget)
 	}
-	if p999 > loadP999HostBudget {
+	if !shortRun && p999 > loadP999HostBudget {
 		t.Errorf("p999 = %s, want <= %s (spec budget %s)", p999.Round(time.Microsecond), loadP999HostBudget, loadP999Budget)
 	}
 	// Steady-state growth is what a leak shows up as: force the collector to
@@ -300,17 +310,19 @@ func TestLoadIngestThroughput(t *testing.T) {
 	// (~12MB ceiling, asserted in TestDedupWindowIsBounded) and the group index
 	// holds one entry per digest. The bound asserted here is the one this shape
 	// actually guarantees; the spec's 8MB is logged for comparison.
-	if growth := rssAfter - rssBefore; growth > loadRSSHostBound {
-		t.Errorf("steady-state RSS growth = %d bytes, want <= %d (spec target %d)",
-			growth, loadRSSHostBound, loadRSSGrowthBound)
-	}
-	if rssPeak-rssBefore > loadRSSTestBound {
-		t.Errorf("peak RSS growth = %d bytes, want <= %d (§7's load-test bound)", rssPeak-rssBefore, loadRSSTestBound)
+	if !shortRun {
+		if growth := rssAfter - rssBefore; growth > loadRSSHostBound {
+			t.Errorf("steady-state RSS growth = %d bytes, want <= %d (spec target %d)",
+				growth, loadRSSHostBound, loadRSSGrowthBound)
+		}
+		if rssPeak-rssBefore > loadRSSTestBound {
+			t.Errorf("peak RSS growth = %d bytes, want <= %d (§7's load-test bound)", rssPeak-rssBefore, loadRSSTestBound)
+		}
 	}
 	if reqS < loadTargetReqS {
 		t.Logf("throughput %.0f req/s is under §7's %.0f req/s target (host load dependent; 4,100-4,500 req/s is typical on an idle host)", reqS, loadTargetReqS)
 	}
-	if reqS < loadFloorReqS {
+	if !shortRun && reqS < loadFloorReqS {
 		t.Errorf("throughput = %.0f req/s, want >= %.0f req/s (the group-commit floor)", reqS, loadFloorReqS)
 	}
 	// The ledger must account for exactly the accepted events: the test doubles as

@@ -125,11 +125,12 @@ go test -count=1 -short ./internal/...        # skips the large fixtures and the
 go test -count=1 -run TestLoadIngestThroughput ./internal/sentinel/   # SPEC-04 §7's load test
 ```
 
-The load test saturates the host for its duration (60s, 5s under `-short`), so
-run the whole tree with `-p 1` (or `-short`) when other timing-sensitive packages
-are in the same run: it can otherwise push `internal/ledger`'s fsync-window
-assertions over their bounds on a shared machine. Measured numbers and the reason
-the §7 latency budget is asserted at a host factor are in `docs/operations.md`
-§9.
+`-short` keeps the whole tree safe to run in parallel (the load test degrades to a
+correctness smoke: one request in flight per worker and no throughput/latency/RSS
+assertions). The full 60s load test saturates the host for its duration, so run
+the tree with `-p 1` when it is in the same run — otherwise it can push
+`internal/ledger`'s fsync-window and `internal/scrub`'s µs/KiB assertions over
+their host-measured bounds. Measured numbers, and the reason the §7 latency budget
+is asserted at a host factor, are in `docs/operations.md` §9.
 
 MIT licensed.

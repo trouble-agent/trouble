@@ -38,7 +38,9 @@ func containsCode(err error, code types.ErrorCode) bool {
 	return err != nil && contains(err.Error(), string(code))
 }
 
-func contains(s, sub string) bool { return len(s) >= len(sub) && (s == sub || len(sub) == 0 || containsAt(s, sub)) }
+func contains(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 || containsAt(s, sub))
+}
 
 func containsAt(s, sub string) bool {
 	for i := 0; i+len(sub) <= len(s); i++ {

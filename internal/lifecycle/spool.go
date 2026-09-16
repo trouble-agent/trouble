@@ -37,14 +37,14 @@ type SpoolState struct {
 
 // Spool is the bounded satellite forward queue (SPEC-12 §3.7).
 type Spool struct {
-	mu       sync.Mutex
-	cfg      Config
-	root     string
-	state    SpoolState
-	open     *os.File
-	openSeq  uint64
-	records  int
-	window   time.Duration
+	mu        sync.Mutex
+	cfg       Config
+	root      string
+	state     SpoolState
+	open      *os.File
+	openSeq   uint64
+	records   int
+	window    time.Duration
 	lastFsync time.Time
 }
 

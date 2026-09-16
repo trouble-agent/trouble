@@ -24,22 +24,22 @@ type Config struct {
 	} `toml:"secrets"`
 
 	Lifecycle struct {
-		SystemdScope        string         `toml:"systemd_scope"`
-		UnitName            string         `toml:"unit_name"`
-		EscalateUnit        string         `toml:"escalate_unit"`
-		CheckerUnit         string         `toml:"checker_unit"`
-		Sandbox             string         `toml:"sandbox"`
-		User                string         `toml:"user"`
-		HeartbeatPath       string         `toml:"heartbeat_path"`
-		HeartbeatInterval   types.Duration `toml:"heartbeat_interval"`
-		HeartbeatStaleAfter types.Duration `toml:"heartbeat_stale_after"`
+		SystemdScope          string         `toml:"systemd_scope"`
+		UnitName              string         `toml:"unit_name"`
+		EscalateUnit          string         `toml:"escalate_unit"`
+		CheckerUnit           string         `toml:"checker_unit"`
+		Sandbox               string         `toml:"sandbox"`
+		User                  string         `toml:"user"`
+		HeartbeatPath         string         `toml:"heartbeat_path"`
+		HeartbeatInterval     types.Duration `toml:"heartbeat_interval"`
+		HeartbeatStaleAfter   types.Duration `toml:"heartbeat_stale_after"`
 		IdleHeartbeatInterval types.Duration `toml:"idle_heartbeat_interval"`
-		WatchdogSec         types.Duration `toml:"watchdog_sec"`
-		DrainTimeout        types.Duration `toml:"drain_timeout"`
-		UpgradeReadyTimeout types.Duration `toml:"upgrade_ready_timeout"`
-		RollbackDepth       int            `toml:"rollback_depth"`
-		SelfRSSWarn         string         `toml:"self_rss_warn"` // e.g. "80MB"
-		ClockSkewTolerance  types.Duration `toml:"clock_skew_tolerance"`
+		WatchdogSec           types.Duration `toml:"watchdog_sec"`
+		DrainTimeout          types.Duration `toml:"drain_timeout"`
+		UpgradeReadyTimeout   types.Duration `toml:"upgrade_ready_timeout"`
+		RollbackDepth         int            `toml:"rollback_depth"`
+		SelfRSSWarn           string         `toml:"self_rss_warn"` // e.g. "80MB"
+		ClockSkewTolerance    types.Duration `toml:"clock_skew_tolerance"`
 	} `toml:"lifecycle"`
 
 	Stall struct {
@@ -47,11 +47,11 @@ type Config struct {
 	} `toml:"stall"`
 
 	Checker struct {
-		Interval    types.Duration `toml:"interval"`
-		ConfirmRuns int            `toml:"confirm_runs"`
-		StateFile   string         `toml:"state_file"`
-		AlarmFile   string         `toml:"alarm_file"`
-		AlarmCommand []string      `toml:"alarm_command"`
+		Interval     types.Duration `toml:"interval"`
+		ConfirmRuns  int            `toml:"confirm_runs"`
+		StateFile    string         `toml:"state_file"`
+		AlarmFile    string         `toml:"alarm_file"`
+		AlarmCommand []string       `toml:"alarm_command"`
 	} `toml:"checker"`
 
 	Ingest struct {
@@ -66,17 +66,22 @@ type Config struct {
 
 	Dashboard DashboardConfig `toml:"dashboard"`
 
+	// HealthURL is the health surface the stall checker and the upgrade READY
+	// wait consume (SPEC-12 §2.1/§3.3). Empty means "derive it from
+	// dashboard.bind".
+	HealthURL string `toml:"health_url"`
+
 	Hub struct {
-		Mode              string         `toml:"mode"`
-		URL               string         `toml:"url"`
-		ForwardProjectID  string         `toml:"forward_project_id"`
-		Token             string         `toml:"token"`
-		ProtocolVersion   int            `toml:"protocol_version"`
-		ForwardBatchRecords int          `toml:"forward_batch_records"`
-		ForwardBatchBytes int            `toml:"forward_batch_bytes"`
-		RetryBase         types.Duration `toml:"retry_base"`
-		RetryMax          types.Duration `toml:"retry_max"`
-		DedupLRU          int            `toml:"dedup_lru"`
+		Mode                string         `toml:"mode"`
+		URL                 string         `toml:"url"`
+		ForwardProjectID    string         `toml:"forward_project_id"`
+		Token               string         `toml:"token"`
+		ProtocolVersion     int            `toml:"protocol_version"`
+		ForwardBatchRecords int            `toml:"forward_batch_records"`
+		ForwardBatchBytes   int            `toml:"forward_batch_bytes"`
+		RetryBase           types.Duration `toml:"retry_base"`
+		RetryMax            types.Duration `toml:"retry_max"`
+		DedupLRU            int            `toml:"dedup_lru"`
 	} `toml:"hub"`
 
 	Spool struct {
@@ -114,11 +119,39 @@ type Config struct {
 // lifecycle and passed to dashboard by the composition root.
 type DashboardConfig struct {
 	Bind string `toml:"bind"`
+	Port int    `toml:"port"`
 	Auth struct {
-		Transport       string         `toml:"transport"`
-		IdentityProvider string        `toml:"identity_provider"`
-		SessionTTL      types.Duration `toml:"session_ttl"`
+		Transport        string         `toml:"transport"`
+		IdentityProvider string         `toml:"identity_provider"`
+		SessionTTL       types.Duration `toml:"session_ttl"`
 	} `toml:"auth"`
+	Mandate              string   `toml:"mandate"`
+	ProxyTrusted         bool     `toml:"proxy_trusted"`
+	ProxyCIDRs           []string `toml:"proxy_cidrs"`
+	PublicOrigin         string   `toml:"public_origin"`
+	ProjectScope         []string `toml:"project_scope"`
+	TokenFile            string   `toml:"token_file"`
+	PollMS               int      `toml:"poll_ms"`
+	StripPollMS          int      `toml:"strip_poll_ms"`
+	StallAlertS          int      `toml:"stall_alert_s"`
+	HealthLoopbackExempt bool     `toml:"health_loopback_exempt"`
+	ReadOnly             bool     `toml:"read_only"`
+	AllowResume          bool     `toml:"allow_resume"`
+	AllowFull            bool     `toml:"allow_full"`
+	PageLimit            int      `toml:"page_limit"`
+	MaxBodyBytes         int64    `toml:"max_body_bytes"`
+	Rate                 struct {
+		ReadRPS    float64 `toml:"read_rps"`
+		ReadBurst  int     `toml:"read_burst"`
+		WriteRPS   float64 `toml:"write_rps"`
+		WriteBurst int     `toml:"write_burst"`
+	} `toml:"rate"`
+	AuthFailLimit  int            `toml:"auth_fail_limit"`
+	AuthFailWindow types.Duration `toml:"auth_fail_window"`
+	MemPressurePct int            `toml:"mem_pressure_pct"`
+	// ReportAuthTimeoutSeconds bounds the reverse-proxy auth exchange when the
+	// mandated proxy terminates TLS (SPEC-10 §2.4).
+	ReportAuthTimeoutSeconds int `toml:"report_auth_timeout_s"`
 }
 
 // Resolved is the output of Resolve: the typed config, every ConfigValue with
@@ -171,10 +204,26 @@ func defaults() *Config {
 	c.Ingest.Auth.LoopbackDSN = true
 	c.Ingest.Auth.NonloopbackMode = "token"
 	c.Ingest.Auth.PublicRequireProxy = true
+	c.HealthURL = ""
 	c.Dashboard.Bind = "127.0.0.1:7644"
+	c.Dashboard.Port = 7644
 	c.Dashboard.Auth.Transport = "cookie"
 	c.Dashboard.Auth.IdentityProvider = ""
 	c.Dashboard.Auth.SessionTTL = "24h"
+	c.Dashboard.TokenFile = ""
+	c.Dashboard.PollMS = 2000
+	c.Dashboard.StripPollMS = 1000
+	c.Dashboard.StallAlertS = 90
+	c.Dashboard.HealthLoopbackExempt = true
+	c.Dashboard.PageLimit = 100
+	c.Dashboard.MaxBodyBytes = 4096
+	c.Dashboard.Rate.ReadRPS = 20
+	c.Dashboard.Rate.ReadBurst = 60
+	c.Dashboard.Rate.WriteRPS = 5
+	c.Dashboard.Rate.WriteBurst = 10
+	c.Dashboard.AuthFailLimit = 10
+	c.Dashboard.AuthFailWindow = "60s"
+	c.Dashboard.MemPressurePct = 80
 	c.Hub.Mode = "hub"
 	c.Hub.URL = ""
 	c.Hub.ForwardProjectID = ""
@@ -339,6 +388,22 @@ func asInt64(v any) (int64, error) {
 	}
 }
 
+// asFloat accepts the numeric forms a TOML value can take for a float key.
+func asFloat(v any) (float64, error) {
+	switch x := v.(type) {
+	case float64:
+		return x, nil
+	case int:
+		return float64(x), nil
+	case int64:
+		return float64(x), nil
+	case string:
+		return strconv.ParseFloat(x, 64)
+	default:
+		return 0, fmt.Errorf("expected float, got %T", v)
+	}
+}
+
 func asDuration(v any) (types.Duration, error) {
 	s, err := asString(v)
 	if err != nil {
@@ -391,15 +456,35 @@ func registry(c *Config) []keyMeta {
 		{"lifecycle.sandbox", "lifecycle", "sandbox", c.Lifecycle.Sandbox, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.Sandbox = s; return err }},
 		{"lifecycle.user", "lifecycle", "user", c.Lifecycle.User, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.User = s; return err }},
 		{"lifecycle.heartbeat_path", "lifecycle", "heartbeat_path", c.Lifecycle.HeartbeatPath, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.HeartbeatPath = s; return err }},
-		{"lifecycle.heartbeat_interval", "lifecycle", "heartbeat_interval", c.Lifecycle.HeartbeatInterval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.HeartbeatInterval = d; return err }},
-		{"lifecycle.heartbeat_stale_after", "lifecycle", "heartbeat_stale_after", c.Lifecycle.HeartbeatStaleAfter, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.HeartbeatStaleAfter = d; return err }},
-		{"lifecycle.idle_heartbeat_interval", "lifecycle", "idle_heartbeat_interval", c.Lifecycle.IdleHeartbeatInterval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.IdleHeartbeatInterval = d; return err }},
+		{"lifecycle.heartbeat_interval", "lifecycle", "heartbeat_interval", c.Lifecycle.HeartbeatInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Lifecycle.HeartbeatInterval = d
+			return err
+		}},
+		{"lifecycle.heartbeat_stale_after", "lifecycle", "heartbeat_stale_after", c.Lifecycle.HeartbeatStaleAfter, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Lifecycle.HeartbeatStaleAfter = d
+			return err
+		}},
+		{"lifecycle.idle_heartbeat_interval", "lifecycle", "idle_heartbeat_interval", c.Lifecycle.IdleHeartbeatInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Lifecycle.IdleHeartbeatInterval = d
+			return err
+		}},
 		{"lifecycle.watchdog_sec", "lifecycle", "watchdog_sec", c.Lifecycle.WatchdogSec, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.WatchdogSec = d; return err }},
 		{"lifecycle.drain_timeout", "lifecycle", "drain_timeout", c.Lifecycle.DrainTimeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.DrainTimeout = d; return err }},
-		{"lifecycle.upgrade_ready_timeout", "lifecycle", "upgrade_ready_timeout", c.Lifecycle.UpgradeReadyTimeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.UpgradeReadyTimeout = d; return err }},
+		{"lifecycle.upgrade_ready_timeout", "lifecycle", "upgrade_ready_timeout", c.Lifecycle.UpgradeReadyTimeout, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Lifecycle.UpgradeReadyTimeout = d
+			return err
+		}},
 		{"lifecycle.rollback_depth", "lifecycle", "rollback_depth", c.Lifecycle.RollbackDepth, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Lifecycle.RollbackDepth = i; return err }},
 		{"lifecycle.self_rss_warn", "lifecycle", "self_rss_warn", c.Lifecycle.SelfRSSWarn, func(cfg *Config, v any) error { s, err := asString(v); cfg.Lifecycle.SelfRSSWarn = s; return err }},
-		{"lifecycle.clock_skew_tolerance", "lifecycle", "clock_skew_tolerance", c.Lifecycle.ClockSkewTolerance, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Lifecycle.ClockSkewTolerance = d; return err }},
+		{"lifecycle.clock_skew_tolerance", "lifecycle", "clock_skew_tolerance", c.Lifecycle.ClockSkewTolerance, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Lifecycle.ClockSkewTolerance = d
+			return err
+		}},
 		{"stall.max_seq_age", "stall", "max_seq_age", c.Stall.MaxSeqAge, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Stall.MaxSeqAge = d; return err }},
 		{"checker.interval", "checker", "interval", c.Checker.Interval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Checker.Interval = d; return err }},
 		{"checker.confirm_runs", "checker", "confirm_runs", c.Checker.ConfirmRuns, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Checker.ConfirmRuns = i; return err }},
@@ -410,10 +495,50 @@ func registry(c *Config) []keyMeta {
 		{"ingest.advertised_host", "ingest", "advertised_host", c.Ingest.AdvertisedHost, func(cfg *Config, v any) error { s, err := asString(v); cfg.Ingest.AdvertisedHost = s; return err }},
 		{"ingest.auth.loopback_dsn", "ingest", "loopback_dsn", c.Ingest.Auth.LoopbackDSN, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Ingest.Auth.LoopbackDSN = b; return err }},
 		{"ingest.auth.nonloopback_mode", "ingest", "nonloopback_mode", c.Ingest.Auth.NonloopbackMode, func(cfg *Config, v any) error { s, err := asString(v); cfg.Ingest.Auth.NonloopbackMode = s; return err }},
-		{"ingest.auth.public_require_proxy", "ingest", "public_require_proxy", c.Ingest.Auth.PublicRequireProxy, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Ingest.Auth.PublicRequireProxy = b; return err }},
+		{"ingest.auth.public_require_proxy", "ingest", "public_require_proxy", c.Ingest.Auth.PublicRequireProxy, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Ingest.Auth.PublicRequireProxy = b
+			return err
+		}},
+		{"health_url", "", "health_url", c.HealthURL, func(cfg *Config, v any) error { s, err := asString(v); cfg.HealthURL = s; return err }},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
+		{"dashboard.port", "dashboard", "port", c.Dashboard.Port, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Port = i; return err }},
+		{"dashboard.mandate", "dashboard", "mandate", c.Dashboard.Mandate, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Mandate = s; return err }},
+		{"dashboard.proxy_trusted", "dashboard", "proxy_trusted", c.Dashboard.ProxyTrusted, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Dashboard.ProxyTrusted = b; return err }},
+		{"dashboard.proxy_cidrs", "dashboard", "proxy_cidrs", c.Dashboard.ProxyCIDRs, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.Dashboard.ProxyCIDRs = ss; return err }},
+		{"dashboard.public_origin", "dashboard", "public_origin", c.Dashboard.PublicOrigin, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.PublicOrigin = s; return err }},
+		{"dashboard.project_scope", "dashboard", "project_scope", c.Dashboard.ProjectScope, func(cfg *Config, v any) error {
+			ss, err := asStringSlice(v)
+			cfg.Dashboard.ProjectScope = ss
+			return err
+		}},
+		{"dashboard.token_file", "dashboard", "token_file", c.Dashboard.TokenFile, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.TokenFile = s; return err }},
+		{"dashboard.poll_ms", "dashboard", "poll_ms", c.Dashboard.PollMS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.PollMS = i; return err }},
+		{"dashboard.strip_poll_ms", "dashboard", "strip_poll_ms", c.Dashboard.StripPollMS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.StripPollMS = i; return err }},
+		{"dashboard.stall_alert_s", "dashboard", "stall_alert_s", c.Dashboard.StallAlertS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.StallAlertS = i; return err }},
+		{"dashboard.health_loopback_exempt", "dashboard", "health_loopback_exempt", c.Dashboard.HealthLoopbackExempt, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Dashboard.HealthLoopbackExempt = b
+			return err
+		}},
+		{"dashboard.read_only", "dashboard", "read_only", c.Dashboard.ReadOnly, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Dashboard.ReadOnly = b; return err }},
+		{"dashboard.allow_resume", "dashboard", "allow_resume", c.Dashboard.AllowResume, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Dashboard.AllowResume = b; return err }},
+		{"dashboard.allow_full", "dashboard", "allow_full", c.Dashboard.AllowFull, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Dashboard.AllowFull = b; return err }},
+		{"dashboard.page_limit", "dashboard", "page_limit", c.Dashboard.PageLimit, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.PageLimit = i; return err }},
+		{"dashboard.max_body_bytes", "dashboard", "max_body_bytes", c.Dashboard.MaxBodyBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Dashboard.MaxBodyBytes = i; return err }},
+		{"dashboard.rate.read_rps", "dashboard", "read_rps", c.Dashboard.Rate.ReadRPS, func(cfg *Config, v any) error { f, err := asFloat(v); cfg.Dashboard.Rate.ReadRPS = f; return err }},
+		{"dashboard.rate.read_burst", "dashboard", "read_burst", c.Dashboard.Rate.ReadBurst, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Rate.ReadBurst = i; return err }},
+		{"dashboard.rate.write_rps", "dashboard", "write_rps", c.Dashboard.Rate.WriteRPS, func(cfg *Config, v any) error { f, err := asFloat(v); cfg.Dashboard.Rate.WriteRPS = f; return err }},
+		{"dashboard.rate.write_burst", "dashboard", "write_burst", c.Dashboard.Rate.WriteBurst, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Rate.WriteBurst = i; return err }},
+		{"dashboard.auth_fail_limit", "dashboard", "auth_fail_limit", c.Dashboard.AuthFailLimit, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.AuthFailLimit = i; return err }},
+		{"dashboard.auth_fail_window", "dashboard", "auth_fail_window", c.Dashboard.AuthFailWindow, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Dashboard.AuthFailWindow = d; return err }},
+		{"dashboard.mem_pressure_pct", "dashboard", "mem_pressure_pct", c.Dashboard.MemPressurePct, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.MemPressurePct = i; return err }},
 		{"dashboard.auth.transport", "dashboard", "transport", c.Dashboard.Auth.Transport, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Auth.Transport = s; return err }},
-		{"dashboard.auth.identity_provider", "dashboard", "identity_provider", c.Dashboard.Auth.IdentityProvider, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Auth.IdentityProvider = s; return err }},
+		{"dashboard.auth.identity_provider", "dashboard", "identity_provider", c.Dashboard.Auth.IdentityProvider, func(cfg *Config, v any) error {
+			s, err := asString(v)
+			cfg.Dashboard.Auth.IdentityProvider = s
+			return err
+		}},
 		{"dashboard.auth.session_ttl", "dashboard", "session_ttl", c.Dashboard.Auth.SessionTTL, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Dashboard.Auth.SessionTTL = d; return err }},
 		{"hub.mode", "hub", "mode", c.Hub.Mode, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.Mode = s; return err }},
 		{"hub.url", "hub", "url", c.Hub.URL, func(cfg *Config, v any) error { s, err := asString(v); cfg.Hub.URL = s; return err }},
@@ -472,7 +597,11 @@ func registry(c *Config) []keyMeta {
 			}
 		}},
 		{"escalate.timeout", "escalate", "timeout", c.Escalate.Timeout, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Escalate.Timeout = d; return err }},
-		{"fs.forbidden_state_roots", "fs", "forbidden_state_roots", c.FS.ForbiddenStateRoots, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.FS.ForbiddenStateRoots = ss; return err }},
+		{"fs.forbidden_state_roots", "fs", "forbidden_state_roots", c.FS.ForbiddenStateRoots, func(cfg *Config, v any) error {
+			ss, err := asStringSlice(v)
+			cfg.FS.ForbiddenStateRoots = ss
+			return err
+		}},
 		{"fs.remote_types", "fs", "remote_types", c.FS.RemoteTypes, func(cfg *Config, v any) error { ss, err := asStringSlice(v); cfg.FS.RemoteTypes = ss; return err }},
 		{"origin.host_id", "origin", "host_id", c.Origin.HostID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Origin.HostID = s; return err }},
 		{"origin.hub_id", "origin", "hub_id", c.Origin.HubID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Origin.HubID = s; return err }},
@@ -494,11 +623,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	// defaults
 	for _, m := range registry(def) {
 		values[m.key] = types.ConfigValue{
-			Key:        m.key,
-			Value:      m.defaultVal,
-			Source:     "default",
-			SourceRef:  "builtin",
-			Redacted:   redacted(m.key),
+			Key:       m.key,
+			Value:     m.defaultVal,
+			Source:    "default",
+			SourceRef: "builtin",
+			Redacted:  redacted(m.key),
 		}
 	}
 
@@ -515,11 +644,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			return Resolved{}, fmt.Errorf("%w: unknown file key %q", types.CodeLifecycle001, k)
 		}
 		values[k] = types.ConfigValue{
-			Key:        k,
-			Value:      fv,
-			Source:     "file",
-			SourceRef:  cfgPath,
-			Redacted:   redacted(k),
+			Key:       k,
+			Value:     fv,
+			Source:    "file",
+			SourceRef: cfgPath,
+			Redacted:  redacted(k),
 		}
 	}
 
@@ -531,11 +660,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	envMap := parseEnv(env, rev, known, &resolved)
 	for k, ev := range envMap {
 		values[k] = types.ConfigValue{
-			Key:        k,
-			Value:      ev,
-			Source:     "env",
-			SourceRef:  envName(k),
-			Redacted:   redacted(k),
+			Key:       k,
+			Value:     ev,
+			Source:    "env",
+			SourceRef: envName(k),
+			Redacted:  redacted(k),
 		}
 	}
 
@@ -546,11 +675,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	}
 	for k, fv := range flagMap {
 		values[k] = types.ConfigValue{
-			Key:        k,
-			Value:      fv,
-			Source:     "flag",
-			SourceRef:  "--" + flagName(k),
-			Redacted:   redacted(k),
+			Key:       k,
+			Value:     fv,
+			Source:    "flag",
+			SourceRef: "--" + flagName(k),
+			Redacted:  redacted(k),
 		}
 	}
 
@@ -564,11 +693,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			if src == "default" {
 				if !equalValues(win.Value, known[k].defaultVal) {
 					resolved.Conflicts = append(resolved.Conflicts, types.ConfigValue{
-						Key:        k,
-						Value:      "TROUBLE-LIFECYCLE-002",
-						Source:     "conflict",
-						SourceRef:  fmt.Sprintf("%s vs default", win.SourceRef),
-						Redacted:   false,
+						Key:       k,
+						Value:     "TROUBLE-LIFECYCLE-002",
+						Source:    "conflict",
+						SourceRef: fmt.Sprintf("%s vs default", win.SourceRef),
+						Redacted:  false,
 					})
 				}
 				continue
@@ -590,11 +719,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			}
 			if other.Source != "" && !equalValues(win.Value, other.Value) {
 				resolved.Conflicts = append(resolved.Conflicts, types.ConfigValue{
-					Key:        k,
-					Value:      "TROUBLE-LIFECYCLE-002",
-					Source:     "conflict",
-					SourceRef:  fmt.Sprintf("%s vs %s", win.SourceRef, other.SourceRef),
-					Redacted:   false,
+					Key:       k,
+					Value:     "TROUBLE-LIFECYCLE-002",
+					Source:    "conflict",
+					SourceRef: fmt.Sprintf("%s vs %s", win.SourceRef, other.SourceRef),
+					Redacted:  false,
 				})
 			}
 		}

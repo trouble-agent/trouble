@@ -127,10 +127,10 @@ func postBatch(ctx context.Context, client *http.Client, cfg Config, batch []typ
 
 // AckHeader parses the hub ack.
 type AckHeader struct {
-	HubSeq      uint64
-	LocalSeq    uint64
-	HostID      string
-	HasAck      bool
+	HubSeq   uint64
+	LocalSeq uint64
+	HostID   string
+	HasAck   bool
 }
 
 func parseAckHeader(s string) AckHeader {

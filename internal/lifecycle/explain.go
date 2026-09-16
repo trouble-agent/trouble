@@ -37,7 +37,7 @@ func Explain(r Resolved, keys []string) ([]types.ConfigValue, error) {
 // payload.env_source=true.
 func WriteConfigRecord(w RecordWriter, r Resolved) error {
 	payload := map[string]any{
-		"values":  r.Values,
+		"values":    r.Values,
 		"conflicts": len(r.Conflicts),
 	}
 	if len(r.Conflicts) > 0 {

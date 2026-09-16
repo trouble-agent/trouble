@@ -74,4 +74,3 @@ func TestUpgradeRenameOverSucceeds(t *testing.T) {
 		t.Errorf("binary not replaced: got %q", string(b))
 	}
 }
-

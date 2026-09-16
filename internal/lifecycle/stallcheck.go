@@ -34,10 +34,10 @@ func StallCheck(ctx context.Context, cfg Config) (Verdict, error) {
 }
 
 type checkerState struct {
-	Seq          uint64 `json:"seq"`
-	TS           string `json:"ts"`
-	BreachCount  int    `json:"breach_count"`
-	LastCheckTS  string `json:"last_check_ts,omitempty"`
+	Seq         uint64 `json:"seq"`
+	TS          string `json:"ts"`
+	BreachCount int    `json:"breach_count"`
+	LastCheckTS string `json:"last_check_ts,omitempty"`
 }
 
 func loadCheckerState(path string) (checkerState, error) {
@@ -198,14 +198,14 @@ func fetchHealth(ctx context.Context, cfg Config, client *http.Client) (types.He
 
 func appendAlarm(path string, v Verdict, h types.HealthResponse) error {
 	line := map[string]any{
-		"ts":            types.NowUTC(),
-		"class":         v.Class,
-		"code":          v.Code,
-		"seq":           h.LedgerLastSeq,
-		"seq_age_s":     v.SeqAgeS,
-		"breach_count":  v.BreachCount,
-		"version":       h.Version,
-		"git_sha":       h.GitSHA,
+		"ts":           types.NowUTC(),
+		"class":        v.Class,
+		"code":         v.Code,
+		"seq":          h.LedgerLastSeq,
+		"seq_age_s":    v.SeqAgeS,
+		"breach_count": v.BreachCount,
+		"version":      h.Version,
+		"git_sha":      h.GitSHA,
 	}
 	b, err := json.Marshal(line)
 	if err != nil {
@@ -274,4 +274,3 @@ func runWithTimeout(cmd *exec.Cmd, d time.Duration) error {
 func DetectionBound(cfg Config) float64 {
 	return cfg.Stall.MaxSeqAge.Seconds() + float64(cfg.Checker.ConfirmRuns)*cfg.Checker.Interval.Seconds()
 }
-

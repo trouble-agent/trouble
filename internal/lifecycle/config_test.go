@@ -32,10 +32,10 @@ hub.token = "sk_live_fixture_0001"
 	}
 
 	want := map[string]struct{ value, source, ref string }{
-		"state_root":      {"/from/env", "env", "TROUBLE_STATE_ROOT"},
-		"ingest.bind":     {"127.0.0.1:8000", "flag", "--ingest-bind"},
-		"hub.token":       {"[REDACTED:config]", "env", "TROUBLE_HUB_TOKEN"},
-		"dashboard.bind":  {"127.0.0.1:7644", "default", "builtin"},
+		"state_root":     {"/from/env", "env", "TROUBLE_STATE_ROOT"},
+		"ingest.bind":    {"127.0.0.1:8000", "flag", "--ingest-bind"},
+		"hub.token":      {"[REDACTED:config]", "env", "TROUBLE_HUB_TOKEN"},
+		"dashboard.bind": {"127.0.0.1:7644", "default", "builtin"},
 	}
 	got := make(map[string]types.ConfigValue)
 	for _, cv := range r.Values {

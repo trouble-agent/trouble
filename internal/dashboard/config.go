@@ -17,32 +17,32 @@ import (
 // fully-resolved values; normalize() fills only fields that are still zero.
 type Config struct {
 	// §3.4 keys.
-	Bind       string // dashboard.bind — listener address
-	Port       int    // dashboard.port — listener port
-	Mandate    string // dashboard.mandate — "proxy" | "tailnet", required off loopback
-	Identity   string // dashboard.identity — the §2.5 seam selector ("token" in v0.1)
-	TokenFile  string // dashboard.token_file — 0600 secret store (§3.2)
-	PollMS     int    // dashboard.poll_ms — content-partial poll interval
-	StripPollMS int   // dashboard.strip_poll_ms — accelerator interval
-	StallAlertS int   // dashboard.stall_alert_s — stale banner threshold
-	HealthLoopbackExempt bool // dashboard.health_loopback_exempt
-	ReadOnly   bool   // dashboard.read_only — refuse all POSTs
-	AllowResume bool  // dashboard.allow_resume — gate kill-switch clearing
-	AllowFull  bool   // dashboard.allow_full — gate mode:"full"
-	PageLimit  int    // dashboard.page_limit — rows per page/partial (max 500)
-	MaxBodyBytes int64 // dashboard.max_body_bytes — POST body cap
-	ReadRPS    float64 // dashboard.rate.read_rps
-	ReadBurst  int     // dashboard.rate.read_burst
-	WriteRPS   float64 // dashboard.rate.write_rps
-	WriteBurst int     // dashboard.rate.write_burst
-	AuthFailLimit int  // dashboard.auth_fail_limit
-	AuthFailWindow types.Duration // dashboard.auth_fail_window
-	MemPressurePct int  // dashboard.mem_pressure_pct — RSS share that sheds poll load
-	ProxyTrusted bool  // dashboard.proxy_trusted
-	ProxyCIDRs  []string // dashboard.proxy_cidrs
-	PublicOrigin string // dashboard.public_origin — exact scheme://host[:port]
-	ProjectScope []string // dashboard.project_scope
-	MaxProjects int    // configured [[projects]] count (the §2.4 >1-project rule)
+	Bind                 string         // dashboard.bind — listener address
+	Port                 int            // dashboard.port — listener port
+	Mandate              string         // dashboard.mandate — "proxy" | "tailnet", required off loopback
+	Identity             string         // dashboard.identity — the §2.5 seam selector ("token" in v0.1)
+	TokenFile            string         // dashboard.token_file — 0600 secret store (§3.2)
+	PollMS               int            // dashboard.poll_ms — content-partial poll interval
+	StripPollMS          int            // dashboard.strip_poll_ms — accelerator interval
+	StallAlertS          int            // dashboard.stall_alert_s — stale banner threshold
+	HealthLoopbackExempt bool           // dashboard.health_loopback_exempt
+	ReadOnly             bool           // dashboard.read_only — refuse all POSTs
+	AllowResume          bool           // dashboard.allow_resume — gate kill-switch clearing
+	AllowFull            bool           // dashboard.allow_full — gate mode:"full"
+	PageLimit            int            // dashboard.page_limit — rows per page/partial (max 500)
+	MaxBodyBytes         int64          // dashboard.max_body_bytes — POST body cap
+	ReadRPS              float64        // dashboard.rate.read_rps
+	ReadBurst            int            // dashboard.rate.read_burst
+	WriteRPS             float64        // dashboard.rate.write_rps
+	WriteBurst           int            // dashboard.rate.write_burst
+	AuthFailLimit        int            // dashboard.auth_fail_limit
+	AuthFailWindow       types.Duration // dashboard.auth_fail_window
+	MemPressurePct       int            // dashboard.mem_pressure_pct — RSS share that sheds poll load
+	ProxyTrusted         bool           // dashboard.proxy_trusted
+	ProxyCIDRs           []string       // dashboard.proxy_cidrs
+	PublicOrigin         string         // dashboard.public_origin — exact scheme://host[:port]
+	ProjectScope         []string       // dashboard.project_scope
+	MaxProjects          int            // configured [[projects]] count (the §2.4 >1-project rule)
 
 	// TokenLenSanity enforces the `tdt_`+43 grammar at load and mint time;
 	// zero means the §3.2 default (47) is applied by normalize.
@@ -52,23 +52,23 @@ type Config struct {
 // DefaultConfig is the SPEC-10 §3.4 default column.
 func DefaultConfig() Config {
 	return Config{
-		Bind:         "127.0.0.1",
-		Port:         7644,
-		Identity:     "token",
-		TokenFile:    "~/.config/trouble/dashboard-tokens.json",
-		PollMS:       2000,
-		StripPollMS:  1000,
-		StallAlertS:  90,
+		Bind:                 "127.0.0.1",
+		Port:                 7644,
+		Identity:             "token",
+		TokenFile:            "~/.config/trouble/dashboard-tokens.json",
+		PollMS:               2000,
+		StripPollMS:          1000,
+		StallAlertS:          90,
 		HealthLoopbackExempt: true,
-		PageLimit:    100,
-		MaxBodyBytes: 4096,
-		ReadRPS:      20,
-		ReadBurst:    60,
-		WriteRPS:     5,
-		WriteBurst:   10,
-		AuthFailLimit: 10,
-		AuthFailWindow: "60s",
-		MemPressurePct: 80,
+		PageLimit:            100,
+		MaxBodyBytes:         4096,
+		ReadRPS:              20,
+		ReadBurst:            60,
+		WriteRPS:             5,
+		WriteBurst:           10,
+		AuthFailLimit:        10,
+		AuthFailWindow:       "60s",
+		MemPressurePct:       80,
 	}
 }
 

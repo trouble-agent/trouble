@@ -1,0 +1,9 @@
+{{define "content"}}
+<section class="panel">
+<h2>groups ({{len .Groups}})</h2>
+<table class="rows">
+<thead><tr><th>sig</th><th>title</th><th>count</th><th>rate</th><th>last seen</th><th>releases</th></tr></thead>
+{{template "partial-group-rows" .}}
+</table>
+</section>
+{{end}}

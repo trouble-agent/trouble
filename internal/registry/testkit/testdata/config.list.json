@@ -1,0 +1,14 @@
+[
+  {
+    "name": "config.list/seeded-toml",
+    "args": { "path": "{tmp}/app.toml" },
+    "mutates": false,
+    "second_apply": "pure"
+  },
+  {
+    "name": "config.list/prefix-filter",
+    "args": { "path": "{tmp}/app.toml", "prefix": "re" },
+    "mutates": false,
+    "second_apply": "pure"
+  }
+]

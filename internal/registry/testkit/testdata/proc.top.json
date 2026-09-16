@@ -1,0 +1,14 @@
+[
+  {
+    "name": "proc.top/default-view",
+    "args": { "n": 5 },
+    "mutates": false,
+    "second_apply": "pure"
+  },
+  {
+    "name": "proc.top/sorted-by-rss",
+    "args": { "sort": "rss", "n": 3, "unit": "payment-worker.service" },
+    "mutates": false,
+    "second_apply": "pure"
+  }
+]

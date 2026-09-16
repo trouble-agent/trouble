@@ -1,0 +1,14 @@
+[
+  {
+    "name": "file.read/seeded-file",
+    "args": { "path": "{tmp}/app.toml" },
+    "mutates": false,
+    "second_apply": "pure"
+  },
+  {
+    "name": "file.read/bounded-read",
+    "args": { "path": "{tmp}/app.toml", "max_bytes": 64, "encoding": "utf-8" },
+    "mutates": false,
+    "second_apply": "pure"
+  }
+]

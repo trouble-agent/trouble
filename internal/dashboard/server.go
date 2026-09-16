@@ -70,6 +70,7 @@ type counters struct {
 	urlToken   atomic.Uint64 // 400 + TROUBLE-DASHBOARD-005
 	writeOk    atomic.Uint64 // successful POST actions
 	panics     atomic.Uint64 // recovered handler panics (defensive net)
+	served     atomic.Uint64 // requests served (health-strip surface)
 }
 
 // stallState is the server-side stale-render tracker (§3.1, §2.6): three
@@ -303,6 +304,7 @@ func newServer(cfg Config, deps Deps) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
+	WarmGzipPool()
 	pageSets, partials, err := parseTemplates()
 	if err != nil {
 		// A parse/define collision is a startup failure, not a 500 on every

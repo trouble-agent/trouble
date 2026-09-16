@@ -333,3 +333,99 @@ non-idempotent module and a mutating module without a real dry run, and that eve
 stays inside the closed draft 2020-12 keyword subset. A descriptor edit without a regenerated
 `internal/registry/schema/*.json` (`make schema`) fails the boot check with
 `TROUBLE-REGISTRY-014`.
+
+## 12. The dashboard (SPEC-10)
+
+`internal/dashboard` is the read-mostly face of the ledger: one embedded HTTP server in the same
+binary as the daemon, serving server-rendered pages and htmx fragments from the SPEC-01 in-memory
+index. It writes nothing to the ledger. Reads default to `127.0.0.1:7644`.
+
+**The route table is the whole surface.** Twenty registrable `(method, path)` rows in §2.1 plus one
+rule for everything else: a pair that is not a row answers **404** with the `Allow` header naming the
+methods the path does accept — never 405, and the body never echoes the requested path. A browser
+gets the embedded static `404.html`; an API or htmx client gets JSON. `TROUBLE-DASHBOARD-009`.
+
+**A token in a URL is refused before authentication.** Every route inspects the raw query string for
+the §2.2 parameter names (`token`, `access_token`, `auth`, `apikey`, `api_key`, `key`,
+`trouble_token`, `tdt` — case-insensitive) and the path for any segment matching
+`^tdt_[A-Za-z0-9_-]{43}$`, and answers **400 + `TROUBLE-DASHBOARD-005`** even when the request would
+otherwise authenticate. The offending value is never logged (parameter name and length only). The
+status is 400 because §2.2 and the §5 catalog say so; §7's test table calls the same case "answers
+404 for a query-string token" — read as "the route is not served".
+
+**Tokens live in a 0600 file, outside the state root.** `dashboard.token_file` owes nothing to the
+ledger's home, because a ledger backup must never carry credentials. Plaintext is `tdt_` + 43
+base64url characters, printed once by the CLI and stored only as `sha256(token)[:32]` hex. The store
+is stat'ed per request, so a CLI rotation reaches the running daemon without a restart; a parse or IO
+failure is fail-closed — every route except the loopback `/health.json` answers 503 +
+`TROUBLE-DASHBOARD-013`, with no last-known-good fallback. A wrong file mode refuses the boot
+(`TROUBLE-LIFECYCLE-013`), and a stored hash equal to a configured project key refuses it too
+(`TROUBLE-DASHBOARD-002`, `detail=equals_ingestion_key`). `LastUsedTS` is written at most once per
+60 s per token: a crash loses ≤60 s of usage, never a credential.
+
+**Auth is Bearer or the `trouble_dash` cookie, and nothing else.** `autonomy ⇒ write ⇒ read`
+expands once at token load. Under-scoped requests answer **403 + `TROUBLE-DASHBOARD-003`** with
+`X-Trouble-Required-Scope`, so a UI can explain the refusal without a second round trip. A
+read-scope session still renders every control — disabled, with `data-requires` and an inline reason,
+never hidden — and the server re-checks every POST, so a forged request from a read session is still
+refused. Ten auth failures from one client IP inside 60 s throttle that IP for 60 s (**429 +
+`Retry-After`**); the read bucket is keyed by token *and* client IP (20/s, burst 60) and the write
+bucket by token (5/s, burst 10).
+
+**CSRF on every POST, four checks in order** (§2.3): a Bearer *and* cookie mixture is refused
+outright; `Origin` must byte-equal `dashboard.public_origin` (or, on loopback, the request's own
+`scheme://Host`) and a browser POST without `Origin`/`Referer` is refused; both cookies are
+`SameSite=Lax`; and the `X-Trouble-CSRF` header must equal the `trouble_csrf` cookie *and*
+`b64url(hmac_sha256(k_csrf, token_id + "|" + yyyymmddhh))` for the authenticated token. `k_csrf` is
+32 random bytes generated at process start, never persisted: a restart invalidates every outstanding
+value, the current and previous hour are accepted, and a Bearer-only `curl` POST is legal because the
+browser-only cookie half is absent.
+
+**Live updates are 2 s polls with a self-describing guard.** The `#health-strip` polls every 1 s and
+is the accelerator: when its `data-seq` changes, `app.js` dispatches `troubleSeq`, which the content
+partials listen for (`hx-trigger="every 2s, troubleSeq from:body"`). Every polled element sets
+`hx-sync="this:replace"` so a slow response is dropped instead of queued, and polling suspends while
+the tab is hidden for ≥10 s (one forced refresh on return). The stale banner is advisory: three
+consecutive identical seqs *and* `data-stall-s ≥ dashboard.stall_alert_s`, or any 429/5xx, or no
+successful poll for 5× the interval. The authoritative stall alarm remains SPEC-12's external checker
+on `/health.json`.
+
+Measured on this host (`go test -count=1 ./internal/dashboard/`): a real trigger reaches the first
+fragment carrying the incident in **p50 529 ms / p100 990 ms** with the accelerator running
+(AC-19's budget: p50 ≤1100 ms, p100 ≤2000 ms), and **p95 1.89 s / p100 2.01 s** with it stopped
+(budget: p95 ≤2000 ms) — the 2 s sampling interval is the p100 limit, which is why the accelerator
+exists and why the spec asserts p95 for the stopped case.
+
+**The §2.9 budget, and how it is measured.** The budget row (`budget_test.go`) runs the dashboard in
+a child process with 10,000 groups / 50,000 records and drives 100 rps from the parent over real
+TCP, so the client's allocations are not counted as the server's. Three windows: the dashboard, a
+control handler in the same process at the same rate (to subtract process-level drift), and a real
+100-concurrent-render burst. Measured here: **live heap 4.12 MB peak / 1.72 MB steady** above the
+boot baseline (ceilings 12 MB / 6 MB), **0.45 MB** under 100 concurrent renders, **1.5 MB retained**
+after the load stops (the dashboard holds no per-request or ledger-derived state), in-process render
+**p99 6.8 ms** (≤20 ms), and **zero regular-file descriptors** opened during renders — every read
+goes through the injected index. Raw RSS is logged beside those numbers: it tracks the Go runtime's
+arena growth, which the sampler's own forced collections amplify in proportion to the fixture's live
+set, and the control window cannot exercise it because it allocates nothing.
+
+Two consequences shaped the code. Fragments are fitted to the §2.1.2 8 KB cap: an over-cap table
+renders as many complete rows as fit and reports the remainder in `data-truncated` plus a marker row,
+because §2.1.2's "one row per incident" and its cap cannot both hold when a required incident row is
+~129 B (200 rows ≈ 25 KB). And compression is bounded: a fresh `flate` writer is ~814 KB of hash
+tables, so the pool holds four writers (≈3.3 MB, warmed before the boot baseline) and a request that
+finds the pool busy is served identity rather than queueing — content identical, encoding different,
+and 100 concurrent renders cannot hold 81 MB against a 12 MB ceiling.
+
+**What the dashboard does not have.** No routes beyond §2.1: no `/issues` index (the issue desk lives
+on the incident story panel), no token-management route (creation is CLI-only), no SSE. `identity`
+selects the §2.5 seam; `token` is the only v0.1 implementation and selecting `tailscale` or
+`proxy-header` answers 503 + `TROUBLE-DASHBOARD-013` (`detail=impl_absent`) at the login boundary.
+
+**Known gaps, stated.** (1) `/groups/{id}` renders the group projection's counters; the wave-contract
+`Index` interface exposes no `EventsBySig` accessor, so the per-sig window rate is not shown.
+(2) The budget partial renders the runtime watermarks, version and git SHA; the §2.1.2 "agent/play
+burn" counters have no injected source in the `Deps` contract, so that row is not rendered rather
+than rendered with a fabricated zero. (3) A malformed write body has no code of its own in the closed
+§5 catalog; it is refused 400 + `TROUBLE-DASHBOARD-010` with `detail=invalid_body_<field>`.
+(4) `internal/dashboard/integration/e2e_dashboard_test.go` is not written here: it needs the
+composition root and a mock ladder, and the composition root's own e2e is the Hermes lane's.

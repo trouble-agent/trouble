@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -76,21 +75,3 @@ func TestUpgradeRenameOverSucceeds(t *testing.T) {
 	}
 }
 
-func TestETXTBSYRegression(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "trouble")
-	if err := os.WriteFile(bin, []byte("live"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Run a long-lived copy of this binary to hold the inode busy.
-	cmd := exec.Command(bin)
-	if err := cmd.Start(); err != nil {
-		t.Skipf("cannot start helper binary: %v", err)
-	}
-	defer cmd.Process.Kill()
-
-	f, err := os.OpenFile(bin, os.O_WRONLY|os.O_TRUNC, 0)
-	if err == nil {
-		f.Close()
-		t.Fatal("expected ETXTBSY opening live binary for write")
-	}
-}

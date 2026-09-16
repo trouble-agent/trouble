@@ -16,7 +16,8 @@ func TestUpgradeParkFailureNoRename(t *testing.T) {
 	cfg := defaults()
 	cfg.StateRoot = t.TempDir()
 	plan := upgradePlan{
-		NewBinary: bin,
+		CurrentBinary: bin,
+		NewBinary:     bin,
 		Park: func(ctx context.Context) (int, error) {
 			return 0, context.Canceled
 		},
@@ -49,7 +50,8 @@ func TestUpgradeRenameOverSucceeds(t *testing.T) {
 	cfg.StateRoot = t.TempDir()
 	called := false
 	plan := upgradePlan{
-		NewBinary: newBin,
+		CurrentBinary: bin,
+		NewBinary:     newBin,
 		Park: func(ctx context.Context) (int, error) {
 			return 0, nil
 		},
@@ -70,7 +72,7 @@ func TestUpgradeRenameOverSucceeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(b) != "new" {
-		t.Errorf("binary not replaced")
+		t.Errorf("binary not replaced: got %q", string(b))
 	}
 }
 

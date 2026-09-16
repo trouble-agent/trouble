@@ -15,18 +15,23 @@ import (
 
 // upgradePlan carries the injected dependencies for an upgrade (SPEC-12 §3.6).
 type upgradePlan struct {
-	NewBinary string
-	Sha256    string
-	Park      func(ctx context.Context) (int, error) // returns parked count
-	Restart   func(ctx context.Context) error
-	Ready     func(ctx context.Context) bool
+	CurrentBinary string
+	NewBinary     string
+	Sha256        string
+	Park          func(ctx context.Context) (int, error) // returns parked count
+	Restart       func(ctx context.Context) error
+	Ready         func(ctx context.Context) bool
 }
 
 // Upgrade performs the rename-over upgrade recipe (SPEC-12 §3.6).
 func Upgrade(ctx context.Context, cfg Config, plan upgradePlan) error {
-	bin, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("%w: cannot locate current binary: %v", types.CodeLifecycle011, err)
+	bin := plan.CurrentBinary
+	if bin == "" {
+		var err error
+		bin, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("%w: cannot locate current binary: %v", types.CodeLifecycle011, err)
+		}
 	}
 	bin = filepath.Clean(bin)
 

@@ -33,6 +33,7 @@ func TestCheckStateRootWrongMode(t *testing.T) {
 	}
 	cfg := defaults()
 	cfg.StateRoot = root
+	cfg.FS.ForbiddenStateRoots = nil
 	_, err := CheckStateRoot(*cfg)
 	if err == nil {
 		t.Fatal("expected error for mode 0755")

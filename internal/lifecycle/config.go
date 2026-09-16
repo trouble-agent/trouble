@@ -454,6 +454,9 @@ func registry(c *Config) []keyMeta {
 				}
 				cfg.Escalate.Channels = out
 				return nil
+			case [][]string:
+				cfg.Escalate.Channels = x
+				return nil
 			case string:
 				if x == "" {
 					cfg.Escalate.Channels = nil
@@ -521,7 +524,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	}
 
 	// env
-	envMap := parseEnv(env, known, &resolved)
+	rev := make(map[string]string, len(known))
+	for k := range known {
+		rev[envName(k)] = k
+	}
+	envMap := parseEnv(env, rev, known, &resolved)
 	for k, ev := range envMap {
 		values[k] = types.ConfigValue{
 			Key:        k,
@@ -697,7 +704,7 @@ func flagName(key string) string {
 	return strings.ReplaceAll(key, ".", "-")
 }
 
-func parseEnv(env []string, known map[string]keyMeta, r *Resolved) map[string]any {
+func parseEnv(env []string, rev map[string]string, known map[string]keyMeta, r *Resolved) map[string]any {
 	out := make(map[string]any)
 	for _, e := range env {
 		if !strings.HasPrefix(e, "TROUBLE_") {
@@ -708,7 +715,10 @@ func parseEnv(env []string, known map[string]keyMeta, r *Resolved) map[string]an
 			continue
 		}
 		name := parts[0]
-		key := envToKey(name)
+		key, ok := rev[name]
+		if !ok {
+			key = envToKey(name)
+		}
 		if m, ok := known[key]; ok {
 			out[key] = coerceEnvValue(parts[1], m.defaultVal)
 		} else {

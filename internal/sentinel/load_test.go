@@ -493,3 +493,72 @@ var loadClient = &http.Client{
 		DisableCompression:  true,
 	},
 }
+
+// TestSteadyRSSAfterManyEvents pins §7's memory paragraph: steady resident set
+// stays inside a fixed budget while events stream through the ingestion path.
+//
+// The spec's number is measured after 1,000,000 events on the trivial path
+// (7.0 -> 15.6MB). Here the same shape runs 200,000 events with a discard sink so
+// the measurement isolates sentinel (the real ledger's own footprint is asserted
+// under the load test), and the budget asserted is the spec's 80MB steady bound.
+func TestSteadyRSSAfterManyEvents(t *testing.T) {
+	if raceEnabled {
+		t.Skip("RSS growth is meaningless under -race instrumentation")
+	}
+	cfg := testConfig(t, func(c *Config) {
+		c.CanaryProject = ""
+		c.Projects[0].QuotaEPM = 100_000_000
+	})
+	sink := &discardSink{}
+	s, err := NewServer(cfg, sink, newTestScrubber(t, cfg.Projects))
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer s.Drain(context.Background())
+	entry, _ := s.projects.project("1")
+
+	const events = 200_000
+	frames := []frame{{File: "worker.py", Function: "claim", InApp: true, ContextLine: "item = pool.get(timeout=1)"}}
+	ctx := context.Background()
+	for i := 0; i < 2_000; i++ { // warm up
+		ev := &rawEvent{
+			ID: eventIDAt(i), Level: "error", Culprit: "worker.claim",
+			Message: "queue wedge: pool exhausted depth=912", Frames: frames,
+			SourceKind: sourceGeneric,
+		}
+		if _, aerr := s.admitEvent(ctx, entry, ev, "event", "warmup"); aerr != nil {
+			t.Fatalf("warmup admit: %v", aerr)
+		}
+	}
+	runtime.GC()
+	debug.FreeOSMemory()
+	before := rssBytes(t)
+
+	for i := 0; i < events; i++ {
+		ev := &rawEvent{
+			ID: eventIDAt(1_000_000 + i), Level: "error", Culprit: "worker.claim",
+			Message: "queue wedge: pool exhausted depth=912", Frames: frames,
+			SourceKind: sourceGeneric,
+		}
+		if _, aerr := s.admitEvent(ctx, entry, ev, "event", "test"); aerr != nil {
+			t.Fatalf("admit %d: %v", i, aerr)
+		}
+	}
+	runtime.GC()
+	debug.FreeOSMemory()
+	after := rssBytes(t)
+	groups := s.Groups()
+	t.Logf("memory: %d events, RSS %d -> %d bytes (steady growth %d); groups=%d group_count=%d dedup=%d",
+		events, before, after, after-before, len(groups), groupCountSum(groups), len(s.dups))
+	if after > 80<<20 {
+		t.Errorf("steady RSS = %d bytes, want <= 80MB (§7's steady bound)", after)
+	}
+	// Every event is counted exactly once, warmup included: the counters are the
+	// never-dropped aggregates (§3.3).
+	if sum := groupCountSum(groups); sum != uint64(events+2_000) {
+		t.Errorf("group counts sum to %d, want %d (200,000 events + 2,000 warmup)", sum, events+2_000)
+	}
+	if len(s.dups) != maxDupEntries {
+		t.Errorf("dedup window holds %d entries, want it pinned at the %d cap", len(s.dups), maxDupEntries)
+	}
+}

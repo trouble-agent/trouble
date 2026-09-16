@@ -248,3 +248,23 @@ The load test saturates the host for its duration, so run the whole tree with
 `go test -p 1 ./internal/...` (or `-short`) — otherwise it can push
 `internal/ledger`'s timing assertions (`TestFsyncWindowBound`,
 `TestPerLineRegression`) over their bounds on a shared machine.
+
+### Substrate fix found by this work: `types.NewID` same-millisecond collisions
+
+Building the sentinel surfaced a real defect in `internal/types/id.go` (SPEC-01's
+identity helper): `encodeULID` copied only 8 of the 10 randomness bytes and walked
+the 130-bit encoding space backwards, so the leading characters carried the
+randomness and the trailing ones the timestamp — and `incRand`, which exists to
+keep ids distinct inside one millisecond, incremented the *dropped* bytes. Two
+`NewID` calls in the same millisecond returned the **same** id.
+
+The user-visible effect: sentinel's `event_id` generation produced identical ids
+inside one millisecond, so SDK-retry deduplication (§6.6) silently swallowed
+genuine events under load — a whole load run collapsed into a single event.
+
+Fixed in `internal/types/id.go` (48-bit timestamp in the leading characters,
+80-bit randomness in the trailing ones, so `incRand`'s increment is visible) and
+pinned by `internal/types/id_test.go` (`TestNewIDIsUniqueAndIncreasing` — 512 ids
+minted in one call, all distinct, strictly increasing;
+`TestEncodeULIDLayout`). Any package that mints ids (ledger `rec_id`, sentinel
+`event_id`, group `grp_`) inherits the fix.

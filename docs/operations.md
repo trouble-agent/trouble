@@ -213,6 +213,17 @@ reserved set and never opens an incident. No observation within
 `invalid`; so is a window in which a sig's own events were dropped by quota even
 though the canary landed.
 
+The read that carries the canary into verification is the ledger's per-source
+index row, not a sentinel-local flag: once an observation lands, the ledger's
+`Sources()` reports the `sentinel` source — the `origin.source` every
+sentinel-written record carries — with `canary_seen=true` and a `canary_last_ts`
+inside `canary_interval`. That row is the antecedent SPEC-05's
+`Evidence.CanarySeen` is derived from (§4.1). `TestCanarySeenInTheLedgerSourceIndex`
+holds it against the real on-disk chain, together with the §3.8 record pair (one
+`phase=injected`, one `phase=observed`) the flag comes from, so §7's canary row is
+pinned on data and not only on the process-side projection
+(`CanaryLastOK`/`Sources()` liveness).
+
 ### Collectors
 
 Sources are `journal:<unit>` (a supervised `journalctl -f -o json` child with a

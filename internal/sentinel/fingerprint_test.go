@@ -2,6 +2,8 @@ package sentinel
 
 import (
 	"encoding/json"
+	"flag"
+	"os"
 	"strings"
 	"testing"
 
@@ -39,11 +41,24 @@ type sigGolden struct {
 	} `json:"vectors"`
 }
 
+// sigGoldenPath is the §3.3 golden file the vector test pins.
+const sigGoldenPath = "testdata/sig_golden.json"
+
+// updateGolden rewrites the sig golden files from the shipped normalizer. Each
+// test that owns a golden file honours it, so regeneration is filtered by -run
+// (the files' own comments name their command).
+var updateGolden = flag.Bool("update-golden", false,
+	"rewrite the sig golden files from the shipped normalizer")
+
 // TestGoldenVectors pins the three §3.3 vectors byte-for-byte: canonical bytes,
 // byte length and the 16-hex sig short form. A mismatch here means the
 // normalizer changed, which REQUIRES a norm_version bump and a re-key of
 // testdata/sig_golden.json in the same commit (§3.3).
 func TestGoldenVectors(t *testing.T) {
+	if *updateGolden {
+		rewriteGoldenVectors(t)
+		return
+	}
 	raw := readFixture(t, "sig_golden.json")
 	var gold sigGolden
 	if err := json.Unmarshal(raw, &gold); err != nil {
@@ -86,6 +101,56 @@ func TestGoldenVectors(t *testing.T) {
 			t.Errorf("vector %s: fallback=%v, want %v", tc.name, fallback, wantFB)
 		}
 	}
+}
+
+// rewriteGoldenVectors regenerates sig_golden.json from the shipped normalizer,
+// keeping the file's own comment (the comment names this command). The key order
+// mirrors the file's, so regenerating an unchanged normalizer is a no-op diff.
+func rewriteGoldenVectors(t *testing.T) {
+	t.Helper()
+	var existing struct {
+		Comment string `json:"_comment"`
+	}
+	if raw, err := os.ReadFile(sigGoldenPath); err == nil {
+		_ = json.Unmarshal(raw, &existing)
+	}
+	out := struct {
+		NormVersion int    `json:"norm_version"`
+		Comment     string `json:"_comment"`
+		Vectors     []struct {
+			Name      string `json:"name"`
+			Canonical string `json:"canonical"`
+			Sig       string `json:"sig"`
+			Bytes     int    `json:"bytes"`
+		} `json:"vectors"`
+	}{NormVersion: types.NormVersionV1, Comment: existing.Comment}
+	n := newNormalizer()
+	a, b, c := vectorEvents()
+	for _, tc := range []struct {
+		name string
+		ev   *rawEvent
+	}{
+		{"A — override", a},
+		{"B — default", b},
+		{"C — message fallback", c},
+	} {
+		canonical, _ := n.canonicalFor(tc.ev)
+		out.Vectors = append(out.Vectors, struct {
+			Name      string `json:"name"`
+			Canonical string `json:"canonical"`
+			Sig       string `json:"sig"`
+			Bytes     int    `json:"bytes"`
+		}{Name: tc.name, Canonical: string(canonical),
+			Sig: n.sigOfCanonical(canonical).String(), Bytes: len(canonical)})
+	}
+	raw, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal golden: %v", err)
+	}
+	if err := os.WriteFile(sigGoldenPath, append(raw, '\n'), 0o644); err != nil {
+		t.Fatalf("write %s: %v", sigGoldenPath, err)
+	}
+	t.Fatalf("rewrote %s from the shipped normalizer: read the diff and commit it with the change that moved the vectors", sigGoldenPath)
 }
 
 // TestVectorDigestsMatchSpec checks the three digests the spec prints in §3.3

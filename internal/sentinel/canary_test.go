@@ -258,6 +258,105 @@ func mustDigest(t *testing.T, ev *rawEvent) string {
 	return n.sigOfCanonical(canonical).DigestHex()
 }
 
+// TestCanarySeenInTheLedgerSourceIndex pins §7's canary row pass threshold at
+// the read the verification side is built on: after a canary observation, the
+// ledger's per-source index reports the `sentinel` source — the origin every
+// sentinel-written record carries — with canary_seen=true and a canary_last_ts
+// inside canary_interval. `Evidence.CanarySeen` (SPEC-TYPES §4.1, the field
+// SPEC-05's `CanarySeen == false ⇒ invalid` rule consumes) is derived from that
+// read; the canary tests above assert the in-process projection
+// (canaryState, ProjectRuntime.CanaryLastOK, Sources liveness) only, so this is
+// the antecedent pin that was missing.
+func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
+	// The interval is the bound the assertion is measured against, so a slow
+	// first commit cannot false-fail it; the observation itself is expected in
+	// the first interval, which is also what Start waits for (§4.2 step 5).
+	const interval = 10 * time.Second
+	e := newE2EChain(t, func(c *Config) {
+		c.CanaryProject = "1"
+		c.CanaryInterval = types.Duration(interval.String())
+	})
+	t0 := nowFunc()
+	e.open(t)
+
+	canaryRecords := func() (injections, observations int) {
+		if err := e.l.Query().ScanFrom(1, func(rec types.Record) bool {
+			if rec.Kind != types.KCanary || rec.Origin.Source != "sentinel" {
+				return true
+			}
+			switch rec.Payload["phase"] {
+			case "injected":
+				injections++
+			case "observed":
+				observations++
+			}
+			return true
+		}); err != nil {
+			t.Fatalf("ledger scan: %v", err)
+		}
+		return injections, observations
+	}
+
+	// The writer is group-commit: the record pair §3.8 pins (one per injection,
+	// one per observation) and the index row derived from it become readable a
+	// commit after the observation, so both reads are awaited under one deadline.
+	var canary types.SourceAge
+	var injections, observations int
+	deadline := nowFunc().Add(5 * time.Second)
+	for {
+		ages, _, err := e.l.Query().Sources()
+		if err != nil {
+			t.Fatalf("ledger Sources: %v", err)
+		}
+		found := false
+		for i := range ages {
+			if ages[i].Source == "sentinel" && ages[i].HostID == e.s.cfg.HostID {
+				canary, found = ages[i], true
+			}
+		}
+		injections, observations = canaryRecords()
+		if found && canary.CanarySeen && injections == 1 && observations == 1 {
+			break
+		}
+		if nowFunc().After(deadline) {
+			t.Fatalf("the ledger never showed the canary once committed: sources = %+v, injected = %d, observed = %d",
+				ages, injections, observations)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if canary.CanaryLastTS == "" {
+		t.Fatal("canary_seen is true but canary_last_ts is empty: verification cannot date the observation")
+	}
+	obs, err := types.ParseUTC(canary.CanaryLastTS)
+	if err != nil {
+		t.Fatalf("canary_last_ts %q is not a UTC timestamp: %v", canary.CanaryLastTS, err)
+	}
+	// §7: "canary observation inside canary_interval".
+	if obs.Before(t0) || obs.Sub(t0) > interval {
+		t.Fatalf("canary observation at %s is %v after boot, want inside canary_interval (%v)",
+			canary.CanaryLastTS, obs.Sub(t0), interval)
+	}
+	if canary.LastEventTS == "" {
+		t.Error("the sentinel source has no last_event_ts")
+	} else if canary.LastEventAgeS < 0 || canary.LastEventAgeS > interval.Seconds() {
+		t.Errorf("sentinel last_event_age_s = %v, want inside canary_interval (%v)",
+			canary.LastEventAgeS, interval.Seconds())
+	}
+	// The reading is recorded where the rest of the sentinel operating notes
+	// live, and the record names this test the way the other §9 rows name theirs,
+	// so the documented antecedent cannot drift away from the pinned one.
+	doc := readOperationsDoc(t)
+	for _, want := range []string{
+		"TestCanarySeenInTheLedgerSourceIndex",
+		"`canary_seen=true`",
+		"`Evidence.CanarySeen`",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/operations.md §9 does not record the canary antecedent: missing %q", want)
+		}
+	}
+}
+
 // TestCanaryRecordShape pins the canary payload keys SPEC-05/SPEC-10 read.
 func TestCanaryRecordShape(t *testing.T) {
 	ts := newTestServer(t, func(c *Config) { c.CanaryProject = "1" })

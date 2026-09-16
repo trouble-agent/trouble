@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>trouble — resident system &amp; code health agent · PRD v2.2</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#08081a; color:#dcdce8; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; line-height:1.6; padding:12px; -webkit-text-size-adjust:100%; }
+  .wrap { max-width:940px; margin:0 auto; }
+  .hero { text-align:center; padding:42px 8px 28px; background:linear-gradient(160deg,#0b1226 0%,#08081a 60%,#1a0a0a 100%); border-radius:18px; margin-bottom:8px; border:1px solid #2a1620; }
+  .logo { font-family:Georgia,serif; font-size:clamp(2.4rem,8vw,3.6rem); font-weight:800; letter-spacing:-0.02em; background:linear-gradient(135deg,#f87171,#fbbf24); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+  .subtitle { color:#7e8aa8; font-size:1rem; margin-top:6px; }
+  .tagline { color:#f87171; font-size:.84rem; margin-top:10px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
+  .meta { color:#55617e; font-size:.76rem; margin-top:14px; }
+  .section-intro { font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:#f87171; font-weight:700; margin:32px 0 6px; }
+  .section { background:rgba(18,16,32,.55); border:1px solid #241a2e; border-radius:16px; padding:22px 16px; margin:12px 0; }
+  @media(min-width:640px){ body{padding:20px} .section{padding:28px} }
+  h2 { font-size:clamp(1.2rem,4.5vw,1.55rem); color:#f2eef2; margin-bottom:12px; }
+  h3 { color:#c8b8c8; font-size:1.02rem; margin:18px 0 6px; }
+  p { margin-bottom:10px; color:#c9c3ce; }
+  .table-wrap { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; margin:12px 0; }
+  table { width:100%; min-width:560px; border-collapse:collapse; font-size:.86rem; }
+  th { text-align:left; color:#9a8ba8; font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; padding:8px 10px; border-bottom:1px solid #3a2a4a; white-space:nowrap; }
+  td { padding:9px 10px; border-bottom:1px solid #241a30; vertical-align:top; color:#c9c3ce; }
+  tr:last-child td { border-bottom:none; }
+  code { background:#241428; border-radius:5px; padding:1px 6px; font-family:ui-monospace,Menlo,monospace; font-size:.83em; color:#fda4af; }
+  p code, li code, td code { white-space:nowrap; }
+  pre { background:#120a16; border:1px solid #2e1e38; border-radius:12px; padding:14px; overflow-x:auto; font-size:.74rem; line-height:1.55; font-family:ui-monospace,Menlo,monospace; color:#d8c8a8; margin:12px 0; -webkit-overflow-scrolling:touch; }
+  pre code { background:none; padding:0; color:inherit; white-space:pre; }
+  .card { border-radius:14px; padding:14px 16px; margin:12px 0; border:1px solid; }
+  .card.red { background:rgba(248,113,113,.07); border-color:#7f1d1d; }
+  .card.amber { background:rgba(251,191,36,.06); border-color:#78350f; }
+  .card.green { background:rgba(74,222,128,.07); border-color:#14532d; }
+  .card.blue { background:rgba(96,165,250,.07); border-color:#1e3a5f; }
+  .card.purple { background:rgba(192,132,252,.06); border-color:#581c87; }
+  .card b.tag { display:block; font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; margin-bottom:6px; }
+  .card.red b.tag { color:#f87171; } .card.amber b.tag { color:#fbbf24; }
+  .card.green b.tag { color:#4ade80; } .card.blue b.tag { color:#60a5fa; } .card.purple b.tag { color:#c084fc; }
+  .features { display:grid; grid-template-columns:1fr; gap:10px; margin:12px 0; }
+  @media(min-width:640px){ .features{grid-template-columns:1fr 1fr} }
+  .feature { background:#140f20; border:1px solid #2e2038; border-radius:12px; padding:12px 14px; font-size:.88rem; }
+  .feature b { color:#efe8f2; display:block; margin-bottom:4px; }
+  .scope-grid { display:grid; grid-template-columns:1fr; gap:12px; margin:12px 0; }
+  @media(min-width:700px){ .scope-grid{grid-template-columns:1fr 1fr} }
+  .scope-col { border-radius:14px; padding:16px; border:1px solid; font-size:.87rem; }
+  .scope-col h4 { font-size:.76rem; text-transform:uppercase; letter-spacing:.1em; margin-bottom:10px; }
+  .scope-col.in { background:rgba(74,222,128,.06); border-color:#14532d; } .scope-col.in h4 { color:#4ade80; }
+  .scope-col.out { background:rgba(148,163,184,.05); border-color:#334155; } .scope-col.out h4 { color:#94a3b8; }
+  .scope-col ul { margin-left:18px; } .scope-col li { margin-bottom:6px; }
+  ul, ol { margin:6px 0 12px 20px; color:#c9c3ce; } li { margin-bottom:6px; }
+  .principle { border-left:3px solid #f87171; background:#140f20; padding:12px 14px; border-radius:0 12px 12px 0; margin:12px 0; font-size:.9rem; }
+  .principle b { color:#f87171; }
+  .check { color:#4ade80; font-weight:700; } .cross { color:#f87171; font-weight:700; }
+  .ladder { display:flex; flex-direction:column; margin:12px 0; }
+  .lstep { display:flex; gap:12px; padding:12px 14px; border:1px solid #2e2038; background:#120d1c; }
+  .lstep:first-child { border-radius:12px 12px 0 0; } .lstep:last-child { border-radius:0 0 12px 12px; }
+  .lstep + .lstep { border-top:none; }
+  .lnum { flex-shrink:0; width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:.95rem; }
+  .l1 .lnum { background:#1e3a5f; color:#60a5fa; } .l2 .lnum { background:#14532d; color:#4ade80; }
+  .l2b .lnum { background:#4a1d96; color:#c084fc; } .l3 .lnum { background:#78350f; color:#fbbf24; }
+  .l4 .lnum { background:#7f1d1d; color:#fca5a5; }
+  .lstep .lt { font-size:.9rem; } .lstep .lt b { display:block; color:#efe8f2; margin-bottom:2px; }
+  .footer { text-align:center; color:#4a4056; font-size:.73rem; padding:24px 8px 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hero">
+  <div class="logo">trouble</div>
+  <div class="subtitle">resident system &amp; code health agent — sensors + sentinel, dashboard, research lane, instant hot-fixes</div>
+  <div class="tagline">PRD v2.3 · open-source-first · for approval</div>
+  <div class="meta">v2.3 (2026-09-03) adds, per the maintainer: <b>Ansible-grade module semantics</b> for config management — idempotency, check-mode, declarative plays; ability scales by adding schema'd modules, never by loosening the agent — and a <b>mini self-improvement skill loop</b> (hermes-style): incidents teach candidate skills, review approves them, updates distribute DOWN from a skills repo for next time — on-host OR offloaded (light agent up, heavy brains hosted, skills down) · v2.2 (remote/local errors, language-agnostic ingestion, dashboard, Off-by-One research lane, instant worktree foreman, dedup core, direct board write) + v2.1 sentinel (embedded Sentry-class service) + v2.0 (tool registry, issue desk, flow control) + v1.0 foundations (event triggers, stabilization, ladder, budgets, breakers) stand</div>
+</div>
+
+<!-- ============ 1. ONE-LINER ============ -->
+<div class="section-intro">01 · The one-liner, upgraded</div>
+<div class="section">
+  <h2>Errors get resolved — not lost, not surprised-by, not waiting for a human to read a log.</h2>
+  <p><b>trouble</b> is an open-source Linux daemon where your applications — local or remote, any language — report their errors (a Sentry-compatible endpoint every major SDK already speaks), where the kernel and services raise their own alarms (PSI, units, logs, disk, leaks), and where every finding works a ladder: <b>record → scripted playbook → research (Off-by-One pre-solve) → budgeted AI agent → outlets</b> — issues in your tracker, a board task via <b>direct write</b>, and for confirmed code bugs, <b>hot-fix mode that kicks a worktree foreman immediately</b>, verified and promoted before it's called done. All of it visible in <b>trouble's own dashboard</b>, deduped end-to-end by one signature system.</p>
+  <ul>
+    <li><b>No more silent log files:</b> the whole point is that an exception in a service — on this host or another — becomes a grouped, tracked, <i>worked</i> item with an audit trail, whether or not any human ever opens a terminal.</li>
+    <li><b>Language-agnostic by construction:</b> Sentry SDKs cover 100+ languages/frameworks with zero code changes; a plain-JSON endpoint covers everything else (one curl from any runtime, cron job, or script); pluggable collector parsers cover legacy apps that only write logs. Nothing is excluded by language choice.</li>
+    <li><b>Managed hands, researched fixes:</b> the agent never has a shell — only typed tool calls (config parsers, service controls, bounded patches). And before the agent even runs, findings can forward to <b>Off-by-One</b> for pre-solve research, so the agent starts from a brief, not a blank page.</li>
+  </ul>
+</div>
+
+<!-- ============ 2. DIRECTIVES MAP ============ -->
+<div class="section-intro">02 · Directive map (v2.0 → v2.2)</div>
+<div class="section">
+  <div class="table-wrap"><table>
+    <tr><th>Directive</th><th>Where it lands</th></tr>
+    <tr><td><b>Local + remote errors get patched and resolved, not lost</b></td><td>sentinel is a network service (§04b): projects, remote ingestion over LAN/Tailscale with DSN auth, retention; the ladder + hot-fix pipeline guarantee resolution machinery, and the ledger/dashboard make "nobody looked at the log" impossible</td></tr>
+    <tr><td><b>Language agnostic / so many languages</b></td><td>§04b language table: Sentry SDKs (any language) · generic JSON endpoint (anything that can curl) · collector parsers (legacy logs) · OTel later. No language gate anywhere in the pipeline</td></tr>
+    <tr><td><b>Own dashboard UI</b></td><td>§04c NEW: embedded web dashboard, served by the daemon — incidents, sentinel groups, issues, hot-fix timelines, breaker states; lean, dark, zero external stack</td></tr>
+    <tr><td><b>Small agent + forward to Off-by-One — research before the agent</b></td><td>§05 rung ③-research: cheap local analysis, then optional forward to <b>Off-by-One</b> (the pre-solve lab) — research results feed the agent run (or resolve it outright); pluggable research drivers</td></tr>
+    <tr><td><b>Hot-fix kicks off a worktree foreman right away</b></td><td>§08 rework: hot-fix lane = <b>direct board write + immediate worktree foreman spawn</b> (isolated git worktree, fleet spawn machinery) — the one explicit timing exception, granted by this directive, fully audited, verify+promote gates unchanged</td></tr>
+    <tr><td><b>Dedup system</b></td><td>§06b named subsystem: one signature core dedups across sensors, sentinel groups, issues, AND board rows — same sig = comment/cross-ref, never a duplicate anything</td></tr>
+    <tr><td><b>Direct board write</b></td><td>§08 flow drivers: <code>board-jsonl</code> direct write first-class (alongside task-router); hot-fix lane defaults to direct</td></tr>
+    <tr><td><b>Borrow from Ansible (or similar) for config management — scalable ability without risk</b></td><td>§06 module semantics: idempotent tools, native check-mode, declarative <b>plays</b> (agent drafts, runner executes); module SDK with conformance tests; optional ansible-module bridge later</td></tr>
+    <tr><td><b>Mini self-improvement skill loop (like hermes) — learns, on host or offloaded, updates sent down after review</b></td><td>§06c skills: SKILL.toml artifacts, candidate→review→promote loop, <b>skills repo distribution (down after review, candidates up)</b>, cross-host learning, and the <b>offloaded deployment shape</b> (light agent on weak hosts, full daemon as hub)</td></tr>
+  </table></div>
+</div>
+
+<!-- ============ 3. ARCHITECTURE ============ -->
+<div class="section-intro">03 · Architecture — one loop, two planes, a dashboard, four outlets</div>
+<div class="section">
+<pre><code>                 ┌────────────────────────────────────────────────────┐
+   SYSTEM PLANE  │  trouble — static Go daemon (epoll, 0% idle)       │
+   sensors ────► │  PSI · inotify · journald · D-Bus · statfs · leaks │
+                 │                                                    │
+   CODE PLANE    │  SENTINEL (embedded error-tracking service)        │
+   apps ───────► │  local + REMOTE apps, any language                 │
+                 │  ◄ Sentry-SDK endpoint (DSN)  ◄ generic JSON       │
+                 │  ◄ local collector (SDK-less apps)                 │
+                 │         │                                          │
+                 │         ▼                                          │
+                 │  [DEDUP CORE] one signature/fingerprint space ────►│──► dashboard
+                 │         │                                          │
+                 │  [rule engine] TOML, hot-reload, breakers          │
+                 │         ▼                                          │
+                 │  [ladder] ① record → ② playbook → ③ research      │
+                 │         │        (Off-by-One pre-solve) → ④ agent  │
+                 │         │        (hands = tool registry only)      │
+                 │         ▼                                          │
+                 │  [outlets] ⑤ escalate · ⑥ issue desk               │
+                 │         │             ├─ github · duckbrain · jira │
+                 │         └─ ⑦ flow: DIRECT board write +            │
+                 │              hot-fix → worktree foreman NOW        │
+                 │                                                    │
+                 │  [dashboard UI] :8644 — incidents, groups, issues, │
+                 │  agent audit, breakers, hot-fix timelines          │
+                 │  [ledger] append-only JSONL · everything above     │
+                 └────────────────────────────────────────────────────┘</code></pre>
+</div>
+
+<!-- ============ 4a. SENSORS ============ -->
+<div class="section-intro">04a · Sensors — the system plane</div>
+<div class="section">
+  <p>Unchanged shape: <code>psi:</code> (cpu/memory/io, some|full, avg10/60/300) · <code>inotify:</code> (+<code>for=</code>) · <code>journal:</code> · <code>dbus:</code> (unit failures, oomd) · <code>timer:</code> · <code>disk:</code> · <code>http:</code> unix-socket tickets · health-trend sampling (per-unit connections/fds/RSS slopes). TOML rules, hot-reload, cooldowns, caps, storm breaker. Example rulesets in <code>examples/</code> only.</p>
+</div>
+
+<!-- ============ 4b. SENTINEL ============ -->
+<div class="section-intro">04b · Sentinel — embedded error tracking, local + remote, any language</div>
+<div class="section">
+  <h2>A Sentry-class service inside the daemon — the network edge for every error your code throws</h2>
+  <p>Sentinel is trouble's code plane: an embedded error-tracking service. Applications report exceptions to it; it fingerprints, groups, counts, and tracks them across releases; and its groups are first-class citizens of the same ladder as a full disk. <b>Local services report over loopback; remote services report over your LAN/Tailscale</b> — same DSN auth (project IDs + public keys), same quotas. A service on another box whose errors used to die in a journal nobody reads now lands in the same groups, dashboard, issues, and hot-fix pipeline as everything else.</p>
+  <h3>Language coverage — the table that makes it agnostic</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Your stack</th><th>Path</th><th>Effort</th></tr>
+    <tr><td>Any language with a Sentry SDK (Go, Python, Node, Rust, Java, Ruby, PHP, .NET, Elixir, Swift, Kotlin, Perl, Lua, …100+ frameworks)</td><td><b>Native ingestion</b> — set the DSN to trouble</td><td>zero code changes</td></tr>
+    <tr><td>Anything that can make an HTTP call (bash, cron, systemd units, embedded, COBOL if it must)</td><td><b>Generic JSON endpoint</b> <code>POST /api/{project}/event/</code></td><td>one curl</td></tr>
+    <tr><td>Apps that only write logs (legacy daemons, third-party binaries)</td><td><b>Collector</b> — journald/file tails + pluggable parsers (go-panic, py-traceback, node-reject, logfmt, regex rules)</td><td>config only</td></tr>
+    <tr><td>OpenTelemetry shops (future)</td><td>OTel receiver — deferred, interface reserved</td><td>—</td></tr>
+  </table></div>
+  <h3>Grouping, releases, quotas — and resolution, the point of it all</h3>
+  <p>Fingerprint = group (SDK fingerprints honored; stack canonicalization masks line numbers/addresses/PIDs). Groups carry counts, first/last seen, release + environment tags. Release tracking gives the money queries — <i>new in v0.4.2 = regression → board task auto-filed; flat after the rollback = verified fix → group closes</i>. Quotas per project with <code>429 + Retry-After</code> keep a runaway app from flooding the daemon (it floods only itself; client sampling respected). Retention compacts quiet groups; the ledger keeps the permanent record. And because groups feed the ladder (§05), a grouped error doesn't just sit in a list — <b>it gets researched, fixed, verified, and closed</b>. That's the difference between Sentry and trouble: Sentry tells you what broke; trouble's job is that it doesn't stay broken.</p>
+<pre><code># any app anywhere (zero code changes):
+SENTRY_DSN="http://pubkey@trouble-host:8643/7" ./payment-worker   # remote ok
+
+# anything:
+curl -X POST :8643/api/3/event/ -d '{"level":"error","message":"queue wedged","extra":{"depth":912}}'
+
+# legacy apps:
+[collector]
+journal_units = ["payment-worker"]
+file_tails    = ["/var/log/legacy/err.log"]
+parse         = ["go-panic", "py-traceback"]</code></pre>
+</div>
+
+<!-- ============ 4c. DASHBOARD ============ -->
+<div class="section-intro">04c · The dashboard — trouble's own UI (NEW)</div>
+<div class="section">
+  <h2>Every group, incident, and fix — visible without opening a terminal</h2>
+  <p>Promoted from "deferred" per directive: trouble serves its own dashboard from the same binary — <b>Go html/template + htmx-style progressive enhancement over embedded static assets, dark theme, zero external stack</b> (no Node build, no SPA framework, no database beyond the ledger). It's the read-mostly face of the ledger; everything shown is already recorded, and the few actions it offers (ack, quiet-close, trigger rule, approve promotion) go through the same authorization as the CLI.</p>
+  <div class="features">
+    <div class="feature"><b>Incidents</b> — live feed: trigger, rung reached, actions, verification status; filter by rule/severity/source; incident detail = the full evidence bundle + tool-call audit trail.</div>
+    <div class="feature"><b>Sentinel</b> — error groups ranked by rate/trend/count; release diff view (new-in / fixed-in); per-project and per-environment breakdowns; the regression queue.</div>
+    <div class="feature"><b>Issues &amp; flow</b> — issue desk state across drivers (github/duckbrain), board tasks filed, hot-fix timelines: filed → foreman picked up → patch → verify window → promoted, with links to the PR/worktree.</div>
+    <div class="feature"><b>System</b> — breaker states, rule health (last fire, suppressed counts), agent budget burn, quota usage, host vitals (PSI mini-graphs). Research lane view: what Off-by-One was asked, what it returned.</div>
+  </div>
+  <p><b>Boundaries:</b> dashboard auth = token (same store as the API) or loopback+unix-socket; read-only by default, write actions permission-gated; served on its own port (<code>:8644</code>) so ingestion (<code>:8643</code>) and admin never share an attack surface; works fine over Tailscale for remote nodes. Mobile-friendly because the maintainer reads dashboards on a phone.</p>
+</div>
+
+<!-- ============ 5. LADDER ============ -->
+<div class="section-intro">05 · The ladder — now with a research rung</div>
+<div class="section">
+  <div class="ladder">
+    <div class="lstep l1"><div class="lnum">①</div><div class="lt"><b>Record</b> — evidence bundle to the ledger before anything (sensor snapshot and/or sentinel group, top-procs, journal tail, unit states, config versions).</div></div>
+    <div class="lstep l2"><div class="lnum">②</div><div class="lt"><b>Playbook</b> — deterministic reflex in tool calls: <code>service.reload</code>, <code>config.set</code>, <code>drain.pool</code>. Zero tokens, sub-2s. Known problem → known fix.</div></div>
+    <div class="lstep l2b"><div class="lnum">②½</div><div class="lt"><b>Research</b> — NEW, per directive: "part of the research before the agent." Unknown-shape findings forward to <b>Off-by-One</b> (the pre-solve lab — idle GPU time turned into pre-solved work) with the fingerprint, stack, release info, and repro context. Off-by-One researches while the incident cools through its stabilization window; the returned brief (root-cause hypotheses, similar-solved cases, proposed patch sketch) is what the agent run starts from — <b>the agent diagnoses from research, not from zero</b>. Pluggable <code>[research]</code> drivers (off-by-one first; none/webhook for OSS users); research is async and never blocks ② or escalation. If research alone yields a confident fix, the agent run can be skipped entirely.</div></div>
+    <div class="lstep l3"><div class="lnum">③</div><div class="lt"><b>Agent</b> — budgeted AI run (25k/8k tokens, 120s, one at a time, two-strikes suspension), now research-informed. Only hands: registry tool calls. Output JSON: {diagnosis, tool_calls[], issue_draft?, confidence}. propose/execute per rule.</div></div>
+    <div class="lstep l4"><div class="lnum">④</div><div class="lt"><b>Outlets</b> — ⑤ escalate (telegram/signal/webhook; always on breakers/failures/review items) · ⑥ issue desk (github/duckbrain; sig-deduped; sentinel groups land here) · ⑦ flow control (direct board write + hot-fix, §08).</div></div>
+  </div>
+</div>
+
+<!-- ============ 6. TOOLS + DEDUP ============ -->
+<div class="section-intro">06 · Tool registry + the dedup core</div>
+<div class="section">
+  <h3>Tool registry — the agent's only hands (unchanged contract)</h3>
+  <p>Typed capabilities with JSON schemas, daemon-implemented: <code>config.get/set/unset/list</code> (TOML/YAML/JSON/env/ini parsers, formatting-preserving, schema-validated) · <code>service.reload/restart/stop/start/status</code> (D-Bus) · <code>file.read/patch</code> (allowlists, backups, rollback records) · <code>proc.top/connections/signal</code> (signal allowlist) · <code>flow.file_issue/create_task/comment</code> · <code>custom:</code> script tools (v1.1). Every call: <b>authorize → validate → dry-run → apply → verify → audit</b>; failed verify rolls back and escalates.</p>
+  <h3>Ansible-grade module semantics — the "scalable ability without risk" answer</h3>
+  <p>Borrowed deliberately from Ansible, the 15-year proven pattern for machine-managed change — its three load-bearing ideas become registry law:</p>
+  <ul>
+    <li><b>Idempotency:</b> every module defines desired-state semantics — running twice yields "ok", not a second change. The agent can retry safely; flakes can't compound. Conformance-tested per module.</li>
+    <li><b>check_mode everywhere:</b> dry-run isn't a convention, it's a module contract — every tool computes and returns the diff it <i>would</i> apply without applying. (v2.0's dry-run stage made mandatory per-module.)</li>
+    <li><b>Plays = declarative remedies:</b> multi-step fixes are DATA, not improvised orchestration — ordered tool-call sequences with <code>when:</code> conditionals, retries, and per-task changed/ok/fail results. <b>The agent drafts a play; the runner executes it</b> through the same 6-stage contract. The agent never orchestrates live — it writes the script of what should happen, and boring machinery performs it.</li>
+  </ul>
+  <p>This is how ability scales without risk growing: <b>new capability = one new schema'd, conformance-tested module</b> (descriptor + Go impl + tests), reviewed like code — never more agent freedom. A <code>plays/</code> library ships curated remedies; the agent's drafted plays land there as candidates (same promotion loop as skills, §06c). Ansible interop note: the community's 3,000+ modules are Python — a v1.1 bridge can exec selected stable modules in a pinned venv as <code>custom:</code> tools (declared schema, audited) instead of reimplementing the world.</p>
+  <h3>The dedup core — one signature space, everything deduped (NEW named subsystem)</h3>
+  <p>Dedup isn't a feature of the issue desk anymore; it's the <b>canonical signature core</b> every plane feeds and every consumer reads:</p>
+  <ul>
+    <li><b>One sig format:</b> <code>{source}:{canonical-hash}</code> — sensors hash (rule + normalized condition + affected unit), sentinel hashes fingerprints, collector parsers hash canonicalized stacks. Same normalization rules everywhere.</li>
+    <li><b>Cross-plane convergence:</b> sensor incident + sentinel group within the window on the same unit → ONE incident, both bundles attached (the crash-loop + error-stream merge).</li>
+    <li><b>Every consumer dedupes on it:</b> issues (recurring sig = comment + counter on the existing issue, never a new one), board rows (sig already has an open row → comment/cross-ref, never a duplicate task), escalations (sig in active cooldown → suppressed), dashboard (sig is the join key), hot-fix verification (the sig must stay quiet for the window).</li>
+    <li><b>Ledger cross-links:</b> one sig → {incidents[], groups[], issues[], tasks[], research_briefs[]} — the full life of a bug in one query, which is also the dashboard's incident-story view.</li>
+  </ul>
+</div>
+
+<!-- ============ 7. ISSUE DESK ============ -->
+<div class="section-intro">06c · The skill loop — it learns, like hermes (NEW)</div>
+<div class="section">
+  <h2>Incidents become skills. Review ships them down. Every host gets smarter.</h2>
+  <p>v1.0's promotion loop (agent-fix → playbook candidate) generalizes into a <b>skill system with the same shape as hermes skills</b> — procedural memory that improves with every incident:</p>
+<pre><code># ~/.trouble/skills/payment-worker-queue-wedge.toml
+name        = "payment-worker-queue-wedge"
+version     = 3
+sigs        = ["sentinel:9f2c…", "journal:payment-worker:restart-loop"]   # which signatures it handles
+[play]                                           # a declarative play (§06) — the remedy
+- tool = "proc.connections"; args = { unit = "payment-worker" }
+- tool = "service.reload";   args = { unit = "payment-worker" }; when = "connections > 400"
+- tool = "config.set";       args = { path = "/etc/payment/worker.toml", key = "pool.max",
+                                      value = 250, validate_only = false }
+[guards]
+verify_window = "10m"                            # sig must stay quiet after
+max_runs     = "3/day"
+escalate_on  = "verify_fail"
+[provenance]                                     # what taught it — full audit chain
+incidents = ["inc_8812", "inc_8907"]             research = ["ob1_brief_2214"]
+[stats]                                          # live, updated by the daemon
+applied = 4   success = 4   last_used = "2026-09-03"</code></pre>
+  <ul>
+    <li><b>The loop:</b> incident → ladder ③ agent fix → captured as <b>candidate skill</b> (provenance-linked to the incident + research brief) → verified in the window → <b>reviewed</b> (human default) → promoted → <b>next occurrence anywhere runs as ② at zero tokens</b>. Playbook thickens, agent runs get rarer — the system measurably heals itself over time, and the ledger proves it.</li>
+    <li><b>Distribution — up and down (the new part):</b> skills live in a <b>git skills repo</b> (the natural OSS answer: review = PR, audit = history, distribution = pull). trouble <b>pushes candidates up</b> as PRs and <b>pulls reviewed skills down</b> on interval/webhook. <b>Cross-host learning:</b> host A's incident teaches the repo; hosts B and C pull the skill; the next occurrence on <i>any</i> host is already a reflex. Pluggable remotes: local-only (default, no hub needed) · git repo · DuckBrain namespace (fleet) · a hub service (later).</li>
+    <li><b>Offloaded deployment shape — on-host or hosted brains:</b> trouble runs full on capable hosts; on weak ones (N100, Raspberry Pi, crowded VPS) it runs in <b>light mode</b>: a ~5MB collector/executor — sensors + sentinel ingestion + skill execution + incident forwarding UP to a hub host running the full daemon (ledger, dashboard, research, agent). Fixes and updated skills come DOWN. The machine stays light under stress; the brains live where resources are; learning still lands on the box that needs it.</li>
+  </ul>
+</div>
+
+<div class="section-intro">07 · The issue desk</div>
+<div class="section">
+  <p>Unchanged from v2.1: driver architecture — <b>github</b> (auto-file, labels, dedup window) + <b>duckbrain</b> (local-first backend) ship; the 4-method driver contract (<code>EnsureBySig/Comment/Close/Healthcheck</code>) keeps Jira/Linear/GitLab an afternoon each; drivers fail isolated; <code>trouble issues list/ack/close/link</code> CLI + dashboard views. One addition from the dedup core: issues link to board tasks and research briefs via sig automatically.</p>
+</div>
+
+<!-- ============ 8. FLOW + HOT-FIX ============ -->
+<div class="section-intro">08 · Flow control — direct board write + instant worktree foreman</div>
+<div class="section">
+  <h2>Hot-fix mode: the foreman is working while the incident is still warm</h2>
+  <p>Flow control writes findings into the work system. Two drivers, both first-class per directive: <b>direct board write</b> (<code>board-jsonl</code> — trouble appends the row itself: fastest, works even when the router is down) and <b>task-router</b> (the standing doctrine for normal filing). <b>Hot-fix-grade incidents take the direct lane and go further — they kick off a worktree foreman immediately:</b></p>
+<pre><code>[flow]
+driver = "board-jsonl"                      # direct write (or "task-router")
+review_mode = "auto"                        # auto | review | never (+ overrides)
+[flow.hotfix]
+enabled = false                             # host master gate
+allowed_repos = ["/srv/src/payment-api"]    # repos a hotfix may touch
+unit_repo_map  = { "payment-worker" = "/srv/src/payment-api" }
+foreman_spawn = "router_spawn"              # fleet spawn machinery
+verify_window = "10m"
+promote = "human"                           # human | auto-after-verify</code></pre>
+  <div class="table-wrap"><table>
+    <tr><th>Stage</th><th>What happens</th><th>Gate</th></tr>
+    <tr><td><b>File</b></td><td>direct board write: row with sig, bundle, issue refs, release tags (or task-router for non-urgent filing)</td><td>review_mode; rule grants <code>flow.create_task</code></td></tr>
+    <tr><td><b>Spawn — NOW</b></td><td><b>hot-fix foreman immediately:</b> trouble invokes the fleet's spawn machinery (router_spawn) directly — a foreman starts in an <b>isolated <code>git worktree</b></b> of the mapped repo (fresh worktree per incident = zero blast radius on the main checkout), briefed with the sig, research brief (if Off-by-One returned one), failing test hints, and the registry-only tool contract</td><td><code>flow.hotfix.enabled</code> + repo in <code>allowed_repos</code> + rule severity ≥ hotfix threshold; every spawn logged with the full brief</td></tr>
+    <tr><td><b>Patch</b></td><td>foreman/agent patches in the worktree (file.patch/config.set/service.reload via the registry contract; deploy step = reviewed playbook, never improvised); PR/commit authored in the worktree</td><td>validate → dry-run → apply → verify → audit on every call</td></tr>
+    <tr><td><b>Verify</b></td><td>sensors + sentinel watch: sig quiet + error group flat + probes green for <code>verify_window</code></td><td>recurrence in window = failed → auto-rollback + issue reopens + escalate</td></tr>
+    <tr><td><b>Promote</b></td><td>verified → task closed fixed, issue linked, worktree merged via its PR (or discarded); remedy captured as playbook candidate</td><td><code>promote=human</code> default; <code>auto-after-verify</code> for the brave</td></tr>
+  </table></div>
+  <div class="card amber"><b class="tag">The timing-authority note — honest amendment</b>
+  v1.0 fenced "trouble never spawns workers; the scheduler owns all timing." This directive amends it explicitly: <b>hot-fix lane is the one granted exception</b> — when a confirmed code bug meets enabled + allowed_repos + severity, trouble spawns the worktree foreman <i>now</i>, because fix latency is the point. The fence holds everywhere else (research forwards, normal filing, chores never spawn anything). The exception is config-gated, off by default, and every use is ledger-audited — an auditable bypass, not a second scheduler.</div>
+</div>
+
+<!-- ============ 9. OPEN SOURCE ============ -->
+<div class="section-intro">09 · Open-source posture</div>
+<div class="section">
+  <p>Unchanged from v2.0/v2.1: config-driven everything (now including dashboard bind/auth, research drivers, repo maps) · pluggable seams (AI resolver: hermes-gateway | openai-compat | none · escalation: telegram/signal | webhook | smtp-later · issue drivers · flow drivers · research drivers: off-by-one | none | webhook) · fleet material in <code>examples/</code> only, CI-grepped · repo layout <code>cmd/trouble, internal/{sensors,sentinel,dashboard,rules,ladder,tools,dedup,issues,flow,ledger}</code> · MIT, conventional commits, secrets never in the ledger (DSN public keys excepted — designed public) · <code>trouble init</code>: a stranger gets sensors + sentinel + dashboard + issue filing in 5 minutes with no fleet software at all (resolver=none, research=none).</p>
+</div>
+
+<!-- ============ 10. SCOPE ============ -->
+<div class="section-intro">10 · First release scope</div>
+<div class="section">
+  <div class="scope-grid">
+    <div class="scope-col in"><h4>MVP</h4>
+      <ul>
+        <li><span class="check">✓</span> Sensors + trend sampling + <code>for=</code> + breakers + stress mode</li>
+        <li><span class="check">✓</span> Sentinel: Sentry-compatible ingestion (envelope/store, gzip, DSN auth, remote projects), generic JSON endpoint, collector parsers, fingerprint grouping, releases/regressions, quotas/429, retention</li>
+        <li><span class="check">✓</span> <b>Dashboard UI</b>: incidents, sentinel groups + release diffs, issues/flow, breaker/budget views — embedded, dark, token-authed, :8644</li>
+        <li><span class="check">✓</span> Ladder ①②③ + <b>research rung (off-by-one driver)</b> + ledger</li>
+        <li><span class="check">✓</span> <b>Dedup core</b>: one sig space across sensors/sentinel/issues/board + convergence</li>
+        <li><span class="check">✓</span> Tool registry with the 6-stage contract</li>
+        <li><span class="check">✓</span> Issue desk: github + duckbrain drivers</li>
+        <li><span class="check">✓</span> Flow: <b>direct board write</b> + task-router; <b>hot-fix lane with immediate worktree foreman spawn</b>, verify window, human promotion</li>
+        <li><span class="check">✓</span> OSS layout, examples, resolver=none path, <code>trouble init</code>, MIT</li>
+        <li><span class="check">✓</span> <b>Module semantics</b>: idempotency + check_mode contracts, plays library + runner, module SDK + conformance tests</li>
+        <li><span class="check">✓</span> <b>Skill loop</b>: SKILL.toml artifacts, candidate→review→promote, skills-repo pull/push, light-mode offload (up/down)</li>
+        <li><span class="check">✓</span> <b>Sentinel proxy</b>: edge forwarder binary (one flag) for customer/remote deployments; multi-project relay</li>
+        <li><span class="check">✓</span> <b>Autonomy modes</b>: shadow (default) | assisted | <b>full — zero humans in any loop</b>, gate-by-gate config, same safety spine</li>
+      </ul>
+    </div>
+    <div class="scope-col out"><h4>Deferred</h4>
+      <ul>
+        <li><span class="cross">✗</span> Sentry sessions/tracing/replays/cron-monitors/profiles; OTel receiver (interface reserved)</li>
+        <li><span class="cross">✓→</span> dashboard write-actions beyond ack/quiet/approve (edit rules from the browser — later; rules stay files for now)</li>
+        <li><span class="cross">✗</span> jira/linear/gitlab drivers; custom-script tools; extra parsers (all v1.1, interfaces shipped)</li>
+        <li><span class="cross">✗</span> eBPF probes, perf forensics, security mode</li>
+        <li><span class="cross">✗</span> multi-host console (per-node dashboards federate by reading each other's ledgers — later); auto-promotion defaults</li>
+        <li><span class="cross">✗</span> scheduling fleet work — with the single, explicit, audited hot-fix exception (§08)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 11. GUARDRAILS + ACs ============ -->
+<div class="section-intro">11 · Guardrails, acceptance criteria, open questions</div>
+<div class="section">
+  <h3>Guardrails</h3>
+  <ul>
+    <li>Do-not-touch enforced at the registry layer (protected paths/units refused before validation). Every tool call: authorize → validate → dry-run → apply → verify → audit; failed verify rolls back + escalates.</li>
+    <li>Dedup + issue caps + quiet-close + ingestion quotas: neither a chatty app nor a flappy rule can spray anything — groups, issues, rows, or pages.</li>
+    <li>Hot-fix: master gate off, <code>allowed_repos</code> empty, worktree-isolated, verify-window gated, promotion human — every default safe; every spawn audited.</li>
+    <li>Research lane is async and best-effort: Off-by-One down or slow never blocks ②, ③, or escalation — it only enriches.</li>
+    <li>Storm mode, OOM immunity (OOMScoreAdjust -500, MemoryMax=64MB), rename-over upgrades — carried unchanged. Dashboard is token-authed, read-mostly, separate port from ingestion.</li>
+  </ul>
+  <h3>Acceptance criteria (v1 AC-1..9 + v2.1 AC-10..17 carry; new below)</h3>
+  <ol>
+    <li><b>AC-18 Remote + language matrix:</b> services on two different hosts — one Go (Sentry SDK), one bash (curl JSON) — report the same bug class; both land in their project groups on the trouble host over Tailscale; dashboard shows both; quotas hold when one floods.</li>
+    <li><b>AC-19 Dashboard:</b> from a phone browser, token-authed: live incident appears within 2s of trigger; sentinel release-diff view shows the regression; hot-fix timeline shows filed→foreman→verify→promote with PR link; all read-only actions work without write grants.</li>
+    <li><b>AC-20 Research lane:</b> unknown fingerprint + off-by-one enabled → brief forwarded, agent run consumes the returned brief (prompt shows it), incident ledger links brief↔agent↔fix; off-by-one forced-unreachable → ladder proceeds unchanged, gap noted in ledger.</li>
+    <li><b>AC-21 Hot-fix immediacy:</b> enabled host + scripted bad line in an allowed repo → direct board row + worktree foreman spawned within 60s of trigger; patch lands in the worktree only (main checkout untouched); verify window passes → promotion prompt; recurrence → rollback + reopen.</li>
+    <li><b>AC-22 Dedup totality:</b> same underlying bug detected via sensor AND sentinel AND collector paths → one incident, one group, one issue, one board row (comments on recurrence), one dashboard story; zero duplicates anywhere.</li>
+    <li><b>AC-23 Module conformance:</b> every shipped module passes the conformance suite — idempotency (double-apply = ok/ok, one change), check_mode returns the true diff without applying, schema violations rejected at validate; a deliberately non-idempotent test module fails CI.</li>
+    <li><b>AC-24 Skill distribution:</b> host A's agent fix → candidate PR → review-merged → hosts B and C pull → synthetic recurrence on B runs as ② at zero tokens with provenance intact (inc_8812 visible in B's ledger).</li>
+    <li><b>AC-25 Light-mode offload:</b> N100-class host runs light agent → incident forwarded up to hub → hub researches/fixes → updated skill pulls down → next local occurrence handled locally, offline-tolerant (queued forward).</li>
+    <li><b>AC-26 Zero-human loop:</b> autonomy=full host + scripted service bug: detection → research → play → hot-fix foreman → PR merged by policy → verify window → promote → skill candidate auto-accepted (threshold met) — ledger + dashboard show every step, zero human actions; kill-switch stops the loop within one stage.</li>
+    <li><b>AC-27 Proxy relay:</b> app → proxy (customer edge) → hub: grouping, quotas, and DSN auth intact through the relay; proxy offline → local spool → flush on reconnect, no loss.</li>
+  </ol>
+  <h3>Open questions (one-liners, or defaults stand)</h3>
+  <ol>
+    <li><b>Off-by-One contract:</b> forward shape = fingerprint + stack + release + repro context; return = structured brief (hypotheses, similar cases, patch sketch). Need to pin the lab's actual API (off-by-one-api skill) — integration spike S-OB1, small.</li>
+    <li><b>Dashboard stack:</b> Go templates + htmx-style enhancement (my default — zero build chain, ages well) vs a tiny Preact SPA. Default: templates.</li>
+    <li><b>Remote ingestion auth:</b> DSN public keys over LAN/Tailscale (Sentry model, my default) vs requiring per-project tokens on top for untrusted networks. Default: DSN model + bind guidance; tokens as an option.</li>
+    <li><b>Repo name:</b> <code>trouble</code> (collision check pending; alternates <code>trouble-daemon</code>, <code>gettrouble</code>). Public from first commit recommended.</li>
+  </ol>
+</div>
+
+<!-- ============ 12. ECOSYSTEM ============ -->
+<div class="section-intro">12 · The ecosystem — the coding-hermes stack, proxies, and the zero-human loop</div>
+<div class="section">
+  <h2>Part of a deployable ecosystem — and the pitch is software that fixes itself</h2>
+  <p>trouble is not a lone daemon; it's a citizen of the <b>coding-hermes stack</b> — the open, deployable system this fleet already runs: the scheduler (timing authority), task-router, the task board + <code>boardctl</code>, DuckBrain (memory/backends), the usage observatory, DAGger (pipeline runtime), Mallard (data services). Every piece is config-driven and open-source by the same rules, so a stranger can deploy <b>the whole platform or any slice of it</b>: trouble integrates natively (board writes, task-router dispatch, worktree foremen, DuckBrain issue backend) and degrades gracefully alone (board-jsonl, webhook everything, resolver=none).</p>
+  <div class="features">
+    <div class="feature"><b>The ecosystem story</b><br>Build and deploy software for services you host → your code reports errors via sentinel (SDK/JSON/collector) → <b>through a proxy if the software runs at your users' edge</b> → the full machinery groups, researches, fixes, verifies, promotes, and learns — automatically. trouble is the "it gets fixed" half of the platform; the scheduler/board/foremen are the "work happens" half; DuckBrain/observatory/mallard are the "state and data" half.</div>
+    <div class="feature"><b>Sentinel proxy — reports from anywhere</b><br>A tiny forwarder binary (<code>trouble proxy</code>, one flag): apps report to the nearest proxy (same Sentry-compatible surface, same DSNs), the proxy relays to the hub trouble with spool-and-flush offline tolerance and per-project quotas. This is the shape for customer deployments: your software at their edge, errors flowing home through one small hop, grouped at the hub. Multi-tenant by project key.</div>
+    <div class="feature"><b>Autonomy modes — the zero-human loop is a deployment posture</b><br><code>autonomy = shadow | assisted | full</code>. <b>shadow</b> (default): everything runs — detection, research, plays, even hot-fix foremen — but PRs stay unmerged and promotions wait; you watch the dashboard and build trust. <b>assisted</b>: auto where you've approved (per rule). <b>full</b>: zero humans in any loop — merge-by-policy after verify, skill candidates auto-accepted past a success threshold, issues filed and closed automatically. The safety spine is what makes full defensible: idempotent conformance-tested modules, plays-as-data (never improvised orchestration), worktree isolation, verify windows, dedup caps, storm breakers, and the append-only ledger auditing every step. Full mode is recommended only after a shadow period with green stats — the system earns autonomy, measurably.</div>
+    <div class="feature"><b>Kill-switch</b><br>One command (<code>trouble autonomy off</code>, or the dashboard button) freezes the loop at the current stage — in-flight plays finish their current tool call, nothing new starts, everything after is recorded as pending. A single flag between "fully autonomous" and "fully supervised," instantly reversible.</div>
+  </div>
+</div>
+
+<div class="footer">
+  trouble · PRD v2.3 · 2026-09-03 · full directive history in the hero; latest: Ansible-grade module semantics + skill learning loop with hub distribution + offloaded light mode · ecosystem: coding-hermes stack citizen, sentinel proxies, zero-human autonomy mode<br>
+  Siblings: Mallard v1.4 (board-official) · DAGger v2.1 (gated) · Observatory (publish-gated) · trouble = software that fixes itself, with or without you watching
+</div>
+
+</div>
+</body>
+</html>

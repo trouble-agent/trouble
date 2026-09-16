@@ -67,7 +67,7 @@ func (q *quotaSet) windowView(project string, now time.Time) (used, prevUsed int
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	w := q.advance(project, now)
-	elapsed = int(now.Sub(q.boot) / time.Second) % quotaWindowSeconds
+	elapsed = int(now.Sub(q.boot)/time.Second) % quotaWindowSeconds
 	return w.used, w.prevUsed, elapsed
 }
 
@@ -152,11 +152,11 @@ func parseHeaderRetry(h string) int {
 // sampled every 60s (§3.9). It is refreshed by the budget sampler goroutine and
 // read on the request path, so the request path never stats the filesystem.
 type diskUsage struct {
-	mu       sync.Mutex
-	bytes    int64
-	budget   int64
-	over     bool
-	sampled  time.Time
+	mu      sync.Mutex
+	bytes   int64
+	budget  int64
+	over    bool
+	sampled time.Time
 }
 
 func (d *diskUsage) set(bytes, budget int64, now time.Time) {

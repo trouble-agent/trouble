@@ -15,11 +15,11 @@ import (
 // Event source kinds (the `payload.source_kind` vocabulary of §4.3's one
 // signature space).
 const (
-	sourceEnvelope = "envelope"
-	sourceStore    = "store"
-	sourceGeneric  = "generic_json"
+	sourceEnvelope  = "envelope"
+	sourceStore     = "store"
+	sourceGeneric   = "generic_json"
 	sourceCollector = "collector"
-	sourceCanary   = "canary"
+	sourceCanary    = "canary"
 )
 
 // frame is one normalized stack frame.
@@ -36,38 +36,38 @@ type frame struct {
 // the store body, the generic JSON endpoint and the collector parsers all
 // produce before the scrubber and the fingerprint see it.
 type rawEvent struct {
-	ID         string
-	TS         string
-	Level      string
-	Logger     string
-	Culprit    string
-	Message    string
-	Release    string
-	Env        string
-	Platform   string
+	ID          string
+	TS          string
+	Level       string
+	Logger      string
+	Culprit     string
+	Message     string
+	Release     string
+	Env         string
+	Platform    string
 	Fingerprint []string
-	Tags       map[string]string
-	Extra      map[string]any
-	Frames     []frame
-	ExcClass   string
-	ExcValue   string
+	Tags        map[string]string
+	Extra       map[string]any
+	Frames      []frame
+	ExcClass    string
+	ExcValue    string
 
-	ItemTypes   []string
-	SourceKind  string
-	AuthForm    string
-	Project     string
-	Zone        string
+	ItemTypes    []string
+	SourceKind   string
+	AuthForm     string
+	Project      string
+	Zone         string
 	ClientReport *types.ClientReport
-	Partial     bool
-	FlushReason string
-	Truncated   bool
-	ClockSkewS  float64
+	Partial      bool
+	FlushReason  string
+	Truncated    bool
+	ClockSkewS   float64
 	// Raw is the original JSON object the event was decoded from, kept so the
 	// loss policy's spool can replay the exact bytes through the real pipeline.
 	Raw json.RawMessage
 	// LevelDegraded marks an unrecognized level that degraded to `error`
 	// (`invalid_level_total`, §3.6): a counter, never a refusal.
-	LevelDegraded bool
+	LevelDegraded   bool
 	CollectorParser string
 	CollectorSource string
 }

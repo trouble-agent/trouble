@@ -321,6 +321,18 @@ func (c *collectorSet) feed(line logLine) {
 	if line.TS.IsZero() {
 		line.TS = c.s.now()
 	}
+	if strings.TrimSpace(line.Text) == "" {
+		// A blank line is a separator inside a dump (Go puts one between the
+		// panic message and the goroutine block), never a START and never an END
+		// (§3.5's END rule excludes the goroutine header, which is what follows).
+		// It does count as activity for the silence timeout.
+		for _, p := range c.parsers {
+			if st := c.states[stateKey(line.Source, p.Name)]; st != nil {
+				st.last = line.TS
+			}
+		}
+		return
+	}
 
 	// Guard 1: one line starts at most one event; parsers are tried in order and
 	// the loser never sees the line.
@@ -340,6 +352,17 @@ func (c *collectorSet) feed(line logLine) {
 		p := starters[0]
 		key := stateKey(line.Source, p.Name)
 		if st := c.states[key]; st != nil && len(st.lines) > 0 {
+			if p.absorbs(st, line.Text) {
+				// A py-traceback's exception line matches the START pattern but
+				// is the last line of the traceback it closes: absorbing it keeps
+				// one traceback in one event (the §3.5 END row's "flush
+				// immediately" reading) while guard 2 still supersedes on a real
+				// new traceback header.
+				st.lines = append(st.lines, line)
+				st.last = line.TS
+				c.flushState(st, "end", false)
+				return
+			}
 			// Guard 2: a START mid-assembly flushes the partial first.
 			c.flushState(st, "superseded", true)
 		}
@@ -371,23 +394,71 @@ func (c *collectorSet) feed(line logLine) {
 			return
 		}
 		if p.Name == "go-panic" && reGoroutineLine.MatchString(line.Text) {
-			// A goroutine header flushes the dump and starts the next one; the
-			// header itself is not part of the event.
-			c.flushState(st, "goroutine_dump", false)
+			// The first goroutine block (goroutine 1) is the panicking
+			// goroutine and belongs to the event; a later block means the dump
+			// moved on, so the event is flushed there.
+			if hasGoFileLine(st.lines) {
+				c.flushState(st, "goroutine_dump", false)
+				return
+			}
+			st.lines = append(st.lines, line)
+			st.last = line.TS
 			return
 		}
-		if p.Name == "py-traceback" && strings.TrimSpace(line.Text) == "" {
-			// A blank line inside a traceback is noise, not an END.
-			continue
+		// First non-continuation line: END/flush for this parser. A line that
+		// *is* the traceback's own final line (its exception line, which is not
+		// a continuation) is absorbed first so one traceback stays one event.
+		if p.absorbs(st, line.Text) {
+			st.lines = append(st.lines, line)
+			st.last = line.TS
 		}
-		// First non-continuation line: END/flush for this parser.
 		c.flushState(st, "end", false)
-		if p.Name == "node-reject" || p.Name == "py-traceback" || p.Name == "go-panic" {
-			// The END line may itself start a new event; the dispatcher sees it
-			// again through the next feed() call, so nothing is lost.
-			return
+		return
+	}
+}
+
+// hasGoFileLine reports whether an assembled dump already carries a
+// `file.go:NN` frame line, which is what distinguishes goroutine 1's block (part
+// of the event) from a later dump block (which ends it).
+func hasGoFileLine(lines []logLine) bool {
+	for _, l := range lines {
+		if reGoFileLine.MatchString(strings.TrimSpace(l.Text)) {
+			return true
 		}
 	}
+	return false
+}
+
+// absorbs reports whether a START line is really the final line of the open
+// partial rather than the first line of a new event (py-traceback's exception
+// line is both).
+func (p *parserDef) absorbs(st *assembleState, line string) bool {
+	if p.Name != "py-traceback" || len(st.lines) == 0 {
+		return false
+	}
+	first := strings.TrimSpace(st.lines[0].Text)
+	if !strings.HasPrefix(first, "Traceback (most recent call last)") {
+		return false
+	}
+	t := strings.TrimSpace(line)
+	if strings.HasPrefix(t, "Traceback (most recent call last)") {
+		return false
+	}
+	if rePyException.MatchString(t) {
+		return true
+	}
+	// The wide form must still look like an exception line (a qualified name, or
+	// a pinned class suffix), so an ordinary `INFO: ready` line ends the event
+	// instead of joining it.
+	m := rePyExceptionWide.FindStringSubmatch(t)
+	if m == nil {
+		return false
+	}
+	class := m[1]
+	if strings.Contains(class, ".") {
+		return true
+	}
+	return rePyException.MatchString(t)
 }
 
 // stateKey keys assembly state by (source, parser) — two sources can never share

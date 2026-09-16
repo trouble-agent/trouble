@@ -118,6 +118,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleEnvelope(w http.ResponseWriter, r *http.Request, projectID, zone string) {
 	body, rerr := s.readEnvelopeBody(w, r)
 	if rerr != nil {
+		s.countReasonOnly(rerr)
 		s.writeError(w, rerr)
 		return
 	}
@@ -305,6 +306,7 @@ func (s *Server) handleStore(w http.ResponseWriter, r *http.Request, projectID, 
 	}
 	body, rerr := s.readEnvelopeBody(w, r)
 	if rerr != nil {
+		s.countReasonOnly(rerr)
 		s.writeError(w, rerr)
 		return
 	}
@@ -360,6 +362,7 @@ func (s *Server) handleGeneric(w http.ResponseWriter, r *http.Request, projectID
 	}
 	body, rerr := s.readEnvelopeBody(w, r)
 	if rerr != nil {
+		s.countReasonOnly(rerr)
 		s.writeError(w, rerr)
 		return
 	}
@@ -441,6 +444,14 @@ func (s *Server) refusal(w http.ResponseWriter, err *Error) bool {
 		return true
 	}
 	return false
+}
+
+// countReasonOnly records a reject reason for a request that failed before a
+// project was resolved (framing, size, gzip, media type).
+func (s *Server) countReasonOnly(err *Error) {
+	if r := rejectReason(err); r != "" {
+		s.counters.countReason(r)
+	}
 }
 
 // countReject records a rejected request for the storm detector of §5.

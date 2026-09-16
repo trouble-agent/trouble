@@ -68,16 +68,16 @@ type Config struct {
 	WriteTimeout             types.Duration
 	IdleTimeout              types.Duration
 	ReadHeaderTimeout        types.Duration
-	PerIPRate                string   // default "600/min, burst 60"
+	PerIPRate                string         // default "600/min, burst 60"
 	GroupFlush               types.Duration // default "5s"
 	CanaryInterval           types.Duration // default "10m"
 	CanaryProject            string         // project id that carries canaries
 	SpoolBudgetBytes         int64          // default 268435456
 	DiskBudgetBytes          int64          // default 2147483648
 	LossPolicy               types.LossPolicy
-	ProxyTrust               string   // "loopback" | "none" | "explicit-list"
-	TrustedProxies           []string // CIDRs, used only when ProxyTrust == "explicit-list"
-	AllowQueryKeyNonLoopback bool     // default false
+	ProxyTrust               string         // "loopback" | "none" | "explicit-list"
+	TrustedProxies           []string       // CIDRs, used only when ProxyTrust == "explicit-list"
+	AllowQueryKeyNonLoopback bool           // default false
 	LedgerWait               types.Duration // default "2s"; ingest backpressure ceiling
 	Projects                 []types.Project
 	Collectors               CollectorConfig

@@ -131,11 +131,11 @@ type releaseInfo struct {
 
 // releaseState is the release bookkeeping of §3.4.
 type releaseState struct {
-	mu        sync.Mutex
-	perRel    map[string]map[string]*releaseInfo // project → release → info
-	resolved  map[string]string                  // sig → last pre-resolve release
-	lastCanary map[string]string                 // project → canary observation ts
-	order     *releaseOrder
+	mu         sync.Mutex
+	perRel     map[string]map[string]*releaseInfo // project → release → info
+	resolved   map[string]string                  // sig → last pre-resolve release
+	lastCanary map[string]string                  // project → canary observation ts
+	order      *releaseOrder
 }
 
 func newReleaseState() *releaseState {

@@ -301,13 +301,13 @@ func eventRecordPayload(ev *rawEvent, sig types.Sig, itemType string, redactions
 		ItemTypes:   ev.ItemTypes,
 	}
 	p := map[string]any{
-		"item_type":   itemType,
-		"native_id":   ev.ID,
-		"event":       se,
-		"auth_form":   ev.AuthForm,
-		"source_kind": ev.SourceKind,
-		"zone":        ev.Zone,
-		"digest":      sig.DigestHex(),
+		"item_type":    itemType,
+		"native_id":    ev.ID,
+		"event":        se,
+		"auth_form":    ev.AuthForm,
+		"source_kind":  ev.SourceKind,
+		"zone":         ev.Zone,
+		"digest":       sig.DigestHex(),
 		"norm_version": sig.NormVersion,
 	}
 	if ev.ItemTypes != nil {
@@ -365,19 +365,19 @@ func renderStack(frames []frame) string {
 // groupRecordPayload builds a `group` record payload (§3.3's op vocabulary).
 func groupRecordPayload(op string, st *groupState, extra map[string]any) map[string]any {
 	p := map[string]any{
-		"op":             op,
-		"digest":         st.grp.Digest,
-		"sig":            st.grp.Sig,
-		"group_id":       st.grp.ID,
-		"title":          st.grp.Title,
-		"count":          st.grp.Count,
-		"counters":       st.grp.Counters,
-		"first_seen_ts":  st.grp.FirstSeenTS,
-		"last_seen_ts":   st.grp.LastSeenTS,
-		"release_range":  st.grp.ReleaseRange,
-		"norm_version":   types.NormVersionV1,
+		"op":               op,
+		"digest":           st.grp.Digest,
+		"sig":              st.grp.Sig,
+		"group_id":         st.grp.ID,
+		"title":            st.grp.Title,
+		"count":            st.grp.Count,
+		"counters":         st.grp.Counters,
+		"first_seen_ts":    st.grp.FirstSeenTS,
+		"last_seen_ts":     st.grp.LastSeenTS,
+		"release_range":    st.grp.ReleaseRange,
+		"norm_version":     types.NormVersionV1,
 		"events_upper_seq": st.eventsUpperSeq,
-		"aggregate":      true,
+		"aggregate":        true,
 	}
 	if st.sampleRate > 0 {
 		p["sample_rate"] = st.sampleRate
@@ -399,7 +399,6 @@ func gapRecordPayload(cause, scope string, estLost int, fromTS, toTS string) map
 		"to_ts":    toTS,
 	}
 }
-
 
 // --- payload readers --------------------------------------------------------
 //

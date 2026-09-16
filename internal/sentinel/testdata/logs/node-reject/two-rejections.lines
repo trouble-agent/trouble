@@ -1,0 +1,5 @@
+UnhandledPromiseRejection: first failure
+    at alpha (/srv/web/a.js:1:1)
+UnhandledPromiseRejection: second failure
+    at beta (/srv/web/b.js:2:2)
+    at node:internal/process/task_queues:95:5

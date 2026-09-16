@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 // journalSource supervises one `journalctl -f -o json` child (§3.5). The cursor
@@ -152,12 +151,12 @@ type journalEvent struct {
 // parseJournalLine decodes journald's `-o json` record.
 func parseJournalLine(b []byte) (journalEvent, bool) {
 	var raw struct {
-		Message      any    `json:"MESSAGE"`
-		RealTime     string `json:"__REALTIME_TIMESTAMP"`
-		Unit         string `json:"_SYSTEMD_UNIT"`
-		Cursor       string `json:"__CURSOR"`
-		Priority     string `json:"PRIORITY"`
-		Identifier   string `json:"SYSLOG_IDENTIFIER"`
+		Message    any    `json:"MESSAGE"`
+		RealTime   string `json:"__REALTIME_TIMESTAMP"`
+		Unit       string `json:"_SYSTEMD_UNIT"`
+		Cursor     string `json:"__CURSOR"`
+		Priority   string `json:"PRIORITY"`
+		Identifier string `json:"SYSLOG_IDENTIFIER"`
 	}
 	if err := json.Unmarshal(b, &raw); err != nil {
 		return journalEvent{}, false
@@ -179,7 +178,7 @@ func parseJournalLine(b []byte) (journalEvent, bool) {
 		return journalEvent{}, false
 	}
 	ev := journalEvent{
-		line: logLine{Text: msg, Source: "journal:" + raw.Unit, Unit: raw.Unit},
+		line:   logLine{Text: msg, Source: "journal:" + raw.Unit, Unit: raw.Unit},
 		cursor: raw.Cursor,
 		realTS: raw.RealTime,
 	}
@@ -218,4 +217,3 @@ func (j *journalSource) Close() error {
 	}
 	return nil
 }
-

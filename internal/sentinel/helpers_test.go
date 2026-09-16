@@ -314,13 +314,13 @@ type envelopeFixtureItem struct {
 func eventJSON(tb testing.TB, mut func(map[string]any)) []byte {
 	tb.Helper()
 	obj := map[string]any{
-		"event_id":   "9f2c1d3e4b5a6c7d8e9f0a1b2c3d4e5f",
-		"level":      "error",
-		"message":    "queue wedge: pool exhausted",
-		"culprit":    "worker.claim",
-		"release":    "payment-api@2.4.1",
+		"event_id":    "9f2c1d3e4b5a6c7d8e9f0a1b2c3d4e5f",
+		"level":       "error",
+		"message":     "queue wedge: pool exhausted",
+		"culprit":     "worker.claim",
+		"release":     "payment-api@2.4.1",
 		"environment": "prod",
-		"platform":   "python",
+		"platform":    "python",
 		"exception": map[string]any{
 			"values": []any{map[string]any{
 				"type":  "PoolExhausted",

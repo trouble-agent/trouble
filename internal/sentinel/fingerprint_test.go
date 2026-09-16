@@ -139,7 +139,7 @@ func TestMaskingRules(t *testing.T) {
 		{"token deadbeefcafe12", "token HEXID"},
 		{"waited 250ms then 3h", "waited DUR then DUR"},
 		{"depth=912 and 7 and 44", "depth=N and 7 and 44"},
-		{"file /tmp/build-12.log", "file /TMP.log"}, // the rule stops at the last digit, so a suffix survives
+		{"file /tmp/build-12.log", "file /TMP.log"},           // the rule stops at the last digit, so a suffix survives
 		{"file /tmp/build-1234.log", "file /tmp/build-N.log"}, // rule 11 precedes rule 12 for 3+ digit runs
 		{"listen 0.0.0.0:8080", "listen 0.0.0.0:PORT"},
 		{"two   spaces\tand\ttabs", "two spaces and tabs"},

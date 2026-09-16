@@ -29,7 +29,7 @@ func TestEnvelopeFixturesDecode(t *testing.T) {
 	for _, tc := range cases {
 		body := readFixture(t, tc.fixture)
 		resp := ts.post(t, "/api/1/envelope/", map[string]string{
-			"X-Sentry-Auth":  ts.authHeader("1"),
+			"X-Sentry-Auth":    ts.authHeader("1"),
 			"Content-Encoding": "identity",
 		}, body)
 		if resp.StatusCode != http.StatusOK {
@@ -74,13 +74,13 @@ func TestEnvelopeFramingCases(t *testing.T) {
 		code   types.ErrorCode
 	}{
 		{
-			name: "length present",
-			body: envelopeBytes(t, base, envelopeFixtureItem{Type: "event", Body: ev, Length: true}),
+			name:   "length present",
+			body:   envelopeBytes(t, base, envelopeFixtureItem{Type: "event", Body: ev, Length: true}),
 			status: 200,
 		},
 		{
-			name: "length absent (single-line JSON)",
-			body: envelopeBytes(t, base, envelopeFixtureItem{Type: "event", Body: ev}),
+			name:   "length absent (single-line JSON)",
+			body:   envelopeBytes(t, base, envelopeFixtureItem{Type: "event", Body: ev}),
 			status: 200,
 		},
 		{
@@ -102,7 +102,7 @@ func TestEnvelopeFramingCases(t *testing.T) {
 			code:   types.CodeSentinel001,
 		},
 		{
-			name:   "missing LF after a length-prefixed body",
+			name: "missing LF after a length-prefixed body",
 			// A `length` that understates the body: the extra bytes are
 			// discarded and the item parses (§6.4: a lying length is data).
 			body:   []byte("{\"event_id\":\"9f2c1d3e4b5a6c7d8e9f0a1b2c3d4e5f\"}\n{\"type\":\"event\",\"length\":2}\n{}trailing-bytes-discarded\n"),
@@ -242,10 +242,10 @@ func TestStoreRouteForms(t *testing.T) {
 	form := "sentry_data=" + url.QueryEscape(string(ev))
 
 	cases := []struct {
-		name  string
-		body  []byte
-		hdr   map[string]string
-		want  int
+		name string
+		body []byte
+		hdr  map[string]string
+		want int
 	}{
 		{"json", ev, map[string]string{"Content-Type": "application/json"}, 200},
 		{"json gzip", gzipBytes(t, ev), map[string]string{"Content-Type": "application/json", "Content-Encoding": "gzip"}, 200},

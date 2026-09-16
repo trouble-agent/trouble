@@ -187,4 +187,3 @@ func genericException(ex map[string]any, causes *[]string) ([]frame, string, str
 	}
 	return out, class, value
 }
-

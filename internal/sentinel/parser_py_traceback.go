@@ -23,8 +23,15 @@ var pyContinuation = []string{
 	`^  \|`,
 }
 
-// rePyException matches the exception line `ExcClass: text`.
+// rePyException matches the pinned exception-line shape `ExcClass: text`.
 var rePyException = regexp.MustCompile(`^([A-Za-z_.]*\d*(?:Error|Exception|Warning|Exit|Fault))\s*:?\s*(.*)$`)
+
+// rePyExceptionWide also accepts a qualified, non-pinned exception name
+// (`app.queue.PoolExhausted: text`). The §3.5 START pattern only lists the
+// stdlib class suffixes, but a traceback's last line is its exception line
+// whatever the class is called; the message field must therefore read the last
+// line rather than the `Traceback` header (documented deviation #6).
+var rePyExceptionWide = regexp.MustCompile(`^([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*): (.*)$`)
 
 // rePyFile matches `  File "/path/file.py", line 118, in func`.
 var rePyFile = regexp.MustCompile(`^\s*File "([^"]+)", line (\d+)(?:, in (\S+))?`)
@@ -76,6 +83,10 @@ func buildPyTracebackEvent(lines []logLine) *rawEvent {
 			if m[2] != "" {
 				ev.Message = m[1] + ": " + strings.TrimSpace(m[2])
 			}
+		} else if m := rePyExceptionWide.FindStringSubmatch(strings.TrimSpace(t)); m != nil {
+			ev.ExcClass = m[1]
+			ev.ExcValue = strings.TrimSpace(m[2])
+			ev.Message = m[1] + ": " + strings.TrimSpace(m[2])
 		}
 	}
 	if pendingFile != "" {

@@ -15,12 +15,20 @@ const goPanicStart = `^(?:\s*panic: |fatal error: )`
 
 // goPanicContinuation is `^\s+\S` (indented), `^\S+\.go:\d+`, `^\t`,
 // `^\S+\(0x`, `^\s*created by `.
+//
+// The last entry is an addition (documented deviation #5 in
+// docs/sentinel-compat.md §5): a Go dump prints frames with no arguments as a
+// bare `pkg.Func()` line, which none of the pinned five patterns match — and the
+// pinned END rule would then close the event at the first frame, losing the
+// stack. The added pattern matches only a whitespace-free, dotted, parenthesised
+// symbol line, so ordinary log lines are unaffected.
 var goPanicContinuation = []string{
 	`^\s+\S`,
 	`^\S+\.go:\d+`,
 	`^\t`,
 	`^\S+\(0x`,
 	`^\s*created by `,
+	`^[\w./*\[\]<>-]+(?:\.[\w]+)+(?:\(.*\))?$`,
 }
 
 // reGoFuncLine matches a Go stack function line: `pkg/path.func(args)`,
@@ -96,18 +104,22 @@ func buildGoPanicEvent(lines []logLine) *rawEvent {
 	if pendingFn != "" && len(ev.Frames) > 0 {
 		ev.Frames[len(ev.Frames)-1].Function = pendingFn
 	}
+	// A Go dump lists goroutine 1 innermost-first; the canonical frame order is
+	// oldest-first with the panicking frame last (§3.5's stack-order row), which
+	// is also the order an SDK reports — that is what makes one digest across
+	// both paths (§4.4).
+	reverseFrames(ev.Frames)
 	if len(ev.Frames) > 0 {
+		// The frame immediately above `panic:` is the panicking function, and
+		// after the reversal it is the last frame.
 		last := ev.Frames[len(ev.Frames)-1]
 		ev.Culprit = last.Function
 		if ev.Culprit == "" {
 			ev.Culprit = last.File
 		}
 	}
-	if panicIdx >= 0 {
-		// The frame immediately above `panic:` is the panicking function.
-		if fn := lastFunctionBefore(ev.Frames, lines, panicIdx); fn != "" {
-			ev.Culprit = fn
-		}
+	if panicIdx >= 0 && len(ev.Frames) > 0 {
+		ev.Culprit = ev.Frames[len(ev.Frames)-1].Function
 	}
 	if ev.Message == "" {
 		ev.Message = "panic"
@@ -115,16 +127,11 @@ func buildGoPanicEvent(lines []logLine) *rawEvent {
 	return ev
 }
 
-// lastFunctionBefore returns the function name of the last frame whose source
-// line index is below the panic line.
-func lastFunctionBefore(frames []frame, lines []logLine, panicIdx int) string {
-	fn := ""
-	for i := 0; i < panicIdx && i < len(lines); i++ {
-		if m := reGoFuncLine.FindStringSubmatch(strings.TrimSpace(lines[i].Text)); m != nil {
-			fn = m[1]
-		}
+// reverseFrames flips a frame slice in place (Go dumps are innermost-first).
+func reverseFrames(f []frame) {
+	for i, j := 0, len(f)-1; i < j; i, j = i+1, j-1 {
+		f[i], f[j] = f[j], f[i]
 	}
-	return fn
 }
 
 // goInApp reports whether a Go file path is application code (not stdlib, not

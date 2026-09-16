@@ -50,10 +50,10 @@ func newProjectEntry(p types.Project) *projectEntry {
 
 // projectIndex resolves keys and projects (§2.4).
 type projectIndex struct {
-	mu       sync.RWMutex
-	byID     map[string]*projectEntry
-	byKey    map[string]*projectEntry
-	order    []string
+	mu    sync.RWMutex
+	byID  map[string]*projectEntry
+	byKey map[string]*projectEntry
+	order []string
 }
 
 func newProjectIndex(projects []types.Project) (*projectIndex, *Error) {
@@ -229,15 +229,15 @@ func (e *projectEntry) counterSnapshot() map[string]any {
 		items[k] = v
 	}
 	return map[string]any{
-		"events_total":          e.eventsTotal,
+		"events_total":           e.eventsTotal,
 		"duplicate_events_total": e.duplicateEvts,
-		"rejected_total":        e.rejected,
-		"dropped_total":         e.dropped,
-		"spooled_total":         e.spooled,
-		"sampled_total":         e.sampled,
-		"legacy_store_total":    e.legacyStore,
-		"unknown_items_total":   e.unknownItems,
-		"items_dropped_total":   items,
+		"rejected_total":         e.rejected,
+		"dropped_total":          e.dropped,
+		"spooled_total":          e.spooled,
+		"sampled_total":          e.sampled,
+		"legacy_store_total":     e.legacyStore,
+		"unknown_items_total":    e.unknownItems,
+		"items_dropped_total":    items,
 	}
 }
 

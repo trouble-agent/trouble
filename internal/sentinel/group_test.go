@@ -11,14 +11,14 @@ import (
 // groupEvent builds an event that groups to one digest (the vector-B stack).
 func groupEvent(id, release string) *rawEvent {
 	return &rawEvent{
-		ID:          id,
-		TS:          "2026-09-16T09:14:03.221Z",
-		Level:       "error",
-		Culprit:     "worker.claim",
-		Message:     "queue wedge: pool exhausted depth=912",
-		Release:     release,
-		SourceKind:  sourceGeneric,
-		AuthForm:    fmtGenericQuery,
+		ID:         id,
+		TS:         "2026-09-16T09:14:03.221Z",
+		Level:      "error",
+		Culprit:    "worker.claim",
+		Message:    "queue wedge: pool exhausted depth=912",
+		Release:    release,
+		SourceKind: sourceGeneric,
+		AuthForm:   fmtGenericQuery,
 		Frames: []frame{
 			{File: "worker.py", Function: "claim", InApp: true, ContextLine: "item = pool.get(timeout=1)"},
 			{File: "queue.py", Function: "get", InApp: true, ContextLine: "raise PoolExhausted(depth=912)"},

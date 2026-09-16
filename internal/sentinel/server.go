@@ -161,37 +161,37 @@ func (c *counters) snapshot() map[string]any {
 	}
 	c.mu.Unlock()
 	return map[string]any{
-		"requests_total":         c.requests.Get(),
-		"ingest_404_total":       c.ingest404.Get(),
-		"envelopes_total":        c.envelopes.Get(),
-		"empty_envelopes":        c.emptyEnvelopes.Get(),
-		"legacy_store_total":     c.legacyStore.Get(),
-		"unknown_items_total":    c.unknownItems.Get(),
-		"items_dropped_total":    items,
-		"client_reports_total":   c.clientReports.Get(),
-		"parser_ambiguous_total": c.parserAmbiguous.Get(),
-		"parser_error_total":     c.parserErrors.Get(),
-		"partial_events_total":   c.partialEvents.Get(),
-		"non_utf8_total":         c.nonUTF8.Get(),
-		"duplicate_events_total": c.duplicateEvents.Get(),
-		"reject_total":           reasons,
-		"rejects_total":          c.rejects.Get(),
-		"canary_injected_total":  c.canaryInjected.Get(),
-		"canary_observed_total":  c.canaryObserved.Get(),
-		"canary_missing_total":   c.canaryMissing.Get(),
-		"spooled_total":          c.spooled.Get(),
-		"sampled_total":          c.sampled.Get(),
-		"spool_replayed_total":   c.replayed.Get(),
-		"dropped_quota_total":    c.droppedQuota.Get(),
-		"spool_write_failed":     c.spoolWriteFail.Get(),
-		"item_overrun_total":     c.overrun.Get(),
-		"truncated_total":        c.truncated.Get(),
-		"invalid_level_total":    c.invalidLevel.Get(),
+		"requests_total":             c.requests.Get(),
+		"ingest_404_total":           c.ingest404.Get(),
+		"envelopes_total":            c.envelopes.Get(),
+		"empty_envelopes":            c.emptyEnvelopes.Get(),
+		"legacy_store_total":         c.legacyStore.Get(),
+		"unknown_items_total":        c.unknownItems.Get(),
+		"items_dropped_total":        items,
+		"client_reports_total":       c.clientReports.Get(),
+		"parser_ambiguous_total":     c.parserAmbiguous.Get(),
+		"parser_error_total":         c.parserErrors.Get(),
+		"partial_events_total":       c.partialEvents.Get(),
+		"non_utf8_total":             c.nonUTF8.Get(),
+		"duplicate_events_total":     c.duplicateEvents.Get(),
+		"reject_total":               reasons,
+		"rejects_total":              c.rejects.Get(),
+		"canary_injected_total":      c.canaryInjected.Get(),
+		"canary_observed_total":      c.canaryObserved.Get(),
+		"canary_missing_total":       c.canaryMissing.Get(),
+		"spooled_total":              c.spooled.Get(),
+		"sampled_total":              c.sampled.Get(),
+		"spool_replayed_total":       c.replayed.Get(),
+		"dropped_quota_total":        c.droppedQuota.Get(),
+		"spool_write_failed":         c.spoolWriteFail.Get(),
+		"item_overrun_total":         c.overrun.Get(),
+		"truncated_total":            c.truncated.Get(),
+		"invalid_level_total":        c.invalidLevel.Get(),
 		"fingerprint_fallback_total": c.fingerprintFB.Get(),
-		"scrub_refusals_total":   c.scrubRefusals.Get(),
-		"ingest_reject_storm":    c.rejectStorm.Get(),
-		"events_total":           c.events.Get(),
-		"groups_created_total":   c.groupsCreated.Get(),
+		"scrub_refusals_total":       c.scrubRefusals.Get(),
+		"ingest_reject_storm":        c.rejectStorm.Get(),
+		"events_total":               c.events.Get(),
+		"groups_created_total":       c.groupsCreated.Get(),
 	}
 }
 
@@ -224,11 +224,11 @@ type Server struct {
 	now   func() time.Time
 	zoner string
 
-	mu       sync.Mutex
+	mu          sync.Mutex
 	regressions map[string]string
-	gmu      sync.Mutex
-	dups     map[string]time.Time
-	dupOrder []string
+	gmu         sync.Mutex
+	dups        map[string]time.Time
+	dupOrder    []string
 
 	// lastRateHeader carries the proactive-backoff header of the most recent
 	// decision (§3.9: 200 + header at 95% of quota).
@@ -242,20 +242,20 @@ type Server struct {
 	rejectMu      sync.Mutex
 	rejectWindows map[string]*rejectWindow
 
-	canaryMu       sync.Mutex
-	canaryProj     string
+	canaryMu        sync.Mutex
+	canaryProj      string
 	canaryProjState string
-	canaryIter     uint64
-	canaryLastTS   string
-	canaryLastOK   bool
-	canaryInFlight bool
+	canaryIter      uint64
+	canaryLastTS    string
+	canaryLastOK    bool
+	canaryInFlight  bool
 
 	collectors *collectorSet
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	draining atomic.Bool
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	draining    atomic.Bool
 	startedFlag atomic.Bool
 }
 
@@ -957,9 +957,9 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 	s.releases.note(entry.proj.ID, ev.Release, ev.TS)
 
 	extra := map[string]any{
-		"disposition":  disposition,
-		"sample_rate":  s.sampleRateFor(digest),
-		"quota_limit":  entry.proj.QuotaEPM,
+		"disposition": disposition,
+		"sample_rate": s.sampleRateFor(digest),
+		"quota_limit": entry.proj.QuotaEPM,
 	}
 	if disposition == dispSampled || disposition == dispSpooled {
 		extra["error_code"] = string(types.CodeSentinel014)

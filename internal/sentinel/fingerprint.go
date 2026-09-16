@@ -27,17 +27,17 @@ const maxNormLine = 512
 
 // The masking rule set (`norm_version = 1`), in the pinned order of §3.3.
 var (
-	reUUID      = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
-	reTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
-	reFileLine  = regexp.MustCompile(`[\w./\-]+\.(?:go|py|js|ts|java|rb|rs|php|cs|c|cpp|h):\d+(?::\d+)?`)
-	reAddr      = regexp.MustCompile(`0x[0-9a-fA-F]{4,}`)
-	reGoroutine = regexp.MustCompile(`goroutine \d+`)
-	rePID       = regexp.MustCompile(`(?i)\bpid[=: ]\s*\d+`)
-	reHexID     = regexp.MustCompile(`\b[0-9a-f]{8,}\b`)
-	reDuration  = regexp.MustCompile(`\b\d+(?:\.\d+)?(?:ns|µs|us|ms|s|m|h)\b`)
-	reNumber    = regexp.MustCompile(`\b\d{3,}\b`)
-	reTmpPath   = regexp.MustCompile(`/(?:tmp|var/tmp)/\S*\d+`)
-	rePort      = regexp.MustCompile(`:(?:6[0-9]{4}|[1-9][0-9]{3,4})\b`)
+	reUUID       = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	reTimestamp  = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`)
+	reFileLine   = regexp.MustCompile(`[\w./\-]+\.(?:go|py|js|ts|java|rb|rs|php|cs|c|cpp|h):\d+(?::\d+)?`)
+	reAddr       = regexp.MustCompile(`0x[0-9a-fA-F]{4,}`)
+	reGoroutine  = regexp.MustCompile(`goroutine \d+`)
+	rePID        = regexp.MustCompile(`(?i)\bpid[=: ]\s*\d+`)
+	reHexID      = regexp.MustCompile(`\b[0-9a-f]{8,}\b`)
+	reDuration   = regexp.MustCompile(`\b\d+(?:\.\d+)?(?:ns|µs|us|ms|s|m|h)\b`)
+	reNumber     = regexp.MustCompile(`\b\d{3,}\b`)
+	reTmpPath    = regexp.MustCompile(`/(?:tmp|var/tmp)/\S*\d+`)
+	rePort       = regexp.MustCompile(`:(?:6[0-9]{4}|[1-9][0-9]{3,4})\b`)
 	reWhitespace = regexp.MustCompile(`\s+`)
 )
 

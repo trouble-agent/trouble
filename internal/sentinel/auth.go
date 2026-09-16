@@ -12,10 +12,10 @@ import (
 // Auth form names (SPEC-04 §2.4). They are the values written into
 // `payload.auth_form` and into `Project.AuthForms`.
 const (
-	fmtXSentryAuth   = "x_sentry_auth"
-	fmtEnvelopeDSN   = "envelope_dsn"
-	fmtQueryKey      = "query_sentry_key"
-	fmtGenericQuery  = "generic_json_query"
+	fmtXSentryAuth  = "x_sentry_auth"
+	fmtEnvelopeDSN  = "envelope_dsn"
+	fmtQueryKey     = "query_sentry_key"
+	fmtGenericQuery = "generic_json_query"
 )
 
 // authMaterial is one auth form found on a request.

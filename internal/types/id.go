@@ -75,16 +75,28 @@ func incRand(r *[10]byte) bool {
 // encodeULID packs 128 bits into 26 Crockford base32 characters (the standard
 // 2-bit left padding). It is a straight bit walk: no big.Int, no allocation
 // beyond the result, because NewID is on every record's hot path.
+//
+// Layout: 48-bit millisecond timestamp in the leading characters, 80-bit
+// randomness in the trailing ones. That is what makes the JSONL-visible id order
+// match time order, and it is why a same-millisecond caller must increment the
+// randomness from its least significant byte (`incRand`) for ids to stay
+// distinct and increasing.
 func encodeULID(ms uint64, rnd [10]byte) string {
 	var raw [16]byte
-	binary.BigEndian.PutUint64(raw[0:8], ms&0xffffffffffff)
-	copy(raw[8:], rnd[:])
+	raw[0] = byte(ms >> 40)
+	raw[1] = byte(ms >> 32)
+	raw[2] = byte(ms >> 24)
+	raw[3] = byte(ms >> 16)
+	raw[4] = byte(ms >> 8)
+	raw[5] = byte(ms)
+	copy(raw[6:], rnd[:])
 	var out [26]byte
 	for i := 0; i < 26; i++ {
-		start := 130 - 5*(i+1) // bit range in a 130-bit space (2 bits of padding)
+		// Character i covers the 130-bit encoding space bits [5i, 5i+5); the
+		// value bits start two positions in (the 2-bit left padding).
 		var v uint32
 		for b := 0; b < 5; b++ {
-			idx := start + b - 2 // index into the 128-bit value
+			idx := 5*i + b - 2
 			var bit uint32
 			if idx >= 0 && idx < 128 {
 				bit = uint32((raw[idx/8] >> uint(7-idx%8)) & 1)

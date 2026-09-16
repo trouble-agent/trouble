@@ -161,12 +161,13 @@ func RunUpgrade(ctx context.Context, cfg Config, o UpgradeOptions) error {
 	}
 
 	if o.Rollback {
+		// Rollback is the same rename-over recipe with the newest backup as the
+		// source: the live path is never opened for writing.
 		prev, err := latestBackup(cfg)
 		if err != nil {
 			return fmt.Errorf("%w: %v", types.CodeLifecycle011, err)
 		}
 		o.To = prev
-		bin = bin // rename over the live path, exactly as the forward path does
 	}
 
 	if o.To == "" {

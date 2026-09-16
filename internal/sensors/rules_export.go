@@ -1,33 +1,13 @@
 package sensors
 
-import "github.com/totalwindupflightsystems/trouble/internal/types"
-
-// rules_export.go publishes the live rule set to the two consumers SPEC-INDEX
-// §4.1 pins to the same dialect: internal/ladder (rung decisions read a rule's
-// entry rung, cooldown, max runs and verify window) and the composition root.
+// rules_export.go publishes the rule-set generation counter to the composition
+// root. Rules() itself already exists (rules.go): the compiled set stays private,
+// so a caller gets copies of the rules and never the evaluator's internals.
 //
-// The compiled set stays private: a caller gets copies of the rules, never the
-// evaluator's internals, so a second evaluation path cannot grow out of this
-// accessor.
+// The ladder caches rule metadata (entry rung, cooldown, max runs, verify
+// window) and must invalidate that cache when a SIGHUP reload swaps the set — the
+// generation counter is what makes the invalidation exact instead of time-based.
 
-// Rules returns the live rule set, one copy per rule (empty when no set has been
-// loaded yet — a daemon reads this after New/Reload, never before).
-func (s *Sensors) Rules() []types.Rule {
-	rs := s.rules.Load()
-	if rs == nil || len(rs.rules) == 0 {
-		return nil
-	}
-	out := make([]types.Rule, len(rs.rules))
-	copy(out, rs.rules)
-	return out
-}
-
-// RulesGeneration reports the generation counter of the live set; a caller that
-// caches decisions beside the rules can invalidate on a change.
-func (s *Sensors) RulesGeneration() uint64 {
-	rs := s.rules.Load()
-	if rs == nil {
-		return 0
-	}
-	return rs.gen
-}
+// RulesGeneration returns the number of rule-set generations installed since
+// boot. It is monotone and zero before the first load.
+func (s *Sensors) RulesGeneration() uint64 { return s.ruleGen.Load() }

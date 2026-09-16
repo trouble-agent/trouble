@@ -235,44 +235,10 @@ func Serve(ctx context.Context, cfg Config, deps Deps) error {
 	if err != nil {
 		return &dashError{Code: types.CodeLifecycle003, HTTP: 500, Message: "bind preflight refused", Detail: "bind_collision"}
 	}
-
-	srv := &http.Server{
-		Handler:           s,
-		MaxHeaderBytes:    maxHeaderBytes,
-		ReadTimeout:       readTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-		ReadHeaderTimeout: readTimeout,
-	}
 	if s.logger != nil {
 		s.logger.Info("dashboard listening", "addr", addr, "identity", cfg.Identity, "loopback", s.loopback)
 	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- srv.Serve(ln)
-	}()
-
-	select {
-	case <-ctx.Done():
-		// Stop accepting; drain in-flight requests for ≤5s (SPEC-10 §4.1
-		// step 6). No ledger state exists to flush.
-		shCtx, cancel := context.WithTimeout(context.Background(), drainTimeout)
-		defer cancel()
-		if err := srv.Shutdown(shCtx); err != nil && s.logger != nil {
-			s.logger.Warn("dashboard drain incomplete", "err", err)
-		}
-		srv.Close()
-		if s.logger != nil {
-			s.logger.Info("dashboard stopped")
-		}
-		return nil
-	case err := <-errCh:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
-	}
+	return serveOn(ctx, s, ln)
 }
 
 // newServer implements the §4.1 startup sequence up to (but not including)

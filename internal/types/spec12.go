@@ -19,7 +19,7 @@ type Heartbeat struct {
 
 // SpoolEntry is one line of a satellite spool segment (SPEC-TYPES §3.14).
 type SpoolEntry struct {
-	ID        string `json:"id"`   // ev_ + ULID
+	ID        string `json:"id"` // ev_ + ULID
 	TS        string `json:"ts"`
 	Kind      string `json:"kind"` // forward | issue | spawn | skill
 	Payload   []byte `json:"payload"`

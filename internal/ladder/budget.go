@@ -3,6 +3,7 @@ package ladder
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -12,6 +13,7 @@ import (
 // window IS an open breaker with scope sig:<sig> and reason suppression_window.
 type breakerState struct {
 	Breaker    types.Breaker
+	Escalated  bool
 	Trips      int
 	Opened     time.Time
 	Duration   time.Duration
@@ -121,10 +123,32 @@ func (l *Ladder) TripBreaker(ctx context.Context, scope, reason string) (types.B
 	d := l.openFor(scope)
 	b := l.breakerLocked(scope)
 	l.openBreakerLockedWithReason(b, reason, d)
+	l.breakerEscalationLocked(ctx, b, l.newestForScopeLocked(scope))
 	if err := l.appendBreaker(ctx, b, ""); err != nil {
 		return b.Breaker, wrapErr(types.CodeLadder015, "", err)
 	}
 	return b.Breaker, nil
+}
+
+// newestForScopeLocked returns the newest open incident a scope refers to (its
+// sig for sig:<sig>, its rule/source otherwise) so a flapping breaker can file an
+// issue against a real incident.
+func (l *Ladder) newestForScopeLocked(scope string) types.Incident {
+	if sig, ok := strings.CutPrefix(scope, scopeSig); ok {
+		for _, st := range l.incs {
+			if st.Inc.Sig == sig {
+				return st.Inc
+			}
+		}
+		return types.Incident{}
+	}
+	var newest types.Incident
+	for _, st := range l.incs {
+		if st.Inc.UpdatedTS > newest.UpdatedTS {
+			newest = st.Inc
+		}
+	}
+	return newest
 }
 
 // Suppress opens a suppression window for a sig (§3.8); a suppression window is
@@ -251,9 +275,11 @@ func (l *Ladder) observeBreakerClosuresLocked(ctx context.Context, st *incState)
 	}
 }
 
-// breakerEscalationLocked raises the source severity and files an issue when a
-// breaker re-opens 4 times in 24h (§3.8: "the human path is never fully
-// suppressed").
+// breakerEscalationLocked raises the source to critical and files an issue when a
+// breaker re-opens 4 times in 24h (§3.8: "A breaker that re-opens 4 times in 24h
+// raises the source's severity to critical and writes an issue through the outlet
+// (the human path is never fully suppressed)"). It is called from every re-open,
+// so flapping cannot be silent.
 func (l *Ladder) breakerEscalationLocked(ctx context.Context, b *breakerState, inc types.Incident) {
 	cutoff := l.now().Add(-24 * time.Hour)
 	recent := 0
@@ -262,13 +288,20 @@ func (l *Ladder) breakerEscalationLocked(ctx context.Context, b *breakerState, i
 			recent++
 		}
 	}
-	b.Reopens24h = b.Reopens24h[len(b.Reopens24h):]
 	if recent < 4 {
 		return
 	}
-	if l.deps.Outlets != nil {
-		_, _ = l.deps.Outlets.EnsureIssue(ctx, inc)
-		_ = l.deps.Outlets.Comment(ctx, inc, "breaker "+b.Breaker.Scope+" re-opened 4 times in 24h")
+	// Only the escalating call acts: the count is consumed so the daemon files
+	// one issue per flapping episode, not one per arrival.
+	b.Reopens24h = nil
+	b.Escalated = true
+	if inc.ID != "" {
+		inc.Severity = types.SevCritical
+		if l.deps.Outlets != nil {
+			if _, err := l.deps.Outlets.EnsureIssue(ctx, inc); err == nil {
+				_ = l.deps.Outlets.Comment(ctx, inc, "breaker "+b.Breaker.Scope+" re-opened 4 times in 24h")
+			}
+		}
 	}
 	if l.deps.Notify != nil {
 		_ = l.deps.Notify.Emit(ctx, inc, "breaker_flapping", map[string]any{"scope": b.Breaker.Scope, "trips": b.Tripper()})

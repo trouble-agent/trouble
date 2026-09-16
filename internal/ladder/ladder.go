@@ -573,7 +573,7 @@ func (l *Ladder) foldLocked(ctx context.Context, sig, inKey string, obs Observat
 		id = v
 	}
 	if id == "" {
-		l.noteOneScopeCodeLocked(scope)
+		l.noteOneScopeCodeLocked(ctx, scope, nil)
 		return ""
 	}
 	st := l.incs[id]
@@ -593,13 +593,14 @@ func (l *Ladder) foldLocked(ctx context.Context, sig, inKey string, obs Observat
 			"arrival_paths":    st.ArrivalPaths,
 		})
 	}
-	l.noteOneScopeCodeLocked(scope)
+	l.noteOneScopeCodeLocked(ctx, scope, st)
 	return id
 }
 
 // noteOneScopeCodeLocked records TROUBLE-LADDER-014 once per window and then
-// every 100th arrival (§3.8).
-func (l *Ladder) noteOneScopeCodeLocked(scope string) {
+// every 100th arrival (§3.8), and gives a flapping breaker its human path: four
+// re-opens in 24h file an issue.
+func (l *Ladder) noteOneScopeCodeLocked(ctx context.Context, scope string, st *incState) {
 	b := l.breakers[scope]
 	if b == nil {
 		return
@@ -607,6 +608,13 @@ func (l *Ladder) noteOneScopeCodeLocked(scope string) {
 	b.Folds++
 	if b.Folds == 1 || b.Folds%100 == 0 {
 		b.Codes = append(b.Codes, string(types.CodeLadder014))
+	}
+	if b.Breaker.State == types.BreakerOpen {
+		inc := types.Incident{}
+		if st != nil {
+			inc = st.Inc
+		}
+		l.breakerEscalationLocked(ctx, b, inc)
 	}
 }
 

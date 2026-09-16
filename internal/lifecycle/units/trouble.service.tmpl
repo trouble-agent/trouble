@@ -1,0 +1,37 @@
+[Unit]
+Description=__DESC__
+Documentation=https://github.com/totalwindupflightsystems/trouble
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+OnFailure=trouble-escalate@%n.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+WatchdogSec=__WATCHDOG__
+Restart=always
+RestartSec=5
+TimeoutStopSec=90
+TimeoutStartSec=30
+KillMode=mixed
+KillSignal=SIGTERM
+EnvironmentFile=-__ENVFILE__
+Environment=TROUBLE_STATE_ROOT=__STATE_ROOT__
+ExecStart=__EXEC__ --config __CONFIG__
+ExecReload=/bin/kill -HUP $MAINPID
+MemoryHigh=__MEM_HIGH__
+MemoryMax=__MEM_MAX__
+MemorySwapMax=0
+OOMScoreAdjust=-500
+LimitNOFILE=8192
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=__STATE_ROOT__
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes

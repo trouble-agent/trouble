@@ -1,159 +1,231 @@
-// Package scrub is the single safety gate between the outside world and every
-// byte trouble persists (SPEC-02).
-//
-// SPEC-02 owns this package and ships the full engine (`Engine`, rule sets,
-// per-target scrubbing, counters). SPEC-01 §4.2 requires exactly one entry
-// point from the ledger — `MandatoryScan` — used as the write-boundary
-// defence-in-depth re-scan, and SPEC-INDEX §4.1 fixes the build order
-// SPEC-01 → SPEC-02. This file therefore provides the SPEC-01-named seam with
-// the mandatory rule set (brief C: env-var assignments, bearer/token shapes,
-// private keys, DSN secret parts, connection strings) and nothing else: the
-// ledger must not acquire a policy dependency. SPEC-02 replaces the
-// implementation behind the same signature (its `Engine.Verify` is the same
-// check with the project's configured rules) without touching call sites.
 package scrub
 
 import (
 	"context"
 	"fmt"
-	"regexp"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
 
-// RulesVersion is reported with every scan result so a rules change is
-// observable in the ledger (SPEC-02 §3.9).
-const RulesVersion = 1
+// The persistence-boundary re-scan (SPEC-02 §3.4 point 3, SPEC-01 §4.2).
+//
+// This file keeps the narrow seam SPEC-01 was built against — MandatoryScan and
+// PrefilterAllows — while the implementation behind it is now the real engine's
+// mandatory set: the 13 mandatory rules of the compiled-in table, plus one
+// boundary variant of the auth-header rule.
+//
+// The boundary check is "ONE coalesced RE2 alternation carrying the 13
+// mandatory patterns" with the entropy rule deliberately excluded (§2, §3.9).
+// Two things the alternation cannot express in RE2 are supplied around it:
+//
+//   - RE2 has no lookahead, so the alternation cannot exclude marker text.
+//     A hit is therefore confirmed by the marker-aware scanners of the same
+//     rules; a payload that carries only [REDACTED:…] markers is NOT refused.
+//     Without that confirmation the boundary would refuse the ledger's own
+//     scrubbed output, and §7's e2e step 4 ("re-run Verify over the finished
+//     ledger: 0 hits") could not hold.
+//   - rule 10 is line-anchored, and the serialized wire form of a header block
+//     escapes its newlines. The boundary variant accepts a real newline, an
+//     escaped newline (a backslash) or the start of the buffer before the
+//     header name, so an unredacted Authorization/Cookie line inside a JSON
+//     string is still refused.
 
-type rule struct {
-	name    string
-	pattern string
-	re      *regexp.Regexp
-}
+// boundaryAuthPattern is the rule-10 boundary variant (see above).
+const boundaryAuthPattern = `(?i)(?:^|[\\\n])[ \t]*(?:authorization|proxy-authorization|x-api-key|x-auth-token|x-sentry-auth|x-amz-security-token|api-key|cookie|set-cookie)[ \t]*:[ \t]*([^\s"\\]{6,})`
 
-// mandatoryRules is the rule set that cannot be disabled by configuration and
-// that is re-applied at the persistence boundary. Every pattern is RE2 (linear
-// time, no catastrophic backtracking) so the scan budget of ≤50 µs per 4 KiB
-// payload is structurally met.
-var mandatoryRules = []rule{
-	{name: "env_assign", pattern: `(?i)\b[A-Z0-9_]*(?:PASS(?:WORD|WD)?|SECRET|TOKEN|APIKEY|API_KEY|CREDENTIAL|PRIVATE_KEY)[A-Z0-9_]*\s*[=:]\s*[^\s"']{4,}`},
-	{name: "bearer_token", pattern: `(?i)\bbearer\s+[A-Za-z0-9._\-]{8,}`},
-	{name: "private_key", pattern: `-----BEGIN [A-Z ]*PRIVATE KEY-----`},
-	{name: "dsn_secret", pattern: `(?i)(?:sentry|dsn|https?)://[0-9a-f]{32}:[0-9a-f]{16,}@`},
-	{name: "conn_string", pattern: `(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp|amqps)://[^\s:/@]+:[^\s@/]{3,}@`},
-}
+// boundaryAuthAnchors are the header names the boundary variant looks for.
+var boundaryAuthAnchors = []string{"authorization", "proxy-authorization", "x-api-key",
+	"x-auth-token", "x-sentry-auth", "x-amz-security-token", "api-key", "cookie", "set-cookie"}
 
-func init() {
-	for i := range mandatoryRules {
-		re, err := regexp.Compile(mandatoryRules[i].pattern)
-		if err != nil {
-			panic(fmt.Sprintf("scrub: mandatory rule %s does not compile: %v", mandatoryRules[i].name, err))
+var (
+	boundaryRules, boundaryTrig = buildBoundaryRules()
+)
+
+// buildBoundaryRules compiles the boundary rule set — the 13 mandatory rules of
+// the compiled-in table plus one boundary variant of the auth-header rule — and
+// the coalesced prefilter that gates it.
+func buildBoundaryRules() ([]tableRule, *trigWords) {
+	t := newTrigWords()
+	for i := range builtinTable {
+		if builtinTable[i].mandatory {
+			t.add(builtinTable[i].anchors)
 		}
-		mandatoryRules[i].re = re
 	}
+	t.add(boundaryAuthAnchors)
+	out := make([]tableRule, 0, len(mandatoryNames)+1)
+	for i := range builtinTable {
+		br := builtinTable[i]
+		if !br.mandatory {
+			continue
+		}
+		c, err := compileBuiltin(br, i)
+		if err != nil {
+			panic(fmt.Sprintf("scrub: mandatory rule %s does not compile: %v", br.name, err))
+		}
+		out = append(out, tableRule{compiledRule: c, gate: t.maskFor(br.anchors), signals: br.signals})
+	}
+	c, err := compileBuiltin(builtinRule{
+		name: "auth_header_boundary", kind: kindRegex, pattern: boundaryAuthPattern,
+		replace: "[REDACTED:auth_header]", mandatory: true, targets: allTargets(),
+		anchors: boundaryAuthAnchors,
+	}, len(out))
+	if err != nil {
+		panic(fmt.Sprintf("scrub: boundary auth rule does not compile: %v", err))
+	}
+	out = append(out, tableRule{compiledRule: c, gate: t.maskFor(boundaryAuthAnchors)})
+	return out, t
 }
 
-// MandatoryRuleNames lists the mandatory rule names, in evaluation order.
+// boundaryHitFor reports the first mandatory rule whose marker-aware scanner
+// still finds a span in b. It never rewrites and never returns the bytes.
+func boundaryHitFor(b []byte, sh *shield) (string, bool) {
+	if len(b) == 0 || !boundaryFilterLike(b) {
+		return "", false
+	}
+	notes := scrubNoteRanges(b)
+	var matched [maxTrigMaskWords]uint64
+	g := gateState{on: true, matched: matched[:boundaryTrig.words64()]}
+	g.sigs = boundaryTrig.fire(b, g.matched)
+	for _, r := range boundaryRules {
+		if g.ruleGated(r.gate, r.signals) {
+			continue
+		}
+		var spans []span
+		switch r.kind {
+		case kindRegex:
+			spans = r.regexSpans(b, nil)
+		case kindPrefix:
+			spans = prefixSpans(b, r.begins)
+		case kindDSNPart:
+			if len(r.begins) > 0 && r.begins[0] == "secret" {
+				spans = dsnSecretSpans(b, sh)
+			} else {
+				spans = dsnAnySpans(b, sh)
+			}
+		}
+		for _, s := range spans {
+			if overlapsAny(s, notes) {
+				continue // the reserved payload["scrub"] note (§3.7)
+			}
+			return r.name, true
+		}
+	}
+	return "", false
+}
+
+// boundaryFilterLike is the prefilter gate of the boundary rule set: it answers
+// "could any mandatory rule match?" without running a rule scanner.
+func boundaryFilterLike(b []byte) bool {
+	if boundaryTrig.nbits == 0 {
+		return true
+	}
+	var matched [maxTrigMaskWords]uint64
+	sigs := boundaryTrig.fire(b, matched[:boundaryTrig.words64()])
+	for _, r := range boundaryRules {
+		g := gateState{on: true, matched: matched[:boundaryTrig.words64()], sigs: sigs}
+		if !g.ruleGated(r.gate, r.signals) {
+			return true
+		}
+	}
+	return false
+}
+
+// scrubNoteRanges returns the byte ranges of every reserved payload["scrub"]
+// object in a serialized record.
+//
+// The note's keys ARE rule names (§3.7 pins the shape:
+// {"by_rule":{"env_assign":611,"dsn_secret":113},…}), so a name-driven pattern
+// reads `"dsn_secret":113` as an assignment and would refuse the ledger's own
+// scrubbed output — §7 step 4 ("re-run the read path over the finished ledger:
+// 0 hits") and §3.7 cannot both hold without this exemption. Only the note is
+// exempt: every other byte of the record is still checked.
+func scrubNoteRanges(b []byte) []span {
+	var out []span
+	for i := 0; i+8 < len(b); i++ {
+		if b[i] != '"' || (i > 0 && b[i-1] == '\\') {
+			continue
+		}
+		if string(b[i:i+8]) != `"scrub":` {
+			continue
+		}
+		j := i + 8
+		for j < len(b) && b[j] == ' ' {
+			j++
+		}
+		if j >= len(b) || b[j] != '{' {
+			continue
+		}
+		depth := 0
+		for k := j; k < len(b); k++ {
+			switch b[k] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					out = append(out, span{start: j, end: k + 1})
+					k = len(b)
+				}
+			}
+		}
+	}
+	return out
+}
+
+func overlapsAny(s span, spans []span) bool {
+	for _, o := range spans {
+		if s.start < o.end && o.start < s.end {
+			return true
+		}
+	}
+	return false
+}
+
+// MandatoryScan re-scans bytes that are about to be persisted (SPEC-01 §4.2).
+// A hit means the record is refused: it is not written, the ledger propagates
+// this error unchanged, and no byte containing the value is stored anywhere.
+// TROUBLE-SCRUB-008 is returned when a mandatory pattern matched; a payload that
+// carries only markers is accepted (a fixed point, §6).
+func MandatoryScan(ctx context.Context, b []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if name, ok := boundaryHitFor(b, nil); ok {
+		return boundaryHit(name)
+	}
+	return nil
+}
+
+// PrefilterAllows reports whether the persistence-boundary prefilter would let
+// bytes through to the rules. It exists so a test can prove the prefilter never
+// disables a rule; production code never calls it.
+func PrefilterAllows(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	var matched [maxTrigMaskWords]uint64
+	sigs := boundaryTrig.fire(b, matched[:boundaryTrig.words64()])
+	for _, r := range boundaryRules {
+		g := gateState{on: true, matched: matched[:boundaryTrig.words64()], sigs: sigs}
+		if !g.ruleGated(r.gate, r.signals) {
+			return true
+		}
+	}
+	return false
+}
+
+// MandatoryRuleNames lists the mandatory rule names in evaluation order, plus
+// the boundary auth variant.
 func MandatoryRuleNames() []string {
-	out := make([]string, 0, len(mandatoryRules))
-	for _, r := range mandatoryRules {
+	out := make([]string, 0, len(boundaryRules))
+	for _, r := range boundaryRules {
 		out = append(out, r.name)
 	}
 	return out
 }
 
-// ScanError is returned by MandatoryScan when a mandatory pattern is still
-// present in bytes that are about to be persisted.
-type ScanError struct {
-	Code types.ErrorCode
-	Rule string
-}
-
-func (e *ScanError) Error() string {
-	return fmt.Sprintf("%s: persistence-boundary re-scan hit %q", e.Code, e.Rule)
-}
-
-// prefilterLiterals are the ASCII literals that every mandatory pattern must
-// contain (case-insensitively). The prefilter is a pure performance gate: the
-// compiled rules remain the authority, so a hit costs one regex pass and a
-// clean payload costs a handful of byte scans instead of five RE2 programs.
-// The measured ingest budget (SPEC-01 §4.2: ≤50 µs per 4 KiB payload) is met
-// with a factor to spare, which is what makes the boundary affordable on every
-// append.
-var prefilterLiterals = []string{
-	"pass", "secret", "token", "api", "credential", "bearer", "private key", "private_key", "://",
-}
-
-// probablyContainsSecret reports whether any mandatory pattern could match.
-func probablyContainsSecret(b []byte) bool {
-	for _, kw := range prefilterLiterals {
-		if containsFoldASCII(b, kw) {
-			return true
-		}
-	}
-	return false
-}
-
-// containsFoldASCII is an ASCII case-insensitive substring search.
-func containsFoldASCII(b []byte, kw string) bool {
-	n := len(kw)
-	if n == 0 || len(b) < n {
-		return false
-	}
-	lo := kw[0] | 0x20
-	up := kw[0] - 32
-	for i := 0; i+n <= len(b); i++ {
-		c := b[i]
-		if c != lo && c != up {
-			continue
-		}
-		if equalFoldASCII(b[i:i+n], kw) {
-			return true
-		}
-	}
-	return false
-}
-
-func equalFoldASCII(b []byte, kw string) bool {
-	for i := 0; i < len(kw); i++ {
-		if foldASCII(b[i]) != foldASCII(kw[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func foldASCII(c byte) byte {
-	if c >= 'A' && c <= 'Z' {
-		return c + 32
-	}
-	return c
-}
-
-// PrefilterAllows reports whether the performance prefilter would let bytes
-// through to the mandatory rules. It exists so a test can prove the prefilter
-// never disables a rule; production code never calls it.
-func PrefilterAllows(b []byte) bool { return probablyContainsSecret(b) }
-
-// MandatoryScan re-scans bytes that are about to be persisted (SPEC-01 §4.2).
-// A hit means the record is refused: it is not written, the ledger propagates
-// this error unchanged, and no byte containing the value is stored anywhere.
-// TROUBLE-SCRUB-006 is returned when the mandatory rule set is incomplete
-// (fail closed); TROUBLE-SCRUB-008 when a mandatory pattern matched.
-func MandatoryScan(ctx context.Context, b []byte) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if len(mandatoryRules) == 0 {
-		return &ScanError{Code: types.CodeScrub006}
-	}
-	if !probablyContainsSecret(b) {
-		return nil
-	}
-	for _, r := range mandatoryRules {
-		if r.re.Match(b) {
-			return &ScanError{Code: types.CodeScrub008, Rule: r.name}
-		}
-	}
-	return nil
+// BoundaryRefused reports whether err is the boundary refusal (TROUBLE-SCRUB-008).
+func BoundaryRefused(err error) bool {
+	se, ok := err.(*ScanError)
+	return ok && se.Code == types.CodeScrub008
 }

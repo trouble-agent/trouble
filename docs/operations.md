@@ -88,3 +88,55 @@ JSONL is canonical and the index is in memory. `modernc.org/sqlite` is **not** l
 decision flips only when one of the four measured triggers in SPEC-01 §3.8 fires, and those
 thresholds are code constants in `internal/ledger/tier.go` printed beside their live values by
 `trouble ledger status --json`.
+
+## 8. Scrubbing (SPEC-02)
+
+`internal/scrub` is the only path bytes take on their way to persistence. Operationally it shows up
+in four places.
+
+**Refused records.** A record that trips the persistence-boundary re-scan is refused with
+`TROUBLE-SCRUB-008`; the caller writes a `gap` and a `lifecycle` note instead of the payload, and the
+ledger's `scrub_refusal_total` counter moves (surfaced by `trouble ledger status --json`). A refusal
+is either (a) a producer that forgot to scrub — fix the caller, do not weaken the rule table — or
+(b) a payload whose content legitimately looks like a credential (see the false-positive notes
+below). The offending bytes are never stored, so a refusal is not diagnosable from the ledger: read
+the caller's log line for the record's `sig` and `kind`.
+
+**Counts, never values.** Every scrubbed record carries `redactions` and, in
+`payload["scrub"]`, the `by_rule` map, `bytes_in/bytes_out`, `truncated`, `rules_version` and the
+engine (`re2`). `Engine.Stats()` (process-cumulative) adds `calls`, `refused_bytes`, `invalid_utf8`,
+`timeouts`, `fail_closed` and `boundary_refusals`. A rising `timeouts`/`fail_closed` rate means
+payloads are being dropped, not redacted: check host load against `scrub.rule_timeout` (250 ms
+default) before anything else.
+
+**Knobs that are safe to use.** `scrub.pii_mode = "keep"` and per-project `pii_mode` are the
+documented escape hatches for PII rules (`pii_email_ip`, `pii_identity_kv`); `scrub.path_mode` /
+`path_allowlist` / `home_roots` tune the path rules; `max_bytes` and `on_over` are per-target
+(only `event_msg`, `stack` and `journal_tail` truncate — everything else refuses, because a
+truncated issue body or board row corrupts a durable artifact a human reads). Knobs that are **not**
+available: the 13 mandatory rules, `boundary_verify`, and any attempt to configure a rule named
+after a built-in. All of those are `TROUBLE-SCRUB-002` at boot, before the ingestion port binds.
+
+**Cost.** The prefilter is what keeps the ingress path cheap: a clean payload costs single-digit
+microseconds because no RE2 program runs. A payload that *does* carry a secret runs a full rule pass,
+which is dominated by the optional PII rules (`pii_identity_kv` is case-insensitive with an eleven-way
+name alternation). MEASURED, on the reference host at load ~2-9: prefilter 3.8 µs/KiB, boundary
+re-scan 4.0-5.0 µs/KiB, mandatory pass 4.3 µs/KiB (clean), full set 89 µs/KiB (clean, PII enabled),
+26 ms per 256 KiB (clean), ~640 µs for a 1.5 KiB payload carrying four secrets, and 7,500 req/s
+through the ingestion harness with the scrubber in the path (12,700 req/s without it). SPEC-02 §3.9
+budgets 3 µs/KiB for the prefilter, 25 µs/KiB for a mandatory pass and 60 µs/KiB for the full set:
+the first three are met, the PII-bearing numbers are 1.5x the budget and are a documented deviation —
+Go's RE2 is linear but its NFA simulation costs 30-90 ns/byte on these patterns. `TestScrubBudget`
+asserts within 4x of the spec number and logs the measured value on every run.
+
+### False positives worth knowing
+
+* `cloud_key_shape` matches any `sk-`, `ghp_`, `hf_`, `SG.` … prefix followed by 20+ token
+  characters, so prose like `risk-management-framework-2026` is redacted. It is a mandatory rule;
+  the fix is the wording, not the table.
+* `pii_email_ip`/`pii_identity_kv` leave loopback and RFC1918 addresses alone on purpose
+  (`127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `0.0.0.0`) — they identify
+  nobody outside the host.
+* The reserved `payload["scrub"]` note is exempt from the boundary re-scan: its keys are rule names
+  (`"dsn_secret":1`), which a name-driven pattern would otherwise read as an assignment and refuse.
+  Everything outside the note is still checked.

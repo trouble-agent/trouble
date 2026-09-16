@@ -12,8 +12,39 @@ SPEC-INDEX` are the authority, and code lands against them.
 `internal/ledger` — the append-only JSONL audit ledger (SPEC-01): record schema, seq allocation,
 group-commit durability, torn-line recovery, daily rotation and part rollover, compaction into
 generation files, the bounded in-memory index with its degradation ladder, the query surface and
-the storage-tier decision. `internal/types` is the shared type source of truth; `internal/scrub`
-carries the persistence-boundary re-scan entry point (the full scrubbing engine is SPEC-02).
+the storage-tier decision.
+
+`internal/scrub` — the single safety gate between the outside world and every byte trouble persists
+(SPEC-02): the compiled-in 18-rule table (13 mandatory, 5 optional), per-target byte budgets, the
+shield that keeps DSN public keys verbatim while redacting everything else, per-project overrides,
+the bundle/record/envelope entry points, and the persistence-boundary re-scan
+(`Verify` / `MandatoryScan`) that `internal/ledger` runs on every serialized line.
+
+`internal/types` is the shared type source of truth.
+
+## The scrubbing contract
+
+The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to
+disk, to the ledger, to the spool, to the skills-local directory, to an issue driver or to a board
+row before its content has passed through `internal/scrub`. Every signature, fingerprint and dedup
+key is computed over the *scrubbed* bytes, so two hosts and three arrival paths that describe the
+same bug produce the same digest.
+
+Two properties carry the design:
+
+* **Idempotence.** `Scrub(Scrub(x)) == Scrub(x)` byte-for-byte, and the second call reports zero
+  redactions. That is what lets a satellite scrub locally and the hub re-scrub the same record on
+  receipt without changing the signature.
+* **Fail closed.** Rule failure, a rule that exceeds `scrub.rule_timeout`, invalid UTF-8 on a text
+  target or a persistence-boundary hit means the payload is **not persisted** — in whole or in part
+  — and the caller emits a `gap`. Availability loses to leakage, deliberately: the ledger is
+  append-only, git-distributed and auto-filed, so a secret that reaches it cannot be removed.
+
+The `trouble` rule table is the authority for what a "secret" is, and its redaction tests are
+conformance tests: `internal/scrub/vectors_test.go` (14 positive and 12 negative vectors, exact
+bytes and exact `by_rule`), `fixedpoint_test.go`, `shield_test.go`, `config_test.go`,
+`conformance_test.go`, `limits_test.go`, `dsn_test.go`, `e2e_ledger_test.go`, `corpus_test.go`,
+`bench_test.go` and `bench_ingest_test.go`.
 
 ## The durability contract
 

@@ -4,3 +4,5 @@ dagger.db
 *.prof
 *.db-shm
 *.db-wal
+.scrub-e2e-*
+.scrub-ingest-*

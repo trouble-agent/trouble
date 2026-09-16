@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"embed"
 
@@ -53,7 +54,9 @@ func CommittedSchemaNames() []string {
 	}
 	out := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if !e.IsDir() {
+		// Only the generated artifacts are schema names; the directory README
+		// keeps the embed non-empty before the first `make schema` run.
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
 			out = append(out, e.Name())
 		}
 	}

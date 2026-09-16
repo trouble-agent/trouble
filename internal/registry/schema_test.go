@@ -326,8 +326,21 @@ func propertyNames(schema map[string]any) map[string]bool {
 
 // walkSchemaKeywords visits every keyword of a schema, recursively (properties,
 // items and oneOf).
+// walkSchemaKeywords visits every KEYWORD in a schema. Property names are data,
+// not keywords, so the walk descends into `properties` values without visiting
+// their keys (SPEC-06 §3.2's closed subset).
 func walkSchemaKeywords(node map[string]any, visit func(keyword string)) {
 	for key, value := range node {
+		if key == "properties" {
+			if props, ok := value.(map[string]any); ok {
+				for _, sub := range props {
+					if m, ok := sub.(map[string]any); ok {
+						walkSchemaKeywords(m, visit)
+					}
+				}
+			}
+			continue
+		}
 		visit(key)
 		switch sub := value.(type) {
 		case map[string]any:

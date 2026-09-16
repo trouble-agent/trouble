@@ -1147,11 +1147,10 @@ func oneOfAlternatives(schema map[string]any) []string {
 		if !ok {
 			continue
 		}
-		req, _ := sub["required"].([]any)
-		if len(req) == 1 {
-			if s, ok := req[0].(string); ok {
-				out = append(out, s)
-			}
+		// The generator emits `required` as []string in memory and the committed
+		// artifact carries []any after a JSON round trip; both must work.
+		if req := requiredOf(sub); len(req) == 1 {
+			out = append(out, req[0])
 		}
 	}
 	return out

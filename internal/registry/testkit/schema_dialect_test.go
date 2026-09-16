@@ -33,6 +33,18 @@ func TestSchemaDialectClosed(t *testing.T) {
 		var walk func(node map[string]any, path string)
 		walk = func(node map[string]any, path string) {
 			for key, value := range node {
+				if key == "properties" {
+					// Property names are data, not keywords: descend without
+					// counting them (SPEC-06 §3.2's closed subset).
+					if props, ok := value.(map[string]any); ok {
+						for _, sub := range props {
+							if m, ok := sub.(map[string]any); ok {
+								walk(m, path+".properties")
+							}
+						}
+					}
+					continue
+				}
 				census[key]++
 				switch sub := value.(type) {
 				case map[string]any:

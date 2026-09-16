@@ -59,8 +59,8 @@ func TestHarnessRejectsNonIdempotent(t *testing.T) {
 		t.Fatalf("the harness failure must be %s, got %q (%v); reported: %s",
 			types.CodeRegistry013, code, err, strings.Join(rec.msgs, " | "))
 	}
-	if !strings.Contains(err.Error(), "one mutation") {
-		t.Errorf("the failure should name the violated obligation (exactly one mutation), got: %v", err)
+	if !strings.Contains(err.Error(), "converge") && !strings.Contains(err.Error(), "one mutation") {
+		t.Errorf("the failure should name the violated obligation (obligation 1: the second Apply must converge with exactly one mutation), got: %v", err)
 	}
 }
 

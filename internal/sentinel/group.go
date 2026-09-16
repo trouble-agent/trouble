@@ -110,6 +110,40 @@ func releaseRange(current []string, release string) []string {
 	return []string{first, release}
 }
 
+// groupStateCopy is a locked snapshot of one group's mutable state. Callers that
+// need to build a record from a group take a copy: handing out the live
+// *groupState would let a request goroutine read fields another request
+// goroutine is writing (the counters are hot).
+type groupStateCopy struct {
+	grp            types.Group
+	eventsUpperSeq uint64
+	sampleRate     float64
+	dirty          bool
+}
+
+// state returns a locked snapshot of one digest's state.
+func (g *groupIndex) state(digest string) (groupStateCopy, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	st, ok := g.byDigest[digest]
+	if !ok {
+		return groupStateCopy{}, false
+	}
+	return st.copyLocked(), true
+}
+
+// copyLocked copies a state while g.mu is held.
+func (st *groupState) copyLocked() groupStateCopy {
+	cp := st.grp
+	cp.ReleaseRange = append([]string(nil), st.grp.ReleaseRange...)
+	return groupStateCopy{
+		grp:            cp,
+		eventsUpperSeq: st.eventsUpperSeq,
+		sampleRate:     st.sampleRate,
+		dirty:          st.dirty,
+	}
+}
+
 // markFlushed records the sequence watermark a flush reached.
 func (g *groupIndex) markFlushed(digest string, seq uint64, sampleRate float64) {
 	g.mu.Lock()
@@ -362,8 +396,9 @@ func renderStack(frames []frame) string {
 	return string(b)
 }
 
-// groupRecordPayload builds a `group` record payload (§3.3's op vocabulary).
-func groupRecordPayload(op string, st *groupState, extra map[string]any) map[string]any {
+// groupRecordPayload builds a `group` record payload (§3.3's op vocabulary) from
+// a locked snapshot.
+func groupRecordPayload(op string, st groupStateCopy, extra map[string]any) map[string]any {
 	p := map[string]any{
 		"op":               op,
 		"digest":           st.grp.Digest,
@@ -528,19 +563,4 @@ func eventPayloadFields(payload map[string]any) (ts, release string) {
 		return asString(e, "ts"), asString(e, "release")
 	}
 	return "", ""
-}
-
-// jsonRoundTrip renders a value through JSON so payloads carry plain maps and
-// slices rather than structs (the ledger stores canonical JSON either way, but
-// a map keeps `payload.event.message` addressable for the dashboard).
-func jsonRoundTrip(v any) any {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return v
-	}
-	var out any
-	if err := json.Unmarshal(b, &out); err != nil {
-		return v
-	}
-	return out
 }

@@ -372,15 +372,15 @@ func TestLedgerBackpressureIsOverloaded(t *testing.T) {
 		c.LedgerWait = types.Duration("20ms")
 	})
 	defer ts.close()
-	ts.sink.delay = 200 * time.Millisecond
-	defer func() { ts.sink.delay = 0 }()
+	ts.sink.setDelay(200 * time.Millisecond)
+	defer ts.sink.setDelay(0)
 	resp := ts.postEvent(t, "1", fmt.Sprintf("%032x", 1))
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("backpressure status = %d, want 429", resp.StatusCode)
 	}
 	_ = readBody(t, resp)
 	// Once the sink recovers, the path works again.
-	ts.sink.delay = 0
+	ts.sink.setDelay(0)
 	resp = ts.postEvent(t, "1", fmt.Sprintf("%032x", 2))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("post-backpressure status = %d, want 200", resp.StatusCode)

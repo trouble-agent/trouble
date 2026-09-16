@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -602,9 +601,6 @@ func (s *Server) projectForCollectors() (*projectEntry, bool) {
 	}
 	return s.projects.project(s.cfg.Projects[0].ID)
 }
-
-// validUTF8 reports whether b is valid UTF-8 (used by the sources).
-func validUTF8(b []byte) bool { return utf8.Valid(b) }
 
 // flushSource flushes every partial belonging to a source (used on rotation,
 // truncation and file removal).

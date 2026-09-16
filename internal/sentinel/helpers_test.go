@@ -39,17 +39,22 @@ type memSink struct {
 }
 
 func (m *memSink) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) {
-	if m.delay > 0 {
+	// delay and fail are read under the lock so the tests that flip them mid-run
+	// (backpressure, sink failure) are race-free.
+	m.mu.Lock()
+	delay, fail := m.delay, m.fail
+	m.mu.Unlock()
+	if delay > 0 {
 		select {
-		case <-time.After(m.delay):
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return types.Record{}, ctx.Err()
 		}
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.fail != nil {
-		return types.Record{}, m.fail
+	if fail != nil {
+		return types.Record{}, fail
 	}
 	m.seq++
 	rec := types.Record{
@@ -84,6 +89,13 @@ func (m *memSink) ScanFrom(seq uint64, yield func(types.Record) bool) error {
 }
 
 // records of one kind.
+// setDelay sets the sink's simulated write latency (races-free with Append).
+func (m *memSink) setDelay(d time.Duration) {
+	m.mu.Lock()
+	m.delay = d
+	m.mu.Unlock()
+}
+
 func (m *memSink) ofKind(kind types.RecordKind) []types.Record {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -178,6 +190,13 @@ func (t *testServer) close() {
 	if t.s.spool != nil {
 		_ = t.s.spool.Close()
 	}
+}
+
+// newLoopbackServer mounts a handler on a loopback listener (the load test drives
+// it with its own pooled client).
+func newLoopbackServer(tb testing.TB, h http.Handler) *httptest.Server {
+	tb.Helper()
+	return httptest.NewServer(h)
 }
 
 // dsnFor renders a project's DSN against the test listener.

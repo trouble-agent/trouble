@@ -449,7 +449,7 @@ func (s *Server) sampleBudget() {
 // counters snapshot and the events watermark (§3.3's counter flush row).
 func (s *Server) flushGroups(ctx context.Context, reason string) *Error {
 	for _, g := range s.groups.snapshot() {
-		st, ok := s.groups.byDigestState(g.Digest)
+		st, ok := s.groups.state(g.Digest)
 		if !ok || !st.dirty {
 			continue
 		}
@@ -463,14 +463,6 @@ func (s *Server) flushGroups(ctx context.Context, reason string) *Error {
 		s.groups.markFlushed(g.Digest, rec.Seq, st.sampleRate)
 	}
 	return nil
-}
-
-// byDigestState returns the live group state (pointer) for flushing.
-func (g *groupIndex) byDigestState(digest string) (*groupState, bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	st, ok := g.byDigest[digest]
-	return st, ok
 }
 
 // rebuild folds the ledger into the group index at boot (§3.3): the last
@@ -1016,7 +1008,7 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 	if res.created || res.release != "" || res.flush {
 		s.groups.markFlushed(digest, rec.Seq, s.sampleRateFor(digest))
 	}
-	if st, ok := s.groups.byDigestState(digest); ok {
+	if st, ok := s.groups.state(digest); ok {
 		switch {
 		case res.created:
 			op := "create"
@@ -1041,7 +1033,7 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		}
 	}
 	if res.flush {
-		if st, ok := s.groups.byDigestState(digest); ok {
+		if st, ok := s.groups.state(digest); ok {
 			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload("flush", st, nil), 0); gerr != nil {
 				s.logger.Printf("sentinel: group flush record failed: %v", gerr)
 			}
@@ -1053,9 +1045,9 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 // sinkLastSeq reads the sink watermark (used to bound a flush).
 func (s *Server) sinkLastSeq() (uint64, error) { return s.sink.LastSeq(), nil }
 
-// sampleRateFor returns the group's current sample rate.
+// sampleRateFor returns the group's current sample rate (a locked read).
 func (s *Server) sampleRateFor(digest string) float64 {
-	if st, ok := s.groups.byDigestState(digest); ok {
+	if st, ok := s.groups.state(digest); ok {
 		return st.sampleRate
 	}
 	return 0
@@ -1128,9 +1120,13 @@ func (s *Server) noteReject(entry *projectEntry) {
 		w.stormed = true
 		s.counters.rejectStorm.Add(1)
 		scope := "project:" + entry.proj.ID
+		// Copy what the record needs: the window keeps mutating under the lock
+		// (the goroutine must not read it).
+		rejects := w.rejects
+		windowStart := w.start
 		go func() {
 			_, _ = s.appendRecord(context.Background(), types.KGap, "", "sentinel",
-				gapRecordPayload("ingest_reject_storm", scope, w.rejects, types.FormatUTC(w.start), types.FormatUTC(now)), 0)
+				gapRecordPayload("ingest_reject_storm", scope, rejects, types.FormatUTC(windowStart), types.FormatUTC(now)), 0)
 		}()
 	}
 }

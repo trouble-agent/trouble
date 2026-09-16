@@ -140,3 +140,108 @@ asserts within 4x of the spec number and logs the measured value on every run.
 * The reserved `payload["scrub"]` note is exempt from the boundary re-scan: its keys are rule names
   (`"dsn_secret":1`), which a name-driven pattern would otherwise read as an assignment and refuse.
   Everything outside the note is still checked.
+
+## 9. Sentinel (SPEC-04)
+
+The listener, what it accepts, and where it deliberately differs from upstream
+Sentry is `docs/sentinel-compat.md`; this section is the operating half.
+
+### What to watch
+
+| Check | Read | What "wrong" looks like |
+|---|---|---|
+| the ingress path still works end to end | `ProjectRuntime(id).CanaryLastTS` / `Sources()` | `canary_last_ok=false`, or `sentinel` with `alive=false`: the canary did not land, so **every verification in the window is `invalid`, never passed** |
+| SDKs are actually reporting | `ProjectRuntime(id).AuthForms`, `LastEventTS` | an empty `auth_forms` list on a project that should be live, or a stale `last_event_ts` |
+| quota is not eating evidence | `ProjectRuntime(id).EventsWindow` vs `QuotaEPM`, `DroppedTotal`, `SampledTotal` | `dropped_total` climbing: SDKs are discarding on 429 while the dashboard looks quiet |
+| SDK-side attrition | `ProjectRuntime(id).ClientReportDiscards` | `queue_overflow`/`network_error` counts rising: the app is dropping events before they ever reach us |
+| collectors are observing | `Sources()` entries for `journal:<unit>` / `file:<path>`, `SpoolStats()` | a source with `alive=false`, or `torn`/`dropped` spool counters climbing |
+| the ledger is keeping up | `reject_total{reason=overloaded}` | 429 `overloaded`: the append wait (`ledger_wait`, 2s) was exceeded, the event was counted dropped and a record was written for it |
+| no 400 storm | `gap{cause=ingest_reject_storm}` | an unread 400 storm from a misconfigured SDK: the gap is the only thing that makes it visible |
+
+### Quota, loss policy and the official behaviour
+
+A quota breach destroys evidence, because the official SDK behaviour on 429 is to
+**discard**. Three policies, all recorded:
+
+* `drop-with-counter` (429 + `Retry-After` + `X-Sentry-Rate-Limits`) — the SDK
+  throws the event away. Every drop writes an `event` record with
+  `disposition=dropped_quota`, so the loss is auditable, and verification for a
+  sig whose own events were dropped in the window is `invalid`, never `passed`.
+* `sample` — deterministic 1/N, 200 with the client's own sample rate unchanged;
+  the drop is recorded and `GroupCounters.SampleRate` carries 1/N.
+* `spool-if-light` — the only policy that keeps the data; the event is written to
+  the spool and replayed when the quota allows. The spool is drop-oldest with a
+  `gap{cause=spool_drop_oldest}` note, then `TROUBLE-SENTINEL-015` when not even an
+  empty spool can hold an entry.
+
+The proactive path matters more than the 429: at 95% of quota the response is
+**200 with the same rate-limit header**, which is what turns a flood into an
+orderly slowdown. `X-Sentry-Rate-Limits` is `retry:categories:scope:reason:` — the
+exact string the ledger and the dashboard show was emitted.
+
+At most one envelope's worth of items is admitted per window at the quota
+boundary: an envelope larger than `quota_epm` is admitted to `quota_epm` items and
+the remainder follows the loss policy, so one big envelope can never be silently
+swallowed whole.
+
+### Canary
+
+One synthetic envelope per `canary_interval` (default 10m) for `canary_project`,
+posted over loopback through the real listener: routing → auth → envelope → scrub
+→ sig → group → ledger. It is exempt from quota, loss policies and breakers,
+because a flood is exactly when evidence matters. The canary sig is in the
+reserved set and never opens an incident. No observation within
+`2 × canary_interval` → `gap{cause=canary_missing}`, `ProjectRuntime.CanaryLastOK
+= false` and a dead `sentinel` source. A window whose canary did not land is
+`invalid`; so is a window in which a sig's own events were dropped by quota even
+though the canary landed.
+
+### Collectors
+
+Sources are `journal:<unit>` (a supervised `journalctl -f -o json` child with a
+persisted cursor) and `file:<path>` (a 250ms poll with `(dev, ino, size)`
+rotation detection). Both hand raw lines to the same assembler, which is keyed by
+`(source, parser)`, so two sources can never share a partial. Parsers:
+`go-panic`, `py-traceback`, `node-reject`, first match wins per line.
+
+Operational facts worth knowing:
+
+* the collector scope sets are **disjoint** from SPEC-03's sensor scopes by boot
+  validation — the same unit in both is a config conflict, because two consumers
+  following one journald cursor would double-count;
+* offsets and cursors live under the state root (`spool/collectors/`, mode 0600)
+  and are persisted per batch; a malformed cursor is a `gap{cause=cursor_invalid}`
+  with `est_lost=-1`, never "no errors";
+* rotation, truncation and removal each emit a `gap` and flush the assembled
+  partial with `partial=true`, so the head of a traceback is not lost;
+* a line longer than `max_line_bytes` is truncated and flagged; non-UTF-8 bytes
+  become U+FFFD and the event is never dropped for encoding;
+* collector events are attributed to `canary_project` (or the first configured
+  project) — journald and file sources are host-level and carry no project id.
+
+### Memory and the dedup window
+
+The duplicate-event window (§6.6) is bounded at 65,536 ids, oldest evicted: at a
+sustained rate above ~109 events/s the oldest ids are forgotten before the
+10-minute mark, and an SDK retry of such an id is counted twice
+(`duplicate_events_total`). That bound exists so a hostile client cannot drive the
+resident set; it is a documented divergence in `docs/sentinel-compat.md` §5.
+
+### Load test
+
+`internal/sentinel/load_test.go` runs the §7 load test: 8 workers, ~4KB gzip'd
+envelopes, one project, 60s (5s under `-short`), against the **real** ledger with
+the 100-record/5ms group-commit policy the spec's reference numbers were measured
+with. MEASURED here (load_avg ~11, sandbox filesystem): 4,183-4,490 req/s (target
+2,000, spec reference 6,199), p99 61-117 ms, p999 89-145 ms, 5xx 0, steady-state
+RSS growth 12-23MB, peak <100MB. The latency floor is the ledger's group-commit
+cycle, not sentinel: the ledger alone measures **6,182 records/s** with the same
+policy on this filesystem, i.e. the batch write + fsync cycle bounds a request's
+latency at tens of milliseconds here. The test logs every number and asserts the
+spec's latency budget at the factor this host supports (p99 ≤ 250ms); the spec's
+25 ms p99 assumes the reference host's fsync service time.
+
+The load test saturates the host for its duration, so run the whole tree with
+`go test -p 1 ./internal/...` (or `-short`) — otherwise it can push
+`internal/ledger`'s timing assertions (`TestFsyncWindowBound`,
+`TestPerLineRegression`) over their bounds on a shared machine.

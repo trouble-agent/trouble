@@ -163,8 +163,8 @@ func TestConcurrencyCapQueuesThenRefuses(t *testing.T) {
 		c.MaxConcurrent = 1
 	})
 	defer ts.close()
-	ts.sink.delay = 1500 * time.Millisecond
-	defer func() { ts.sink.delay = 0 }()
+	ts.sink.setDelay(1500 * time.Millisecond)
+	defer ts.sink.setDelay(0)
 
 	done := make(chan struct{})
 	go func() {

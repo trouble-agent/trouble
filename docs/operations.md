@@ -296,3 +296,80 @@ non-idempotent module and a mutating module without a real dry run, and that eve
 stays inside the closed draft 2020-12 keyword subset. A descriptor edit without a regenerated
 `internal/registry/schema/*.json` (`make schema`) fails the boot check with
 `TROUBLE-REGISTRY-014`.
+
+## 12. The issue desk (SPEC-09)
+
+**One issue per sig, forever.** Identity is `(driver, sig, project)`, held in the in-memory anchor
+index and rebuilt at boot from the `issue` records inside the retention window. The dedup window
+(default `30m`, per driver, clamped `1m..24h`) only chooses the *shape* of a recurrence: a one-line
+fold inside it, a full block (counters and release range since the previous comment) outside it.
+Neither path ever creates a second issue; only two things do — the anchor being gone at the driver
+(`TROUBLE-ISSUES-007`, a human deleted it) or a reopen the driver refuses (`TROUBLE-ISSUES-008`, in
+which case the desk files a superseding issue carrying `supersedes: <old id>` and the same sig
+marker).
+
+**Caps are the anti-spray rule.** `[issues.caps]` bounds creates and comments per sig, per project
+and globally, and `comment_min_interval` spaces the folds. Counters are rebuilt from the ledger at
+boot, so a restart cannot lift a cap. A capped operation is recorded (`op=cap`) and **never
+spooled**: a cap is a policy decision a retry cannot change. The incident itself is unaffected — a
+capped critical incident escalates through the escalation outlet.
+
+**A driver outage degrades the rung; it never fails the incident.** Two consecutive failed probes
+(`fail_after_probes`) mark a driver failed, write one `healthcheck` record and one `gap`
+(`cause=driver_down`), and the ladder continues at rung `outlets` with its state unchanged. The
+pending operations spool; on recovery the spool drains before new work and each drained operation
+sets the anchor through a `result=replayed` record. Everything dropped (TTL, attempt count, budget)
+writes **both** a `gap` (`cause=queue_overflow`) and an `issue{op:drop}` record, so the loss is
+visible in the ledger rather than inferred.
+
+**Day one checks.** `trouble issues health --json` (cap counters per driver, spool depth, driver
+health). A `TROUBLE-ISSUES-003` means the token file's mode or owner is wrong — the desk made no
+outbound call, so nothing was filed and nothing was lost. A `TROUBLE-ISSUES-005` on a full spool is
+the one case where work is refused rather than queued: entries younger than
+`spool_min_retention` are never evicted, by design.
+
+**The token never appears anywhere but the wire.** It is read from a 0600 file (or the configured
+env var), refused on argv, and it is never logged, never in a ledger payload, never in
+`DriverHealth.Detail`, and never printed by `trouble config explain` (which shows the file path with
+`Redacted=true` and, for the KV backend, the header **name** only).
+
+## 13. The skill loop (SPEC-11)
+
+**The artifact cannot express code.** `SKILL.toml` has a frozen key set; an unknown key, an unknown
+table, a `[stats]` table, a glob in `allowed_modules` or a free-text sig is a refusal
+(`TROUBLE-SKILLS-001`) with a reason naming the field. A skill can do exactly one thing: cause typed
+registry tool calls that its `allowed_modules` allowlist names and this build already ships.
+
+**What is signed is not the file.** TOML has no canonical form, so the signature covers
+`trouble.skill.v1` + a deterministic JSON projection + `play_sha256=<digest of the play bytes>`. A
+reformat does not invalidate an artifact; a one-byte play edit does, even though `SKILL.toml` is
+untouched. The generation prefix inside the signed bytes is the artifact's schema version.
+
+**Local stats never travel.** `applied/success/last_used` live in
+`<state root>/skills-local/stats.json` (flushed within 5 s, crash-loss window stated), never in the
+artifact — that is the fix for the PRD's own contradiction, and the reason the distribution path
+stays unidirectional. The same file carries the per-day `max_runs` counter.
+
+**Pull only, and only reads.** The channel is read with `git ls-remote`/`fetch`/`rev-parse`/
+`checkout --detach` as argv arrays, never through a shell, and never pushed to. Tag mode selects the
+highest semver tag (a `source_ref` with no wildcard is an exact tag name); branch mode is legal but
+recorded as `ref_mode=branch` so an operator can see a mutable head was trusted. A resolved sha equal
+to the last one writes **no** ledger record.
+
+**Refusals are recorded, never silent.** Every gate failure writes a `refused` record deduplicated to
+one per 24 h per `(name, version, code, reason)` with the accumulated count — a permanently refused
+artifact on every pull interval cannot flood the ledger, and nothing is dropped. A below-floor
+satellite records `floor_blocked` (refusal `013` whose cause is `004`), which is how the hub learns
+the host is not running the version.
+
+**Boot re-verification is the tamper detector.** Every boot re-reads each installed artifact and its
+play and compares the canonical digests; a mismatch moves the tree to `quarantine/`, marks the row
+`refused`, records `TROUBLE-SKILLS-002` and never executes it. The process stays green on `/health`
+while `trouble skills status` reports it.
+
+**Canary first, then the per-host approve policy.** With `canary_host_id` set, a non-canary host
+holds a version (`TROUBLE-SKILLS-012`) until a green canary from that host exists inside
+`canary_validity`; a **failed** canary is terminal for the version. `approve=review` (the default)
+parks a pulled version in `pending/` until `trouble skills approve <name>@<v>`; `approve=never`
+refuses everything pulled; `approve=auto` installs, and installation is still not authority — in
+`shadow` an `auto` host runs mutating skill plays as `check_mode` downstream.

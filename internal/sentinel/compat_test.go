@@ -165,6 +165,7 @@ func TestCompatMatrixDivergences(t *testing.T) {
 		"**Collector events are attributed to one project**",
 		"**The duplicate-event window is bounded.**",
 		"**`SourceLiveness`, `ProjectRuntime`, `CollectorParser`, `SentryEvent`,",
+		"**This document is hand-maintained, not generated.**",
 	}
 	for _, e := range entries {
 		if !strings.Contains(doc, e) {
@@ -179,6 +180,65 @@ func TestCompatMatrixDivergences(t *testing.T) {
 		if !strings.Contains(doc, "`"+key+"`") {
 			t.Errorf("docs/sentinel-compat.md does not document the payload key %q", key)
 		}
+	}
+}
+
+// readOperationsDoc returns docs/operations.md, whose §9 carries the sentinel
+// operating records (the load-test table, the steady-resident-set record and the
+// compat document's provenance).
+func readOperationsDoc(t *testing.T) string {
+	t.Helper()
+	b, err := os.ReadFile(operationsDocPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", operationsDocPath, err)
+	}
+	return string(b)
+}
+
+// TestCompatDocProvenance pins §7's shipped-artifact sentence. §7 says the compat
+// document is "regenerated from the same tables by `make compat-matrix`"; this
+// repository ships no build layer, so as shipped that sentence named a target that
+// cannot run and nothing said so. The document is hand-maintained and enforced by
+// the drift checks instead, and both its own header and docs/operations.md §9 have
+// to say that: the five check names and the absent target are asserted in both
+// places, and the "no build layer" claim is checked against the filesystem rather
+// than trusted — a root Makefile appearing while the prose still says there is
+// none fails here, which is what forces the record to be revisited.
+func TestCompatDocProvenance(t *testing.T) {
+	doc := readCompatDoc(t)
+	ops := readOperationsDoc(t)
+
+	for _, want := range []string{"hand-maintained", "no `make compat-matrix` target"} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/sentinel-compat.md does not state its provenance: missing %q", want)
+		}
+	}
+	for _, want := range []string{"hand-maintained", "no `Makefile`"} {
+		if !strings.Contains(ops, want) {
+			t.Errorf("docs/operations.md §9 does not record the compat document's provenance: missing %q", want)
+		}
+	}
+	checks := []string{
+		"TestCompatMatrixRoutes",
+		"TestCompatMatrixItemTypes",
+		"TestCompatMatrixEncodings",
+		"TestCompatMatrixAuthForms",
+		"TestCompatMatrixDivergences",
+	}
+	for _, name := range checks {
+		if !strings.Contains(doc, name) {
+			t.Errorf("docs/sentinel-compat.md does not name the drift check %s it is enforced by", name)
+		}
+		if !strings.Contains(ops, name) {
+			t.Errorf("docs/operations.md §9 does not name the drift check %s", name)
+		}
+	}
+	// The claim is falsifiable, not asserted on trust: §7's generator would be a
+	// Makefile target, and a root Makefile is what makes the prose stale.
+	if _, err := os.Stat("../../Makefile"); err == nil {
+		t.Error("a root Makefile exists, but the provenance record still states the repository ships no build layer (compat §5.15, docs/operations.md §9)")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat Makefile: %v", err)
 	}
 }
 

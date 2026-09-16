@@ -2,9 +2,14 @@
 
 The ingestion surface of `internal/sentinel` (SPEC-04), what it accepts, and
 every place where it deliberately differs from upstream Sentry or from the SPEC-04
-text. Everything here is derived from the code's own tables: `TestCompatMatrix`
-(`compat_test.go`) renders the tables below from the same values the server uses
-and fails if this document drifts from them.
+text. The document is **hand-maintained**: this repository ships no build layer, so
+there is no `make compat-matrix` target to regenerate it (divergence 15 in §5,
+recorded for operators in `docs/operations.md` §9). It is enforced by the drift
+checks `TestCompatMatrixRoutes`, `TestCompatMatrixItemTypes`,
+`TestCompatMatrixEncodings`, `TestCompatMatrixAuthForms` and
+`TestCompatMatrixDivergences` (`compat_test.go`), each of which renders its table
+from the same values the server uses and fails CI when this document drifts from
+them. `TestCompatDocProvenance` pins this header.
 
 ## 1. Routes (listener `sentinel.bind`, default `127.0.0.1:7643`)
 
@@ -94,8 +99,8 @@ resolve to different projects are `TROUBLE-SENTINEL-006` (cause
 
 ## 5. Known divergences from the SPEC-04 text
 
-Each of these is a place where the shipped code cannot follow the spec literally,
-with the reason. Every one of them is asserted by a test.
+Each of these is a place where the shipped artifact cannot follow the spec
+literally, with the reason. Every one of them is asserted by a test.
 
 1. **`scrubber` interface shape.** SPEC-04 §2.2 sketches
    `Scrub(b []byte, targets []string) (types.ScrubResult, error)`. SPEC-02 ships
@@ -165,6 +170,13 @@ with the reason. Every one of them is asserted by a test.
     `internal/types` by this spec** (§3.6/§3.10 own them). `SourceLiveness` is
     declared alongside them because SPEC-04 produces it and SPEC-10 consumes it;
     it must not be redeclared.
+15. **This document is hand-maintained, not generated.** §7 names
+    `make compat-matrix` as its regeneration path; no `Makefile` exists anywhere in
+    this repository (the build layer is repo-wide and deferred with SPEC-06's
+    `make conformance` / `make schema` and SPEC-12's `Makefile` `build` target), so
+    the drift checks listed in the header enforce the document instead of a
+    generator. Pinned by `TestCompatDocProvenance`, which also fails if a root
+    `Makefile` appears while `docs/operations.md` §9 still says there is none.
 
 ## 6. Ledger payload schema
 

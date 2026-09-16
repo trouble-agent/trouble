@@ -146,6 +146,23 @@ asserts within 4x of the spec number and logs the measured value on every run.
 The listener, what it accepts, and where it deliberately differs from upstream
 Sentry is `docs/sentinel-compat.md`; this section is the operating half.
 
+### The compat document's provenance
+
+`docs/sentinel-compat.md` is **hand-maintained**: this repository ships no build
+layer (there is no `Makefile` anywhere in the tree), so §7's "regenerated from the
+same tables by `make compat-matrix`" names a target that cannot run here. What
+keeps the document honest is the drift-check test set instead —
+`TestCompatMatrixRoutes`, `TestCompatMatrixItemTypes`,
+`TestCompatMatrixEncodings`, `TestCompatMatrixAuthForms` and
+`TestCompatMatrixDivergences` each render their table's values from the same
+tables the server uses and fail CI when the document and the code disagree.
+`TestCompatDocProvenance` pins this paragraph, that header and the absence of a
+root `Makefile` against each other, so the claim "there is no generator" cannot
+outlive a `Makefile` that appears; compat §5 records the divergence. The missing
+build layer is repo-wide (SPEC-06's `make conformance` / `make schema`, SPEC-12's
+`Makefile` `build` target) and is not this package's to invent: it is flagged for
+the v0.1 `SPEC-INDEX` review together with §7's numeric load thresholds below.
+
 ### What to watch
 
 | Check | Read | What "wrong" looks like |
@@ -301,6 +318,37 @@ run the tree with `go test -p 1 ./internal/...` when it is included — otherwis
 can push `internal/ledger`'s timing assertions (`TestFsyncWindowBound`,
 `TestPerLineRegression`) and `internal/scrub`'s µs/KiB budgets over their
 host-measured bounds on a shared machine.
+
+### Steady resident set (§7's Memory paragraph)
+
+§7's Memory sentence — "`TestMain` asserts steady RSS ≤ 80MB after 1,000,000
+events (measured trivial path 7.0 → 15.6MB) and ≤ 192MB under the load test" — is
+shipped at the spec's scale. `TestSteadyRSSAfterManyEvents` (`load_test.go`) drives
+`steadyRSSEvents` (1,000,000) events through the admission path with a discard
+sink, so the measurement isolates sentinel from the ledger's own footprint, and
+asserts steady RSS after `runtime.GC()` + `debug.FreeOSMemory()`; the load test
+asserts the sentence's other half (peak growth ≤ 192MB) beside its own row above.
+MEASURED here, 16-core host under sibling fleet load, across two runs:
+**1,000,000 events in 32.4-33.2s, steady RSS 30.4-31.4MB** (15.5-15.8MB before the
+run, growth 15.0-15.7MB) against the 80MB bound — the package's full run is
+115-139s on this host depending on how the tree is run, and this measurement is
+roughly a third of it, which is why it is a named test and not a `TestMain`.
+
+There is no `TestMain` in this package: §7's sentence names one, but a `TestMain`
+would pay this measurement on every invocation, including the `-race` build (where
+a resident-set number is skewed by instrumentation and says nothing) and `-short`
+(which exists so a busy host can run the whole tree in parallel). The named test
+is what the sentence refers to; `TestMemoryBoundsMatchOperationsDoc` ties the table
+below to the constants, so the count and the bounds cannot drift from this prose.
+Unlike the load test it is single-goroutine CPU work with no ledger fsync in the
+path (~1 core for ~32s), so it runs under `-short` too and cannot push a sibling
+package's host-measured budgets the way the 8-worker load test can.
+
+| Measurement | Shipped and asserted | §7's Memory paragraph |
+|---|---|---|
+| steady-RSS event count | 1,000,000 events | 1,000,000 events |
+| steady RSS bound | 80MB | 80MB |
+| peak RSS bound under the load test | 192MB | 192MB |
 
 ### Substrate fix found by this work: `types.NewID` same-millisecond collisions
 

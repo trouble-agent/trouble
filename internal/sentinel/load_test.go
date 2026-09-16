@@ -58,6 +58,15 @@ const (
 	loadRSSTestBound   = 192 << 20
 )
 
+// §7's Memory paragraph: "steady RSS <= 80MB after 1,000,000 events" on the
+// trivial path. steadyRSSEvents is that scale and steadyRSSBound that budget;
+// both are tied to the §9 table in docs/operations.md by
+// TestMemoryBoundsMatchOperationsDoc.
+const (
+	steadyRSSEvents = 1_000_000
+	steadyRSSBound  = 80 << 20
+)
+
 // rssBytes reads the process's resident set size from /proc/self/statm. It is the
 // honest "RSS growth" measure (Go's HeapInuse is not RSS).
 func rssBytes(tb testing.TB) int64 {
@@ -506,13 +515,15 @@ var loadClient = &http.Client{
 	},
 }
 
-// TestSteadyRSSAfterManyEvents pins §7's memory paragraph: steady resident set
-// stays inside a fixed budget while events stream through the ingestion path.
-//
-// The spec's number is measured after 1,000,000 events on the trivial path
-// (7.0 -> 15.6MB). Here the same shape runs 200,000 events with a discard sink so
-// the measurement isolates sentinel (the real ledger's own footprint is asserted
-// under the load test), and the budget asserted is the spec's 80MB steady bound.
+// TestSteadyRSSAfterManyEvents pins §7's Memory paragraph — "steady RSS <= 80MB
+// after 1,000,000 events (measured trivial path 7.0 -> 15.6MB)" — at the spec's
+// scale: steadyRSSEvents events through the admission path with a discard sink,
+// so the measurement isolates sentinel (the real ledger's own footprint is
+// asserted under the load test), and the budget asserted is the spec's steady
+// bound. §7's sentence names a `TestMain` for this; it ships as this named test
+// instead, because a `TestMain` would pay the measurement on every invocation of
+// the package, including the -race and -short builds where a resident-set number
+// says nothing (docs/operations.md §9).
 func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	if raceEnabled {
 		t.Skip("RSS growth is meaningless under -race instrumentation")
@@ -529,10 +540,13 @@ func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	defer s.Drain(context.Background())
 	entry, _ := s.projects.project("1")
 
-	const events = 200_000
+	const (
+		events = steadyRSSEvents
+		warmup = 2_000
+	)
 	frames := []frame{{File: "worker.py", Function: "claim", InApp: true, ContextLine: "item = pool.get(timeout=1)"}}
 	ctx := context.Background()
-	for i := 0; i < 2_000; i++ { // warm up
+	for i := 0; i < warmup; i++ { // warm up
 		ev := &rawEvent{
 			ID: eventIDAt(i), Level: "error", Culprit: "worker.claim",
 			Message: "queue wedge: pool exhausted depth=912", Frames: frames,
@@ -546,6 +560,7 @@ func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	debug.FreeOSMemory()
 	before := rssBytes(t)
 
+	start := time.Now()
 	for i := 0; i < events; i++ {
 		ev := &rawEvent{
 			ID: eventIDAt(1_000_000 + i), Level: "error", Culprit: "worker.claim",
@@ -560,15 +575,16 @@ func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	debug.FreeOSMemory()
 	after := rssBytes(t)
 	groups := s.Groups()
-	t.Logf("memory: %d events, RSS %d -> %d bytes (steady growth %d); groups=%d group_count=%d dedup=%d",
-		events, before, after, after-before, len(groups), groupCountSum(groups), len(s.dups))
-	if after > 80<<20 {
-		t.Errorf("steady RSS = %d bytes, want <= 80MB (§7's steady bound)", after)
+	t.Logf("memory: %d events in %s, RSS %d -> %d bytes (steady growth %d); groups=%d group_count=%d dedup=%d",
+		events, time.Since(start).Round(time.Millisecond), before, after, after-before,
+		len(groups), groupCountSum(groups), len(s.dups))
+	if after > steadyRSSBound {
+		t.Errorf("steady RSS = %d bytes, want <= %d (steadyRSSBound, §7's steady bound)", after, steadyRSSBound)
 	}
 	// Every event is counted exactly once, warmup included: the counters are the
 	// never-dropped aggregates (§3.3).
-	if sum := groupCountSum(groups); sum != uint64(events+2_000) {
-		t.Errorf("group counts sum to %d, want %d (200,000 events + 2,000 warmup)", sum, events+2_000)
+	if sum := groupCountSum(groups); sum != uint64(events+warmup) {
+		t.Errorf("group counts sum to %d, want %d (%d events + %d warmup)", sum, events+warmup, events, warmup)
 	}
 	if len(s.dups) != maxDupEntries {
 		t.Errorf("dedup window holds %d entries, want it pinned at the %d cap", len(s.dups), maxDupEntries)
@@ -596,6 +612,24 @@ func docTableRow(tb testing.TB, path, label string) (string, string) {
 	return "", ""
 }
 
+// docMB renders a byte bound the way §9's tables state it (the constants' binary
+// megabyte: `1MB = 1<<20` bytes).
+func docMB(n int64) string { return fmt.Sprintf("%dMB", n>>20) }
+
+// docCount renders an event count with thousands separators, the shape §9's
+// steady-resident-set table uses.
+func docCount(n int) string {
+	s := strconv.Itoa(n)
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte(',')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // TestLoadBoundsMatchOperationsDoc ties §9's load-test table to the bounds
 // load_test.go actually asserts, the way TestDecompressedCapBoundary ties the
 // compat cap row to the enforced cap. The paragraph this table replaced said
@@ -604,7 +638,6 @@ func docTableRow(tb testing.TB, path, label string) (string, string) {
 // connected the prose to the constant. A doc edit that changes a number without
 // the constant (or the reverse) now fails here.
 func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
-	mb := func(n int64) string { return fmt.Sprintf("%dMB", n>>20) }
 	cases := []struct {
 		label    string
 		asserted string // what the test asserts on this host
@@ -614,8 +647,8 @@ func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
 		{"throughput reference (logged, not asserted)", "—", fmt.Sprintf("%.0f req/s", loadReferenceReqS)},
 		{"p99 latency", loadP99HostBudget.String(), loadP99Budget.String()},
 		{"p999 latency", loadP999HostBudget.String(), loadP999Budget.String()},
-		{"steady-state RSS growth", mb(loadRSSHostBound), mb(loadRSSGrowthBound)},
-		{"peak RSS growth", mb(loadRSSTestBound), "—"},
+		{"steady-state RSS growth", docMB(loadRSSHostBound), docMB(loadRSSGrowthBound)},
+		{"peak RSS growth", docMB(loadRSSTestBound), "—"},
 	}
 	for _, tc := range cases {
 		gotAsserted, gotPinned := docTableRow(t, operationsDocPath, tc.label)
@@ -634,5 +667,33 @@ func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
 	}
 	if strings.Contains(string(doc), "p99 ≤ 250ms") {
 		t.Error("§9 still states a 250ms p99 the test does not assert")
+	}
+}
+
+// TestMemoryBoundsMatchOperationsDoc ties §9's steady-resident-set table to the
+// constants and to §7's Memory paragraph, the way
+// TestLoadBoundsMatchOperationsDoc ties the load table. §7's sentence names a
+// `TestMain` after 1,000,000 events; the record has to state the shipped shape (a
+// named test at the spec's own scale) instead of leaving the sentence readable as
+// satisfied at a fifth of the scale, and a doc edit that changes the count or a
+// bound without the constant (or the reverse) fails here.
+func TestMemoryBoundsMatchOperationsDoc(t *testing.T) {
+	cases := []struct {
+		label    string
+		shipped  string // what the test asserts
+		sentence string // §7's Memory paragraph
+	}{
+		{"steady-RSS event count", docCount(steadyRSSEvents) + " events", docCount(steadyRSSEvents) + " events"},
+		{"steady RSS bound", docMB(steadyRSSBound), docMB(steadyRSSBound)},
+		{"peak RSS bound under the load test", docMB(loadRSSTestBound), docMB(loadRSSTestBound)},
+	}
+	for _, tc := range cases {
+		gotShipped, gotSentence := docTableRow(t, operationsDocPath, tc.label)
+		if gotShipped != tc.shipped {
+			t.Errorf("§9 row %q asserts %q, but load_test.go asserts %q", tc.label, gotShipped, tc.shipped)
+		}
+		if gotSentence != tc.sentence {
+			t.Errorf("§9 row %q states §7's Memory paragraph as %q, but the constant renders %q", tc.label, gotSentence, tc.sentence)
+		}
 	}
 }

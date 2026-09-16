@@ -198,6 +198,85 @@ func fmtAge(s float64, ok bool) string {
 	}
 }
 
+// cleanIncident / cleanGroup / cleanEvidence / cleanStory sanitize every string
+// a detail page renders, so §6.9 holds on the pages that carry a typed struct
+// (the fragment paths already clean their row models).
+func cleanIncident(inc types.Incident) types.Incident {
+	inc.ID = clean(inc.ID)
+	inc.Sig = clean(inc.Sig)
+	inc.GroupID = clean(inc.GroupID)
+	inc.State = types.LadderState(clean(string(inc.State)))
+	inc.EntryRung = types.Rung(clean(string(inc.EntryRung)))
+	inc.Rung = types.Rung(clean(string(inc.Rung)))
+	inc.Severity = types.Severity(clean(string(inc.Severity)))
+	inc.OpenedTS = clean(inc.OpenedTS)
+	inc.UpdatedTS = clean(inc.UpdatedTS)
+	inc.ResolvedTS = clean(inc.ResolvedTS)
+	inc.VerifyWin = types.Duration(clean(string(inc.VerifyWin)))
+	inc.LeaseID = clean(inc.LeaseID)
+	inc.IssueID = clean(inc.IssueID)
+	inc.TaskID = clean(inc.TaskID)
+	inc.ResearchID = clean(inc.ResearchID)
+	return inc
+}
+
+func cleanGroup(g types.Group) types.Group {
+	g.ID = clean(g.ID)
+	g.Sig = clean(g.Sig)
+	g.Digest = clean(g.Digest)
+	g.Source = types.SigSource(clean(string(g.Source)))
+	g.Title = clean(g.Title)
+	g.FirstSeenTS = clean(g.FirstSeenTS)
+	g.LastSeenTS = clean(g.LastSeenTS)
+	g.IncidentID = clean(g.IncidentID)
+	g.CompactedTS = clean(g.CompactedTS)
+	rel := make([]string, 0, len(g.ReleaseRange))
+	for _, r := range g.ReleaseRange {
+		rel = append(rel, clean(r))
+	}
+	g.ReleaseRange = rel
+	return g
+}
+
+func cleanEvidence(ev types.Evidence) types.Evidence {
+	ev.TSWindowStart = clean(ev.TSWindowStart)
+	ev.TSWindowEnd = clean(ev.TSWindowEnd)
+	ev.CanaryID = clean(ev.CanaryID)
+	ev.Zone = clean(ev.Zone)
+	ev.Result = types.VerifyResultKind(clean(string(ev.Result)))
+	for i := range ev.SourcesExpected {
+		ev.SourcesExpected[i] = clean(ev.SourcesExpected[i])
+	}
+	for i := range ev.SourcesAlive {
+		ev.SourcesAlive[i] = clean(ev.SourcesAlive[i])
+	}
+	for i := range ev.SourcesQuiet {
+		ev.SourcesQuiet[i] = clean(ev.SourcesQuiet[i])
+	}
+	for i := range ev.SourcesMissing {
+		ev.SourcesMissing[i] = clean(ev.SourcesMissing[i])
+	}
+	return ev
+}
+
+func cleanStory(st Story) Story {
+	st.IssueRef = clean(st.IssueRef)
+	st.BoardRow = clean(st.BoardRow)
+	st.ResearchID = clean(st.ResearchID)
+	st.Research = clean(st.Research)
+	st.SpawnID = clean(st.SpawnID)
+	st.Promotion = clean(st.Promotion)
+	st.Candidate = clean(st.Candidate)
+	return st
+}
+
+func cleanSensor(sh types.SensorHealth) types.SensorHealth {
+	sh.Reason = clean(sh.Reason)
+	sh.LastSuccessTS = clean(sh.LastSuccessTS)
+	sh.LastEventTS = clean(sh.LastEventTS)
+	return sh
+}
+
 // fmtRate renders a per-minute rate.
 func fmtRate(r float64) string { return fmt.Sprintf("%.1f/min", r) }
 
@@ -233,7 +312,7 @@ func (s *server) incidentRow(inc types.Incident, now time.Time) incidentRow {
 	}
 	row := incidentRow{
 		Inc:      clean(inc.ID),
-		Title:    truncRunes(clean(inc.ID)),
+		Title:    truncRunes(s.incidentTitle(inc)),
 		Severity: inc.Severity,
 		State:    inc.State,
 		Rung:     inc.Rung,
@@ -246,6 +325,26 @@ func (s *server) incidentRow(inc types.Incident, now time.Time) incidentRow {
 	}
 	row.LastAge = fmtAge(row.LastAgeS, row.HasAge)
 	return row
+}
+
+// incidentTitle resolves the human title of an incident: the incident's group
+// title (the incident projection carries a sig and a group id, never a title),
+// then the group digest, then the sig, then the incident id.
+func (s *server) incidentTitle(inc types.Incident) string {
+	if inc.GroupID != "" && s.deps.Lookup != nil {
+		if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
+			if t := clean(g.Title); t != "" {
+				return t
+			}
+			if d := clean(g.Digest); d != "" {
+				return d
+			}
+		}
+	}
+	if sig := clean(inc.Sig); sig != "" {
+		return sig
+	}
+	return clean(inc.ID)
 }
 
 // groupRows maps the ranked group table (row 4).
@@ -454,7 +553,7 @@ func (s *server) sensorList() []types.SensorHealth {
 				sh.Reason = "no sample yet"
 			}
 		}
-		out = append(out, sh)
+		out = append(out, cleanSensor(sh))
 	}
 	return out
 }

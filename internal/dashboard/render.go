@@ -38,9 +38,12 @@ var staticFS embed.FS
 const cspHeader = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // maxPartialBytes is the §2.1.2 fragment contract: ≤8 KB uncompressed per
-// partial. A fragment that would exceed it fails the render path
-// (TROUBLE-DASHBOARD-007) instead of quietly shipping an oversized swap.
+// partial. An over-cap fragment is fitted (see fitPartial) rather than shipped.
 const maxPartialBytes = 8 << 10
+
+// maxPageBytes is the §2.9 per-request buffer ceiling: an HTML writer streams to
+// the socket and keeps no full-page buffer beyond 256 KiB.
+const maxPageBytes = 256 << 10
 
 // gzipThreshold is the §2.7 compression floor: HTML ≥1 KB is gzipped, and only
 // when the client advertised gzip support.
@@ -272,13 +275,28 @@ func (s scopeSet) best() types.Scope {
 
 // renderPage renders a page through the shell with the §2.8 headers, the CSRF
 // cookie and gzip for HTML ≥1 KB.
+//
+// The page is executed into a bounded buffer first (§2.9 allows a per-request
+// buffer up to 256 KiB): a template that fails mid-execute must be able to take
+// the §5 007 path, and a status cannot be chosen once the body has started
+// streaming. Fragments are bounded by the 8 KB cap for the same reason.
 func (s *server) renderPage(w http.ResponseWriter, r *http.Request, page string, d *pageData) error {
 	set, ok := s.pageSets[page]
 	if !ok || set == nil {
 		return errRender
 	}
+	buf := getBuf()
+	defer putBuf(buf)
+	if err := set.tpl.ExecuteTemplate(buf, "shell", d); err != nil {
+		return err
+	}
+	if buf.Len() > maxPageBytes {
+		return fmt.Errorf("%w: page %s is %d bytes (cap %d)", errRender, page, buf.Len(), maxPageBytes)
+	}
+	body := buf.String()
 	return s.writeHTML(w, r, http.StatusOK, true, func(ow io.Writer) error {
-		return set.tpl.ExecuteTemplate(ow, "shell", d)
+		_, werr := io.WriteString(ow, body)
+		return werr
 	})
 }
 

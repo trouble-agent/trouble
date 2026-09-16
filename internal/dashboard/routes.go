@@ -360,12 +360,14 @@ func (s *server) pageIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	rows, seq := s.incidentRows(ctx, s.cfg.PageLimit)
+	groups, _ := s.groupRows(ctx, s.cfg.PageLimit)
 	open, groupsOpen, perMin := s.deps.Index.Counters(s.now())
 	d := s.newPage(r, "Overview", "index")
 	d.Seq = seq
 	d.Banner = s.bannerState()
 	d.Strip = s.stripData(ctx)
 	d.Incidents = rows
+	d.Groups = groups
 	d.Counters = countersView{IncidentsOpen: open, GroupsOpen: groupsOpen, EventsPerMin: perMin}
 	if err := s.renderPage(w, r, "index", d); err != nil {
 		s.renderFailure(w, r, err)
@@ -404,18 +406,21 @@ func (s *server) pageIncident(w http.ResponseWriter, r *http.Request) {
 	d.Seq = s.deps.Index.LastSeq()
 	d.Banner = s.bannerState()
 	d.Strip = s.stripData(ctx)
-	d.Incident = inc
+	cinc := cleanIncident(*inc)
+	d.Incident = &cinc
 	d.IncidentID = id
 	if inc.GroupID != "" {
-		if g, ok := s.deps.Lookup.Group(inc.GroupID); ok {
-			d.Group = g
+		if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
+			cg := cleanGroup(*g)
+			d.Group = &cg
 		}
 	}
-	if ev, ok := s.deps.Lookup.Evidence(id); ok {
-		d.Evidence = ev
+	if ev, ok := s.deps.Lookup.Evidence(id); ok && ev != nil {
+		cev := cleanEvidence(*ev)
+		d.Evidence = &cev
 	}
 	if s.deps.Story != nil {
-		d.Story = s.deps.Story(id)
+		d.Story = cleanStory(s.deps.Story(id))
 	}
 	d.Timeline, _ = s.timelineRows(id, 0, s.cfg.PageLimit)
 	if err := s.renderPage(w, r, "incident", d); err != nil {
@@ -457,7 +462,8 @@ func (s *server) pageGroup(w http.ResponseWriter, r *http.Request) {
 	d.Seq = s.deps.Index.LastSeq()
 	d.Banner = s.bannerState()
 	d.Strip = s.stripData(ctx)
-	d.Group = g
+	cg := cleanGroup(*g)
+	d.Group = &cg
 	d.GroupID = id
 	if age, ok := s.deps.Index.LastEventAge(g.Sig, s.now()); ok {
 		d.GroupLastAgeS = age

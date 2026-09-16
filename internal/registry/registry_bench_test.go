@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -414,7 +415,11 @@ func TestSteadyRSSAfterCalls(t *testing.T) {
 	}
 
 	var before, after runtime.MemStats
+	// Steady-state RSS is only meaningful once the allocator has returned its
+	// free spans to the OS: without FreeOSMemory, Sys tracks the peak of the
+	// 19M allocations the loop makes, not the retained set.
 	runtime.GC()
+	debug.FreeOSMemory()
 	runtime.ReadMemStats(&before)
 	for i := 0; i < benchSteadyCalls; i++ {
 		if _, err := f.reg.Call(ctx, req); err != nil {
@@ -422,6 +427,7 @@ func TestSteadyRSSAfterCalls(t *testing.T) {
 		}
 	}
 	runtime.GC()
+	debug.FreeOSMemory()
 	runtime.ReadMemStats(&after)
 
 	sysDelta := int64(after.Sys) - int64(before.Sys)
@@ -431,8 +437,9 @@ func TestSteadyRSSAfterCalls(t *testing.T) {
 		benchSteadyCalls, sysDelta, heapDelta,
 		int64(after.TotalAlloc)-int64(before.TotalAlloc), after.Mallocs-before.Mallocs, benchRSSDeltaBudget)
 	if sysDelta > benchRSSDeltaBudget {
-		t.Errorf("the steady-state RSS delta after %d calls is %d bytes, over the §7 budget of %d",
-			benchSteadyCalls, sysDelta, benchRSSDeltaBudget)
+		t.Errorf("the steady-state RSS delta after %d calls is %d bytes, over the §7 budget of %d "+
+			"(HeapAlloc delta %+d bytes, so the retained set is the thing to look at)",
+			benchSteadyCalls, sysDelta, benchRSSDeltaBudget, heapDelta)
 	}
 	if after.Mallocs-before.Mallocs < uint64(benchSteadyCalls) {
 		t.Errorf("the loop allocated only %d times over %d calls: it did not exercise the registry",

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -25,6 +26,22 @@ var Keywords = map[string]bool{
 	"minLength": true, "maxLength": true, "pattern": true,
 	"items": true, "minItems": true, "maxItems": true, "oneOf": true, "default": true,
 	"$schema": true, "$id": true,
+}
+
+// regexCache memoises compiled schema patterns: validate.Args runs on every call
+// and re-compiling a property pattern per call dominated the allocation profile.
+var regexCache sync.Map // pattern string -> *regexp.Regexp
+
+func compilePattern(pat string) (*regexp.Regexp, error) {
+	if v, ok := regexCache.Load(pat); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pat)
+	if err != nil {
+		return nil, err
+	}
+	regexCache.Store(pat, re)
+	return re, nil
 }
 
 // Error is a refusal carrying the registry's validate-stage code.
@@ -223,7 +240,7 @@ func validateValue(schema map[string]any, val any, path string) error {
 			return err
 		}
 		if pat, ok := schema["pattern"].(string); ok && pat != "" {
-			re, err := regexp.Compile(pat)
+			re, err := compilePattern(pat)
 			if err != nil {
 				return errf(path, "schema pattern %q does not compile: %v", pat, err)
 			}
@@ -366,6 +383,9 @@ func Normalize(raw map[string]any) (map[string]any, error) {
 	if raw == nil {
 		return map[string]any{}, nil
 	}
+	if jsonNative(raw) {
+		return raw, nil
+	}
 	b, err := json.Marshal(raw)
 	if err != nil {
 		return nil, &Error{Code: types.CodeRegistry018, Reason: fmt.Sprintf("args are not JSON-representable: %v", err)}
@@ -380,6 +400,34 @@ func Normalize(raw map[string]any) (map[string]any, error) {
 		out = map[string]any{}
 	}
 	return out, nil
+}
+
+// jsonNative reports whether every value in args is already a JSON-native Go
+// value (the shape the decoder produces), so the round trip can be skipped.
+func jsonNative(args map[string]any) bool {
+	for _, v := range args {
+		if !jsonNativeValue(v) {
+			return false
+		}
+	}
+	return true
+}
+
+func jsonNativeValue(v any) bool {
+	switch t := v.(type) {
+	case nil, string, bool, json.Number:
+		return true
+	case []any:
+		for _, item := range t {
+			if !jsonNativeValue(item) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		return jsonNative(t)
+	}
+	return false
 }
 
 // DecodeArgs strictly decodes normalized args into a module's typed args struct:

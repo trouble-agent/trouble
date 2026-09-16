@@ -158,7 +158,11 @@ func NewWith(deps RegistryDeps, mods []types.Module) (*Registry, error) {
 			return nil, err
 		}
 	}
-	if err := VerifyCommittedSchemas(r.names, func(name string) (types.Descriptor, bool) {
+	// The committed-artifact check covers the shipped set: those are the
+	// descriptors `make schema` writes and CI diffs. A module registered from
+	// outside the package (a test double, a future extension) has no committed
+	// artifact to compare against, so it is validated by its descriptor alone.
+	if err := VerifyCommittedSchemas(shippedNames(r.names), func(name string) (types.Descriptor, bool) {
 		d, err := r.Descriptor(name)
 		return d, err == nil
 	}); err != nil {
@@ -168,6 +172,21 @@ func NewWith(deps RegistryDeps, mods []types.Module) (*Registry, error) {
 }
 
 // warned carries boot-time refusals that must be visible without failing the boot.
+// shippedNames filters a module-name list down to the shipped set.
+func shippedNames(names []string) []string {
+	shipped := map[string]bool{}
+	for _, d := range ShippedDescriptors() {
+		shipped[d.Name] = true
+	}
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		if shipped[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 // Register validates a descriptor and adds the module to the table.
 // A mutating module with CheckMode=false is refused with TROUBLE-REGISTRY-014 at
 // registration, not at call time (SPEC-06 §3.2, AC-23 condition 2).

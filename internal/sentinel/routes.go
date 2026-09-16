@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -525,9 +526,17 @@ func indexByte(b []byte, c byte) int {
 }
 
 // parseClientReport decodes the SDK's own accounting (§3.2).
+//
+// The `timestamp` field is optional and may arrive in either form the SDK
+// contract allows — an ISO DateTime string or a UNIX timestamp in seconds,
+// fractional included ("String or Number"). sentry-javascript sends the numeric
+// form, so a typed string field would push those reports onto the malformed
+// path and turn the SDK's own attrition into silence, which is exactly what
+// §1.3 exists to prevent. A missing, null or unrecognized value leaves the
+// report on the server clock; the item is still parsed and never dropped.
 func parseClientReport(body []byte, projectID string, now time.Time) (*types.ClientReport, *Error) {
 	var raw struct {
-		Timestamp string `json:"timestamp"`
+		Timestamp json.RawMessage `json:"timestamp"`
 		Discarded []struct {
 			Reason   string `json:"reason"`
 			Category string `json:"category"`
@@ -538,7 +547,7 @@ func parseClientReport(body []byte, projectID string, now time.Time) (*types.Cli
 		return nil, errf(types.CodeSentinel019, "client_report is not a JSON object", "client_report")
 	}
 	rep := &types.ClientReport{Project: projectID, TS: types.FormatUTC(now)}
-	if ts, err := types.ParseUTC(raw.Timestamp); err == nil {
+	if ts, ok := clientReportTS(raw.Timestamp); ok {
 		rep.TS = types.FormatUTC(ts)
 	}
 	for _, d := range raw.Discarded {
@@ -553,6 +562,53 @@ func parseClientReport(body []byte, projectID string, now time.Time) (*types.Cli
 		})
 	}
 	return rep, nil
+}
+
+// clientReportTS decodes the client report's timestamp in either form the SDK
+// contract allows: an ISO DateTime string, or UNIX seconds as a plain decimal
+// number with an optional fraction (sentry-javascript sends `1642153010.09`).
+// ok is false for anything else — absent, null, or a shape neither form accepts
+// (a boolean, an object, a non-timestamp string, `1e9`, a number outside int64)
+// — and the caller keeps its own clock: a report whose timestamp cannot be read
+// is still parsed, never dropped (§3.2).
+//
+// The seconds and the fraction are decoded as decimal digits rather than
+// through a float, so `1642153010.09` yields exactly 90,000,000ns: `float64`
+// cannot represent that value and the subtraction would hand back
+// 89,999,914ns.
+func clientReportTS(raw json.RawMessage) (time.Time, bool) {
+	tok := strings.TrimSpace(string(raw))
+	if tok == "" || tok == "null" {
+		return time.Time{}, false
+	}
+	if tok[0] == '"' {
+		var s string
+		if err := json.Unmarshal([]byte(tok), &s); err != nil {
+			return time.Time{}, false
+		}
+		ts, err := types.ParseUTC(s)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return ts, true
+	}
+	secStr, fracStr, _ := strings.Cut(tok, ".")
+	sec, err := strconv.ParseInt(secStr, 10, 64)
+	if err != nil {
+		return time.Time{}, false
+	}
+	var nsec int64
+	if fracStr != "" {
+		if len(fracStr) > 9 { // sub-nanosecond digits fall below the clock
+			fracStr = fracStr[:9]
+		}
+		digits := fracStr + strings.Repeat("0", 9-len(fracStr))
+		nsec, err = strconv.ParseInt(digits, 10, 64)
+		if err != nil {
+			return time.Time{}, false
+		}
+	}
+	return time.Unix(sec, nsec).UTC(), true
 }
 
 // readBodyLimited reads a request body within a cap (the probe/GET path).

@@ -574,3 +574,65 @@ func TestSteadyRSSAfterManyEvents(t *testing.T) {
 		t.Errorf("dedup window holds %d entries, want it pinned at the %d cap", len(s.dups), maxDupEntries)
 	}
 }
+
+// operationsDocPath is the shipped operations guide (§9 "Load test").
+const operationsDocPath = "../../docs/operations.md"
+
+// docTableRow returns the two cells after the label of a `| label | a | b |`
+// row of a markdown table in PATH.
+func docTableRow(tb testing.TB, path, label string) (string, string) {
+	tb.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		tb.Fatalf("read %s: %v", path, err)
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Split(line, "|")
+		if len(fields) >= 4 && strings.TrimSpace(fields[1]) == label {
+			return strings.TrimSpace(fields[2]), strings.TrimSpace(fields[3])
+		}
+	}
+	tb.Fatalf("%s has no %q row", path, label)
+	return "", ""
+}
+
+// TestLoadBoundsMatchOperationsDoc ties §9's load-test table to the bounds
+// load_test.go actually asserts, the way TestDecompressedCapBoundary ties the
+// compat cap row to the enforced cap. The paragraph this table replaced said
+// the test "asserts a p99 <= 250ms" while loadP99HostBudget was already 1s — a
+// stale sentence inside the branch's own commit sequence, because nothing
+// connected the prose to the constant. A doc edit that changes a number without
+// the constant (or the reverse) now fails here.
+func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
+	mb := func(n int64) string { return fmt.Sprintf("%dMB", n>>20) }
+	cases := []struct {
+		label    string
+		asserted string // what the test asserts on this host
+		pinned   string // §7's pass threshold, which this host does not meet
+	}{
+		{"throughput floor", fmt.Sprintf("%.0f req/s", loadFloorReqS), fmt.Sprintf("%.0f req/s", loadTargetReqS)},
+		{"throughput reference (logged, not asserted)", "—", fmt.Sprintf("%.0f req/s", loadReferenceReqS)},
+		{"p99 latency", loadP99HostBudget.String(), loadP99Budget.String()},
+		{"p999 latency", loadP999HostBudget.String(), loadP999Budget.String()},
+		{"steady-state RSS growth", mb(loadRSSHostBound), mb(loadRSSGrowthBound)},
+		{"peak RSS growth", mb(loadRSSTestBound), "—"},
+	}
+	for _, tc := range cases {
+		gotAsserted, gotPinned := docTableRow(t, operationsDocPath, tc.label)
+		if gotAsserted != tc.asserted {
+			t.Errorf("§9 row %q asserts %q, but load_test.go asserts %q", tc.label, gotAsserted, tc.asserted)
+		}
+		if gotPinned != tc.pinned {
+			t.Errorf("§9 row %q states §7's threshold as %q, but the constant renders %q", tc.label, gotPinned, tc.pinned)
+		}
+	}
+	// The §7 sentence the table replaced must not come back: the doc has to name
+	// what CI actually trips on.
+	doc, err := os.ReadFile(operationsDocPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", operationsDocPath, err)
+	}
+	if strings.Contains(string(doc), "p99 ≤ 250ms") {
+		t.Error("§9 still states a 250ms p99 the test does not assert")
+	}
+}

@@ -240,22 +240,59 @@ number in `docs/sentinel-compat.md` §3. §6.1's phrase "a limited reader capped
 §3.7's own bomb row require — and is worth pinning in the spec text at the next
 SPEC-04 revision so it cannot be read as an allowance.
 
+### Client report timestamps
+
+A `client_report` item timestamps itself in either of the two forms the SDK
+contract allows: an ISO DateTime string, or a UNIX timestamp in seconds with the
+fraction that sentry-javascript sends (`1642153010.09`). The decoder reads both
+(`clientReportTS`); a missing, `null` or unrecognized value leaves the report on
+the server clock. Before that fix the field was a typed string, so the numeric
+form failed to decode and the item took the malformed path — a `200` on the wire
+with no `event` record, no merged `ClientReportDiscards` and no
+`client_reports_total`, i.e. the SDK's own attrition became silence, which is the
+outcome §1.3 exists to prevent. `TestClientReportTimestampForms` drives every
+shape through the HTTP path, `TestClientReportTSParsing` pins the fallbacks, and
+`docs/sentinel-compat.md` §2 records both accepted forms.
+
+The fraction is decoded from the digits rather than through a float, so
+`1642153010.09` is exactly 90,000,000 ns; a `float64` subtraction hands back
+89,999,914 ns.
+
 ### Load test
 
 `internal/sentinel/load_test.go` runs the §7 load test: 8 workers, ~4KB gzip'd
 envelopes, one project, 60s (5s under `-short`), against the **real** ledger with
 the 100-record/5ms group-commit policy the spec's reference numbers were measured
-with. MEASURED here (load_avg 8-15, sandbox filesystem, across a 5s and several 60s
-runs): 1,768-4,490 req/s (target 2,000, spec reference 6,199), p99 61-526 ms,
-p999 89-780 ms, 5xx 0, steady-state RSS growth 12-28MB, peak <220MB. The
-throughput tracks host load; the test asserts a 1,000 req/s floor (still 7x what
-fsync-per-line buys, so it proves group commit is in use) and logs the measured
-value against the spec's target and reference. The latency floor is the ledger's group-commit
-cycle, not sentinel: the ledger alone measures **6,182 records/s** with the same
-policy on this filesystem, i.e. the batch write + fsync cycle bounds a request's
-latency at tens of milliseconds here. The test logs every number and asserts the
-spec's latency budget at the factor this host supports (p99 ≤ 250ms); the spec's
-25 ms p99 assumes the reference host's fsync service time.
+with. MEASURED here (16-core host carrying sibling fleet work, load_avg 6-24,
+sandbox filesystem, across a 5s run and several 60s runs): 1,768-4,490 req/s
+(spec reference 6,199), p99 61-526 ms, p999 89-780 ms, 5xx 0, steady-state RSS
+growth 12-29MiB, peak RSS growth up to 157MiB. Throughput and latency both track
+host load.
+
+The test asserts the host-supported bounds in the table below (`MB` is the
+constants' binary megabyte, `1MB = 1<<20` bytes); the right-hand column is §7's
+own pass threshold, which this host does not meet. The latency floor is the
+ledger's group-commit cycle, not sentinel: the ledger alone measures **6,182
+records/s** with the same policy on this filesystem, i.e. the batch write + fsync
+cycle bounds a request's latency at tens of milliseconds here, against the 25 ms
+p99 the spec assumes on its reference host.
+
+| Bound the test asserts | This host | §7's pass threshold |
+|---|---|---|
+| throughput floor | 1000 req/s | 2000 req/s |
+| throughput reference (logged, not asserted) | — | 6199 req/s |
+| p99 latency | 1s | 25ms |
+| p999 latency | 2s | 100ms |
+| steady-state RSS growth | 48MB | 8MB |
+| peak RSS growth | 192MB | — |
+
+`TestLoadBoundsMatchOperationsDoc` parses that table and fails if a value
+disagrees with the constants in `load_test.go`, so prose and code cannot drift
+apart again. §7's numeric threshold still has no automated assertion — the
+left-hand column is what CI trips on. At the in-flight shape §7's own reference
+implies (256 × 1 ÷ 6,199 req/s = 41 ms mean) the 25 ms p99 budget is
+arithmetically unreachable here, so the gap stays a v0.1 `SPEC-INDEX` review item
+for the spec owner rather than a bound asserted in this package.
 
 `-short` degrades the load test to a correctness smoke (one request in flight per
 worker, no throughput/latency/RSS assertions), which keeps `go test -short

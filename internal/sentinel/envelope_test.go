@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -437,6 +438,145 @@ func TestUnknownProjectIs401(t *testing.T) {
 		t.Fatalf("unknown project = %d %s, want 401 007", resp.StatusCode, resp.Header.Get("X-Sentry-Error"))
 	}
 	_ = readBody(t, resp)
+}
+
+// TestClientReportTimestampForms pins §3.2's "parsed, never dropped" through the
+// real HTTP path for every timestamp form the SDK contract allows. A client
+// report carrying the numeric UNIX form (`{"timestamp":1789555500,…}` — what
+// sentry-javascript sends) used to be rejected by the decoder's typed string
+// field and take the malformed path, so the envelope answered 200 while the
+// SDK's own attrition produced no event record, no merged ClientReportDiscards
+// and no client_reports_total: silence, which is the opposite of §1.3's purpose.
+func TestClientReportTimestampForms(t *testing.T) {
+	const isoForm = `"2026-09-16T09:15:00Z"`
+	cases := []struct {
+		name    string
+		ts      string // the timestamp member's JSON text; "" omits the member
+		wantTS  string
+		wantNow bool
+	}{
+		{name: "iso string", ts: isoForm, wantTS: "2026-09-16T09:15:00.000Z"},
+		{name: "unix seconds", ts: `1789555500`, wantTS: types.FormatUTC(time.Unix(1789555500, 0))},
+		{name: "unix fractional", ts: `1642153010.09`, wantTS: types.FormatUTC(time.Unix(1642153010, 90_000_000))},
+		{name: "absent", wantNow: true},
+		{name: "null", ts: `null`, wantNow: true},
+		{name: "unparseable string", ts: `"yesterday"`, wantNow: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := newTestServer(t, nil)
+			defer ts.close()
+			body := `{"discarded_events":[{"reason":"queue_overflow","category":"error","quantity":2},` +
+				`{"reason":"network_error","category":"error","quantity":5}]}`
+			if tc.ts != "" {
+				body = `{"timestamp":` + tc.ts + `,` + strings.TrimPrefix(body, "{")
+			}
+			env := envelopeBytes(t, map[string]any{"event_id": "9f2c1d3e4b5a6c7d8e9f0a1b2c3d4e5f"},
+				envelopeFixtureItem{Type: "client_report", Body: []byte(body), Length: true, ContentType: "application/json"})
+			before := nowFunc()
+			resp := ts.post(t, "/api/1/envelope/", map[string]string{
+				"X-Sentry-Auth":    ts.authHeader("1"),
+				"Content-Encoding": "identity",
+			}, env)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status %d (%s), want 200", resp.StatusCode, readBody(t, resp))
+			}
+			_ = respID(t, resp)
+
+			// Exactly one `event` record, item_type client_report, and no group
+			// (§6.5: a client_report-only envelope writes no group).
+			recs := ts.sink.ofKind(types.KEvent)
+			if len(recs) != 1 {
+				t.Fatalf("%d event records, want 1 (parsed, never dropped)", len(recs))
+			}
+			if got := recs[0].Payload["item_type"]; got != "client_report" {
+				t.Errorf("item_type = %v, want client_report", got)
+			}
+			rep, ok := recs[0].Payload["client_report"].(*types.ClientReport)
+			if !ok || rep == nil {
+				t.Fatalf("event record carries no client_report payload: %v", recs[0].Payload["client_report"])
+			}
+			if len(rep.Discarded) != 2 || rep.Discarded[0].Reason != "queue_overflow" || rep.Discarded[1].Quantity != 5 {
+				t.Errorf("client_report discards = %+v, want the two buckets", rep.Discarded)
+			}
+			if tc.wantNow {
+				got, perr := types.ParseUTC(rep.TS)
+				if perr != nil {
+					t.Fatalf("report TS %q is not the pinned layout: %v", rep.TS, perr)
+				}
+				if d := got.Sub(before); d < -2*time.Second || d > 5*time.Second {
+					t.Errorf("report TS %s is %s from the pre-request clock, want the server's now", rep.TS, d)
+				}
+			} else if rep.TS != tc.wantTS {
+				t.Errorf("report TS = %q, want %q", rep.TS, tc.wantTS)
+			}
+			if got := ts.s.counters.clientReports.Get(); got != 1 {
+				t.Errorf("client_reports_total = %d, want 1", got)
+			}
+			if len(ts.sink.ofKind(types.KGroup)) != 0 || len(ts.s.Groups()) != 0 {
+				t.Errorf("client_report opened a group: %d group records, %d live groups",
+					len(ts.sink.ofKind(types.KGroup)), len(ts.s.Groups()))
+			}
+			rt, ok := ts.s.ProjectRuntime("1")
+			if !ok {
+				t.Fatal("ProjectRuntime(1) missing")
+			}
+			if rt.ClientReportDiscards["queue_overflow"] != 2 || rt.ClientReportDiscards["network_error"] != 5 {
+				t.Errorf("client_report_discards = %v, want the merged buckets", rt.ClientReportDiscards)
+			}
+		})
+	}
+	// The matrix has to name both accepted forms. This is a shape check on the
+	// doc, not the behavior pin — the wire table above is the pin.
+	if doc := readCompatDoc(t); !strings.Contains(doc, "UNIX timestamp in\nseconds as a JSON number") {
+		t.Error("docs/sentinel-compat.md §2 does not name the numeric client_report timestamp form")
+	}
+}
+
+// TestClientReportTSParsing pins the two accepted forms and every fallback of
+// clientReportTS directly, including the out-of-range guard that keeps a
+// nonsense number from overflowing the seconds field.
+func TestClientReportTSParsing(t *testing.T) {
+	cases := []struct {
+		name   string
+		raw    string
+		want   time.Time
+		wantOK bool
+	}{
+		{name: "iso string", raw: `"2026-09-16T09:15:00Z"`, want: time.Date(2026, 9, 16, 9, 15, 0, 0, time.UTC), wantOK: true},
+		{name: "iso with millis", raw: `"2026-09-16T09:15:00.250Z"`, want: time.Date(2026, 9, 16, 9, 15, 0, 250e6, time.UTC), wantOK: true},
+		{name: "unix integer", raw: `1789555500`, want: time.Unix(1789555500, 0).UTC(), wantOK: true},
+		{name: "unix fractional", raw: `1642153010.09`, want: time.Unix(1642153010, 90e6).UTC(), wantOK: true},
+		{name: "unix zero", raw: `0`, want: time.Unix(0, 0).UTC(), wantOK: true},
+		{name: "absent", raw: ``, wantOK: false},
+		{name: "null", raw: `null`, wantOK: false},
+		{name: "boolean", raw: `true`, wantOK: false},
+		{name: "object", raw: `{}`, wantOK: false},
+		{name: "unparseable string", raw: `"yesterday"`, wantOK: false},
+		{name: "overflowing number", raw: `1e19`, wantOK: false},
+		{name: "negative overflow", raw: `-1e19`, wantOK: false},
+		{name: "exponent notation", raw: `1.5e9`, wantOK: false},
+		{name: "empty", raw: ``, wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := clientReportTS(json.RawMessage(tc.raw))
+			if ok != tc.wantOK {
+				t.Fatalf("clientReportTS(%s) ok = %v, want %v", tc.raw, ok, tc.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("clientReportTS(%s) = %s, want %s", tc.raw, got.Format(time.RFC3339Nano), tc.want.Format(time.RFC3339Nano))
+			}
+		})
+	}
+	// The numeric form must not be truncated to whole seconds on the way in.
+	frac, ok := clientReportTS(json.RawMessage(`1642153010.09`))
+	if !ok || frac.Nanosecond() != 90_000_000 {
+		t.Errorf("fractional UNIX timestamp = %v (ok %v), want 1642153010.09", frac, ok)
+	}
 }
 
 // TestGzipEnvelopeAccepted pins the SDK's default Content-Encoding.

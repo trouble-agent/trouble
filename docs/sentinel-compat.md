@@ -32,6 +32,16 @@ those four paths → `405` + `TROUBLE-SENTINEL-021`.
 An unsupported item type **never** fails the envelope. `SentryEvent.ItemTypes`
 records every type seen, including dropped ones.
 
+The `client_report` timestamp is accepted in both forms the SDK contract allows
+— an ISO DateTime string (`"2026-09-16T09:15:00Z"`) or a UNIX timestamp in
+seconds as a JSON number, fractional included (`1642153010.09`, the form
+sentry-javascript sends). A missing, `null` or unrecognized value (a boolean, an
+object, `1e9`, a number outside `int64`) leaves the report on the server clock;
+the item is still parsed and never dropped, because §3.2's point is that
+SDK-side attrition is visible data rather than silence (§1.3).
+`TestClientReportTimestampForms` drives every one of those shapes through the
+HTTP path.
+
 Binary item types (`attachment`, `minidump`, `profile`, `replay`) require an
 explicit `length`; without it the envelope is `400` + `TROUBLE-SENTINEL-001`
 (cause `length_required`).

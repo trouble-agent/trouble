@@ -1,0 +1,52 @@
+# trouble sensors configuration example (SPEC-03 §4).
+# Copy to <config>/10-sensors.toml and edit; every key has a default, and no
+# host-specific value is compiled into the binary anywhere.
+
+[sensors.psi]
+enabled = true
+sample_interval = "2s"   # min 1s, max 10s, and always <= window
+window = "2s"            # must be a multiple of 2s; the ceiling is probed at boot
+
+[sensors.journald]
+enabled = true
+units = []               # empty = follow only trouble's own unit, never the whole journal
+follow_all = false       # refused on hosts whose journal exceeds follow_all_max_entries
+follow_all_max_entries = 2000000
+queue = 8192             # entries
+queue_bytes = 33554432   # 32 MiB
+max_entry = 65536        # bytes per MESSAGE
+probe_interval = "30s"   # the seek probe IS the liveness proof; entry silence is not staleness
+
+[sensors.dbus]
+enabled = true
+user_managers = ["self"] # "self" | "user:<uid>" | "uid:<uid>"; system manager is always watched
+ping_interval = "30s"
+reconcile_interval = "300s"
+
+[sensors.disk]
+enabled = true
+mounts = ["/"]
+interval = "60s"
+
+[sensors.timers]
+enabled = true
+interval = "60s"
+
+[sensors.inotify]
+enabled = true           # the rules directory is watched even when paths = []
+paths = []
+recheck_interval = "900s"
+max_depth = 8
+
+[sensors.rules]
+dir = ""                 # empty = <config>/rules.d
+reload_debounce = "500ms"
+
+[sensors.limits]
+rule_per_min = 120
+source_per_min = 600
+global_per_min = 1200
+incidents_per_5m = 25
+
+[sensors]
+merge_window = "5s"

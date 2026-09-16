@@ -1,0 +1,38 @@
+// trouble — polkit policy for systemd unit management (SPEC-03 §3.3).
+//
+// install: /etc/polkit-1/rules.d/10-trouble-manage-units.rules, mode 0644,
+// root-owned. The rule authorizes ONLY the trouble uid, ONLY for
+// org.freedesktop.systemd1.manage-units, and ONLY for the units that SPEC-06's
+// do-not-touch list has already narrowed. Without it, `service.*` tool calls
+// are refused with TROUBLE-SENSORS-012 (the POLICY-REFUSED surface) — which is
+// the correct, visible failure, never a silent no-op.
+//
+// The daemon never probes polkit by attempting a mutating call; `trouble
+// install` verifies this file is present and loaded and fails loudly if not.
+//
+// Replace TOOLKIT_USER below with the trouble uid (trouble install renders it).
+
+polkit.addRule(function(action, subject) {
+    if (action.id != "org.freedesktop.systemd1.manage-units") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    if (subject.user != "TOOLKIT_USER") {
+        return polkit.Result.NOT_HANDLED;
+    }
+    // SPEC-06 ownership: the registry's allowlist is the authority for which
+    // units a play may touch. This policy only authorizes the verb; the unit
+    // allowlist is enforced before the call is ever made.
+    var allowed = [
+        "example-app.service",
+        "example-worker.service"
+    ];
+    var unit = action.lookup("unit");
+    if (unit === undefined || allowed.indexOf(unit) < 0) {
+        return polkit.Result.NOT_HANDLED;
+    }
+    var verb = action.lookup("verb");
+    if (verb == "start" || verb == "stop" || verb == "restart" || verb == "reload") {
+        return polkit.Result.YES;
+    }
+    return polkit.Result.NOT_HANDLED;
+});

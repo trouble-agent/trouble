@@ -45,13 +45,16 @@ func (s *server) authenticate(r *http.Request, required types.Scope) (principal,
 		return principal{}, &dashError{Code: types.CodeDashboard012, HTTP: 429, Message: "rate limited", Detail: "auth_failure_throttle"}
 	}
 
-	// Loopback /health.json exemption: the one route that runs without auth.
-	if required == "" && s.healthExempt(r) {
+	// Loopback /health.json exemption: the one route that runs without auth
+	// (§2.1 row 8 note — the read scope on that row is the non-exempt case).
+	if s.healthExempt(r) {
 		return principal{}, nil
 	}
 
-	// Step 4: identify. The token store fail-closes before any lookup (§3.2):
-	// no last-known-good fallback.
+	// Step 4: identify. The store is stat'ed per request; an mtime/size change
+	// re-reads it into a new immutable set before this request looks anything
+	// up (§3.2, edge case 3: a rotation cannot half-apply within one request).
+	s.store.refresh(now)
 	if err := s.store.invalid(); err != nil {
 		s.counters.denied.Add(1)
 		return principal{}, &dashError{Code: types.CodeDashboard013, HTTP: 503, Message: "token store unavailable", Detail: "token_store_invalid"}

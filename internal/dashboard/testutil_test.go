@@ -227,6 +227,14 @@ func (f *fakeIndex) setSeq(seq uint64) {
 	f.seq = seq
 }
 
+// seqNow reads the current seq without counting the accessor call (tests that
+// need the CAS pair the fragment would carry).
+func (f *fakeIndex) seqNow() uint64 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.seq
+}
+
 func (f *fakeIndex) calls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -331,6 +339,9 @@ type fakeActions struct {
 	closes   []closeCall
 	ackErr   error
 	closeErr error
+	// lookup, when set, receives the ladder's state effect (a close resolves
+	// the incident) so the CAS tests exercise a real state move.
+	lookup *fakeLookup
 }
 
 type ackCall struct {
@@ -351,14 +362,33 @@ func (a *fakeActions) Ack(ctx context.Context, inc string, actor types.Actor, re
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.acks = append(a.acks, ackCall{Inc: inc, Actor: actor, Reason: reason, Until: until})
-	return a.ackErr
+	if a.ackErr != nil {
+		return a.ackErr
+	}
+	if a.lookup != nil {
+		if cur, ok := a.lookup.Incident(inc); ok {
+			cur.UpdatedTS = types.FormatUTC(time.Now())
+			a.lookup.putIncident(*cur)
+		}
+	}
+	return nil
 }
 
 func (a *fakeActions) Close(ctx context.Context, inc string, actor types.Actor, reason, resolution string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.closes = append(a.closes, closeCall{Inc: inc, Actor: actor, Reason: reason, Resolution: resolution})
-	return a.closeErr
+	if a.closeErr != nil {
+		return a.closeErr
+	}
+	if a.lookup != nil {
+		if cur, ok := a.lookup.Incident(inc); ok {
+			cur.State = types.StResolved
+			cur.ResolvedTS = types.FormatUTC(time.Now())
+			a.lookup.putIncident(*cur)
+		}
+	}
+	return nil
 }
 
 func (a *fakeActions) ackCount() int {
@@ -566,6 +596,7 @@ func newEnv(t *testing.T, opt envOptions) *testEnv {
 	deps.Clock = clock.Now
 	deps.TokenFile = cfg.TokenFile
 
+	actions.lookup = lookup
 	s, err := newServer(cfg, deps)
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
@@ -596,6 +627,9 @@ func unlimitedRates(cfg *Config) {
 // incidents, groups, an issue ref + board row + promotion for the story panel,
 // breakers, rules.
 func seedFixtures(idx *fakeIndex, lookup *fakeLookup) {
+	// Start three records below the §3.4 example seq so the fixtures' CAS pair
+	// (ledger_seq 41207, the same literal the spec's example uses) holds.
+	idx.setSeq(41204)
 	inc1 := types.Incident{
 		ID: "inc_01J9F0000000000000000000AB", Sig: "sentinel:sha256v1:9f2c1d3e4b5a6c7d",
 		GroupID: "grp_01J9F0000000000000000000AB", State: types.StVerifying,

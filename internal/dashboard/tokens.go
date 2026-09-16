@@ -280,7 +280,8 @@ func (ts *TokenStore) refresh(now time.Time) {
 	}
 }
 
-// lookup finds the entry whose stored hash equals the presented token's hash.
+// lookup finds the authenticatable entry whose stored hash equals the presented
+// token's hash. Revoked entries are present for audit but never authenticate.
 // Comparison of the derived hashes is constant-time against the found entry
 // (SPEC-10 §2.2): the plaintext is never held beyond this function.
 func (ts *TokenStore) lookup(plaintext string) (tokenEntry, bool) {
@@ -298,6 +299,9 @@ func (ts *TokenStore) lookup(plaintext string) (tokenEntry, bool) {
 		return tokenEntry{}, false
 	}
 	if !subtleEqual(h, entry.Hash) {
+		return tokenEntry{}, false
+	}
+	if entry.Revoked {
 		return tokenEntry{}, false
 	}
 	return entry, true
@@ -371,6 +375,19 @@ func (ts *TokenStore) markUsed(label string, now time.Time) {
 // plaintext byte-equal to any forbidden ingestion key (TROUBLE-DASHBOARD-002,
 // detail equals_ingestion_key — §4.3.2).
 func (ts *TokenStore) Mint(label string, scopes []types.Scope, now time.Time) (types.Token, string, error) {
+	tok, plaintext, err := ts.mint(label, scopes, now)
+	if err != nil {
+		return types.Token{}, "", err
+	}
+	if err := ts.add(tok); err != nil {
+		return types.Token{}, "", err
+	}
+	return tok, plaintext, nil
+}
+
+// mint generates a token without writing it: entropy, the §3.2 grammar check
+// and the §4.3.2 ingestion-key refusal.
+func (ts *TokenStore) mint(label string, scopes []types.Scope, now time.Time) (types.Token, string, error) {
 	if label == "" {
 		return types.Token{}, "", errors.New("token label required")
 	}
@@ -390,17 +407,12 @@ func (ts *TokenStore) Mint(label string, scopes []types.Scope, now time.Time) (t
 			return types.Token{}, "", &dashError{Code: types.CodeDashboard002, HTTP: 500, Message: "token equals an ingestion key", Detail: "equals_ingestion_key"}
 		}
 	}
-	tok := types.Token{
+	return types.Token{
 		ID:        label,
 		Hash:      hashOf(plaintext),
 		Scopes:    append([]types.Scope(nil), scopes...),
 		CreatedTS: types.FormatUTC(now),
-		Revoked:   false,
-	}
-	if err := ts.add(tok); err != nil {
-		return types.Token{}, "", err
-	}
-	return tok, plaintext, nil
+	}, plaintext, nil
 }
 
 // Rotate mints a new label (<label>+<yyyymmdd>) and revokes the old entry in
@@ -419,11 +431,10 @@ func (ts *TokenStore) Rotate(label string, now time.Time) (types.Token, string, 
 		return types.Token{}, "", fmt.Errorf("token %q already revoked", label)
 	}
 	newLabel := label + "+" + now.UTC().Format("20060102")
-	tok, plaintext, err := ts.Mint(newLabel, old.Scopes, now)
+	tok, plaintext, err := ts.mint(newLabel, old.Scopes, now)
 	if err != nil {
 		return types.Token{}, "", err
 	}
-	old.Revoked = true
 	if err := ts.rewrite(func(tf *tokenFile) {
 		for i := range tf.Tokens {
 			if tf.Tokens[i].ID == label {

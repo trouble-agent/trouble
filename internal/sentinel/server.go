@@ -498,32 +498,18 @@ func (s *Server) rebuild(rd ledgerReader) error {
 				return true
 			}
 			grp := groupFromRecord(rec)
-			upper, _ := rec.Payload["events_upper_seq"].(float64)
-			bases[digest] = base{grp: grp, upper: uint64(upper)}
+			upper, _ := asUint64(rec.Payload["events_upper_seq"])
+			bases[digest] = base{grp: grp, upper: upper}
 		case types.KEvent:
 			digest, _ := rec.Payload["digest"].(string)
 			if digest == "" {
 				return true
 			}
 			e := evRef{digest: digest, seq: rec.Seq, sig: rec.Sig, redactions: rec.Redactions}
-			if evp, ok := rec.Payload["event"].(map[string]any); ok {
-				e.ts, _ = evp["ts"].(string)
-				e.release, _ = evp["release"].(string)
-			}
-			if project, ok := rec.Payload["project"].(string); ok && project != "" {
+			e.ts, e.release = eventPayloadFields(rec.Payload)
+			if project := eventProject(rec.Payload); project != "" {
 				if entry, found := s.projects.project(project); found {
-					if form, fok := rec.Payload["auth_form"].(string); fok {
-						entry.observeForm(form)
-					}
-				}
-			}
-			if ts, ok := rec.Payload["event"].(map[string]any); ok {
-				if project, ok := ts["project"].(string); ok && project != "" {
-					if entry, found := s.projects.project(project); found {
-						if form, fok := rec.Payload["auth_form"].(string); fok {
-							entry.observeForm(form)
-						}
-					}
+					entry.observeForm(asString(rec.Payload, "auth_form"))
 				}
 			}
 			events = append(events, e)
@@ -569,47 +555,17 @@ func (s *Server) rebuild(rd ledgerReader) error {
 // groupFromRecord rebuilds a types.Group from a `group` record's payload.
 func groupFromRecord(rec types.Record) types.Group {
 	g := types.Group{Sig: rec.Sig, Source: types.SrcSentinel}
-	if s, ok := rec.Payload["group_id"].(string); ok {
-		g.ID = s
+	g.ID = asString(rec.Payload, "group_id")
+	g.Digest = asString(rec.Payload, "digest")
+	g.Title = asString(rec.Payload, "title")
+	g.FirstSeenTS = asString(rec.Payload, "first_seen_ts")
+	g.LastSeenTS = asString(rec.Payload, "last_seen_ts")
+	if n, ok := asUint64(rec.Payload["count"]); ok {
+		g.Count = n
 	}
-	if s, ok := rec.Payload["digest"].(string); ok {
-		g.Digest = s
-	}
-	if s, ok := rec.Payload["title"].(string); ok {
-		g.Title = s
-	}
-	if s, ok := rec.Payload["first_seen_ts"].(string); ok {
-		g.FirstSeenTS = s
-	}
-	if s, ok := rec.Payload["last_seen_ts"].(string); ok {
-		g.LastSeenTS = s
-	}
-	if f, ok := rec.Payload["count"].(float64); ok {
-		g.Count = uint64(f)
-	}
-	if rr, ok := rec.Payload["release_range"].([]any); ok {
-		for _, v := range rr {
-			if s, ok := v.(string); ok {
-				g.ReleaseRange = append(g.ReleaseRange, s)
-			}
-		}
-	}
-	if c, ok := rec.Payload["counters"].(map[string]any); ok {
-		if f, ok := c["events"].(float64); ok {
-			g.Counters.Events = uint64(f)
-		}
-		if f, ok := c["suppressed"].(float64); ok {
-			g.Counters.Suppressed = uint64(f)
-		}
-		if f, ok := c["redacted_values"].(float64); ok {
-			g.Counters.Redacted = uint64(f)
-		}
-		if f, ok := c["dropped_events"].(float64); ok {
-			g.Counters.Dropped = uint64(f)
-		}
-		if f, ok := c["sample_rate"].(float64); ok {
-			g.Counters.SampleRate = f
-		}
+	g.ReleaseRange = asStringSlice(rec.Payload["release_range"])
+	if c, ok := asCounters(rec.Payload["counters"]); ok {
+		g.Counters = c
 	}
 	return g
 }
@@ -668,10 +624,7 @@ func (s *Server) ObserveRecord(rec types.Record) error {
 		if grp.Digest == "" {
 			return nil
 		}
-		upper := uint64(0)
-		if f, ok := rec.Payload["events_upper_seq"].(float64); ok {
-			upper = uint64(f)
-		}
+		upper, _ := asUint64(rec.Payload["events_upper_seq"])
 		last := ""
 		if len(grp.ReleaseRange) > 1 {
 			last = grp.ReleaseRange[1]
@@ -682,11 +635,7 @@ func (s *Server) ObserveRecord(rec types.Record) error {
 		if digest == "" {
 			return nil
 		}
-		ts, release := "", ""
-		if evp, ok := rec.Payload["event"].(map[string]any); ok {
-			ts, _ = evp["ts"].(string)
-			release, _ = evp["release"].(string)
-		}
+		ts, release := eventPayloadFields(rec.Payload)
 		s.groups.replayEvent(digest, rec.Seq, ts, release, rec.Redactions)
 	case types.KIncident:
 		if st, ok := rec.Payload["state"].(string); ok && (st == string(types.StResolved) || st == "closed") {
@@ -989,18 +938,6 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		s.counters.groupsCreated.Add(1)
 	}
 	s.releases.note(entry.proj.ID, ev.Release, ev.TS)
-	if res.flush {
-		// The 100-event trigger fired: flush right after the event record so the
-		// flush's events_upper_seq covers it.
-		defer func() {
-			if st, ok := s.groups.byDigestState(digest); ok {
-				_, _ = s.appendRecord(context.Background(), types.KGroup, sigStr, "sentinel", groupRecordPayload("flush", st, nil), 0)
-				if rec, err := s.sinkLastSeq(); err == nil {
-					s.groups.markFlushed(digest, rec, st.sampleRate)
-				}
-			}
-		}()
-	}
 
 	extra := map[string]any{
 		"disposition":  disposition,
@@ -1036,30 +973,41 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		s.groups.markDropped(digest, 1, outcome.sampleRate)
 	}
 
-	// Group records: create / release / (100-event flush handled above).
-	if res.created {
-		st, _ := s.groups.byDigestState(digest)
-		op := "create"
-		extraG := map[string]any{}
-		if verdict := s.releases.regressionVerdict(sigStr, ev.Release); verdict != "" {
-			extraG["regression"] = verdict
-			s.noteRegression(sigStr, verdict)
-			op = "release"
+	// Group records: create / release / the 100-event flush. The watermark is
+	// this event's seq, so a rebuild replays exactly the events the counters do
+	// not include and no others (§3.3).
+	if res.created || res.release != "" || res.flush {
+		s.groups.markFlushed(digest, rec.Seq, s.sampleRateFor(digest))
+	}
+	if st, ok := s.groups.byDigestState(digest); ok {
+		switch {
+		case res.created:
+			op := "create"
+			extraG := map[string]any{}
+			if verdict := s.releases.regressionVerdict(sigStr, ev.Release); verdict != "" {
+				extraG["regression"] = verdict
+				s.noteRegression(sigStr, verdict)
+				op = "release"
+			}
+			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload(op, st, extraG), 0); gerr != nil {
+				s.logger.Printf("sentinel: group create record failed: %v", gerr)
+			}
+		case res.release != "":
+			extraG := map[string]any{"release": res.release}
+			if verdict := s.releases.regressionVerdict(sigStr, res.release); verdict != "" {
+				extraG["regression"] = verdict
+				s.noteRegression(sigStr, verdict)
+			}
+			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload("release", st, extraG), 0); gerr != nil {
+				s.logger.Printf("sentinel: group release record failed: %v", gerr)
+			}
 		}
-		grec, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload(op, st, extraG), 0)
-		if gerr == nil {
-			s.groups.markFlushed(digest, rec.Seq, st.sampleRate)
-			_ = grec
-		}
-	} else if res.release != "" {
-		st, _ := s.groups.byDigestState(digest)
-		extraG := map[string]any{"release": res.release}
-		if verdict := s.releases.regressionVerdict(sigStr, res.release); verdict != "" {
-			extraG["regression"] = verdict
-			s.noteRegression(sigStr, verdict)
-		}
-		if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload("release", st, extraG), 0); gerr != nil {
-			s.logger.Printf("sentinel: group release record failed: %v", gerr)
+	}
+	if res.flush {
+		if st, ok := s.groups.byDigestState(digest); ok {
+			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload("flush", st, nil), 0); gerr != nil {
+				s.logger.Printf("sentinel: group flush record failed: %v", gerr)
+			}
 		}
 	}
 	return rec, nil

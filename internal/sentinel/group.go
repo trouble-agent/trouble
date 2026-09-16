@@ -400,6 +400,137 @@ func gapRecordPayload(cause, scope string, estLost int, fromTS, toTS string) map
 	}
 }
 
+
+// --- payload readers --------------------------------------------------------
+//
+// A payload read from the ledger has been through canonical JSON, so every
+// number is a float64, every array an []any and every object a map[string]any.
+// A payload read from an in-process sink still holds its Go types. These helpers
+// accept both, so the rebuild path is identical in tests and in production.
+
+func asString(m map[string]any, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func asUint64(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case int:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case int64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case uint64:
+		return n, true
+	case uint:
+		return uint64(n), true
+	case json.Number:
+		i, err := n.Int64()
+		if err != nil || i < 0 {
+			return 0, false
+		}
+		return uint64(i), true
+	}
+	return 0, false
+}
+
+func asFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
+}
+
+func asStringSlice(v any) []string {
+	switch t := v.(type) {
+	case []string:
+		return append([]string(nil), t...)
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, e := range t {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}
+
+// asCounters reads a GroupCounters value in either shape.
+func asCounters(v any) (types.GroupCounters, bool) {
+	switch c := v.(type) {
+	case types.GroupCounters:
+		return c, true
+	case map[string]any:
+		var out types.GroupCounters
+		if n, ok := asUint64(c["events"]); ok {
+			out.Events = n
+		}
+		if n, ok := asUint64(c["suppressed"]); ok {
+			out.Suppressed = n
+		}
+		if n, ok := asUint64(c["redacted_values"]); ok {
+			out.Redacted = n
+		}
+		if n, ok := asUint64(c["dropped_events"]); ok {
+			out.Dropped = n
+		}
+		if f, ok := asFloat(c["sample_rate"]); ok {
+			out.SampleRate = f
+		}
+		return out, true
+	}
+	return types.GroupCounters{}, false
+}
+
+// eventProject reads the project id of an `event` record's nested event.
+func eventProject(payload map[string]any) string {
+	switch e := payload["event"].(type) {
+	case types.SentryEvent:
+		return e.Project
+	case map[string]any:
+		return asString(e, "project")
+	}
+	return ""
+}
+
+// eventPayloadFields reads the (ts, release) of an `event` record regardless of
+// whether the nested event arrived as a struct or as decoded JSON.
+func eventPayloadFields(payload map[string]any) (ts, release string) {
+	switch e := payload["event"].(type) {
+	case types.SentryEvent:
+		return e.TS, e.Release
+	case map[string]any:
+		return asString(e, "ts"), asString(e, "release")
+	}
+	return "", ""
+}
+
 // jsonRoundTrip renders a value through JSON so payloads carry plain maps and
 // slices rather than structs (the ledger stores canonical JSON either way, but
 // a map keeps `payload.event.message` addressable for the dashboard).

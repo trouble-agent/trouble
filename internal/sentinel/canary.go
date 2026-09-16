@@ -194,6 +194,11 @@ func (s *Server) canaryLoop() {
 func (s *Server) checkCanaryAge() {
 	project, lastTS, ok := s.canaryState()
 	if project == "" {
+		// No observation has ever landed: the configured project is the one whose
+		// canary is missing.
+		project = s.canaryProj
+	}
+	if project == "" {
 		return
 	}
 	maxAge := 2 * s.cfg.CanaryInterval.Std()

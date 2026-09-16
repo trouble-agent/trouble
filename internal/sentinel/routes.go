@@ -270,6 +270,7 @@ func (s *Server) acceptEnvelopeItem(r *http.Request, auth authOutcome, item enve
 			AuthForm:     auth.form,
 			ItemTypes:    []string{"client_report"},
 			ClientReport: rep,
+			NoGroup:      true,
 		}
 		if _, aerr := s.admitEvent(r.Context(), auth.entry, ev, "client_report", "client_report"); aerr != nil {
 			return nil, aerr

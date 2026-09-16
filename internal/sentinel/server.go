@@ -948,6 +948,25 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		return rec, nil
 	}
 
+	// A client_report is accounted, never grouped (§3.2: "a client_report-only
+	// envelope is the SDK saying it dropped events, so it updates
+	// ClientReportDiscards and writes no group") and consumes no quota, because
+	// quota counts event items (§3.9).
+	if ev.NoGroup {
+		payload := eventRecordPayload(ev, sig, itemType, redactions, map[string]any{
+			"disposition": dispAdmitted,
+			"error_code":  "",
+		})
+		rec, nerr := s.appendRecord(ctx, types.KEvent, sigStr, "sentinel", payload, redactions)
+		if nerr != nil {
+			return types.Record{}, nerr
+		}
+		entry.mu.Lock()
+		entry.lastEvent = ev.TS
+		entry.mu.Unlock()
+		return rec, nil
+	}
+
 	// Group folding (§3.3).
 	title := groupTitle(ev)
 	res := s.groups.observe(sig, digest, ev.TS, ev.Release, title, redactions)

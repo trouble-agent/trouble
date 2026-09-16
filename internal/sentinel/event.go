@@ -58,10 +58,14 @@ type rawEvent struct {
 	Project      string
 	Zone         string
 	ClientReport *types.ClientReport
-	Partial      bool
-	FlushReason  string
-	Truncated    bool
-	ClockSkewS   float64
+	// NoGroup marks an event that is accounted but never grouped: a
+	// client_report is the SDK's own attrition record, so it writes an `event`
+	// record and no group, and consumes no quota (§3.2, §6.5).
+	NoGroup     bool
+	Partial     bool
+	FlushReason string
+	Truncated   bool
+	ClockSkewS  float64
 	// Raw is the original JSON object the event was decoded from, kept so the
 	// loss policy's spool can replay the exact bytes through the real pipeline.
 	Raw json.RawMessage

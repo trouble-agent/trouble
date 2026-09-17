@@ -52,13 +52,19 @@ func freePort(t *testing.T) int {
 // grabbed the port between the two freePort calls.
 func freePortPair(t *testing.T) (int, int) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	// Hold BOTH listeners open while choosing, so a parallel test package
+	// probing :0 cannot be handed either port (the p, p+1 window race).
+	ln1, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer ln.Close()
-	p := ln.Addr().(*net.TCPAddr).Port
-	return p, p + 1
+	defer ln1.Close()
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen2: %v", err)
+	}
+	defer ln2.Close()
+	return ln1.Addr().(*net.TCPAddr).Port, ln2.Addr().(*net.TCPAddr).Port
 }
 
 // stateBase is a state root the ledger accepts: 0700 under $HOME, never /tmp

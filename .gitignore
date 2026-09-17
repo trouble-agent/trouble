@@ -11,3 +11,5 @@ dagger.db
 .sentinel-e2e-*
 .sentinel-load-*
 .sentinel-dbg-*
+.worktrees/
+*.db

@@ -87,6 +87,45 @@ cannot be dialled at boot fails with TROUBLE-HUB-003 (exit 13); with `require_re
 starts degraded and says so (§4.3). Every key above appears in `trouble config explain` with its
 provenance like any other key — the profile is not a second config system.
 
+### 2.1.1 Redis deployment options (normative for the light-hub profile)
+
+The daemon works against any Redis ≥ 6.2 (streams + consumer groups + `XAUTOCLAIM`). The options
+below are the supported deployment shapes; anything outside them is unsupported by the degradation
+matrix of §4.3:
+
+1. **Persistence: `appendonly yes` (`everysec`), `save ""` off.** Redis is a queue and a dedup gate,
+   never the record (§1 rule 1) — durability comes from the ledger's ack-after-fsync seam (§3.3).
+   AOF everysec bounds warm-restart loss to ≤1s of *queue* (entries re-derivable from senders'
+   spools), while RDB snapshots invite a false sense of durability. Noeviction is REQUIRED: the
+   bound is the daemon's lag gate + `maxlen` (§3.2 rule 3), never Redis-side eviction of a queue.
+2. **Topology: single primary, replication optional, no cluster mode.** Cluster mode is refused at
+   preflight (TROUBLE-HUB-015) — the stream key and the dedup key space must live on one primary
+   for the consumer-group and `SET NX` semantics to hold. A replica MAY follow for warm restarts;
+   with `replica-read-only` defaults a failed-over replica is exactly the degradation case §3.4
+   already prices (one duplicate, caught by the ledger idempotency check).
+3. **Memory: `maxmemory` sized to `maxlen × avg-entry-bytes × 2` minimum, with `maxmemory-policy
+   noeviction`.** The queue's ceiling is enforced by trouble, not by Redis eviction.
+4. **Keyspace: dedicated logical DB or instance.** `trouble:*` keys must not share a DB with
+   eviction-prone caches; preflight `INFO` checks report `evicted_keys`, `maxmemory_policy`,
+   `aof_enabled` and `cluster_enabled` into `/health.json` (fields `redis.aof`, `redis.policy`,
+   `redis.evicted_keys`) so a misconfigured server is visible, not assumed.
+5. **Recovery posture: on a cold (empty) Redis after failover or flush, the daemon re-creates the
+   group with `MKSTREAM $` and serves from the ledger — senders' spools replay what Redis lost,
+   the dedup gate re-warms from the ledger's idempotency index (boot-time restore, §3.1
+   `dedup.state`), and `trouble hub status` reports `redis.state = "cold"` until the first
+   acknowledged entry.**
+
+| Key (new) | Default | Meaning |
+|---|---|---|
+| `server.redis.require_persistence` | `true` | preflight fails (TROUBLE-HUB-016, exit 13) when `appendonly=no`, unless set `false` deliberately |
+| `server.redis.check_policy` | `true` | preflight warns (health `redis.policy` ≠ `noeviction`) and `/health.json` flags it |
+| `server.redis.failover_grace` | `30s` | window after a reconnect in which the gate trusts restored keys before re-claiming via ledger replay |
+
+New codes: **TROUBLE-HUB-015** (permanent; cluster mode or multi-key-topology Redis refused at
+boot, exit 13) and **TROUBLE-HUB-016** (permanent; `appendonly=no` with
+`require_persistence=true`, exit 13). Both are preflight refusals: misconfiguration is a boot
+failure, never a runtime surprise.
+
 ### 2.2 CLI surface
 
 | Command | Contract | Exit codes |
@@ -175,9 +214,16 @@ Rules:
    batch that violates the ingestion caps.
 2. **Ordering**: `XADD` is the only append; per-stream order is the arrival order. The ledger writer
    preserves entry order within a batch, so per-host seq order survives the queue.
-3. **Approximate trim**: `XADD MAXLEN ~ maxlen` never trims entries that a consumer-group has not
-   acked; trimming is a memory ceiling for acked history, not a data-loss mechanism. A stream whose
-   un-acked length exceeds `maxlen` triggers the backpressure of §4.2 instead.
+3. **Approximate trim is a memory ceiling, and it is NOT ack-aware.** Redis `XADD … MAXLEN ~ maxlen`
+   evicts the OLDEST entries whenever the stream exceeds the bound, regardless of consumer-group
+   pending (PEL) state — a trimmed-but-unacked entry would only ever surface as a min-idle
+   `XAUTOCLAIM` of an id the stream no longer holds. The no-loss guarantee therefore does NOT come
+   from the trim. It comes from (a) the **lag gate**: entries are enqueued only while
+   `XLEN − (acked position)` stays under `maxlen`; beyond that, §4.2 backpressure (429 +
+   `Retry-After`) engages and senders' local spools hold; and (b) the ack-after-fsync rule of §3.3,
+   which bounds any trimmed-entry exposure to batches already fsynced into the ledger. Sizing rule:
+   `maxlen` ≥ 60 s of peak burst at `batch_records` per entry, so the lag gate — not eviction — is
+   what stops the world.
 4. **Payload scrubbing happens before enqueue.** The scrubber (SPEC-02) runs on the ingestion path in
    both profiles, so the queue never holds an un-redacted value and the log-redaction counters are the
    same numbers in both profiles.
@@ -320,7 +366,7 @@ it.
 
 ## 5. Errors
 
-Codes: **TROUBLE-HUB-001 .. TROUBLE-HUB-014** (SPEC-TYPES §5, SPEC-INDEX §3.5). Class vocabulary is the
+Codes: **TROUBLE-HUB-001 .. TROUBLE-HUB-016** (SPEC-TYPES §5, SPEC-INDEX §3.5). Class vocabulary is the
 shared one (`transient | permanent | policy_refused`); no code here is `policy_refused`, because a
 profile refusal is a configuration error, not an authorization decision.
 

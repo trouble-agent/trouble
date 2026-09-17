@@ -184,6 +184,7 @@ type Observation struct { // the admission input; scrubbed and sig-keyed before 
     Severity      Severity
     Stabilization StabilizationState
     Detail        map[string]any
+    Codeplane     *CodeplaneContext // cross-plane bundle (SPEC-TYPES §3.15.12), nil for pure-system events
 }
 type AdmitResult struct { Inc string; Created, Folded, Reopened, Refused bool; Reason string }
 type Transition struct { Seq uint64; From, To LadderState; Trigger string; Evidence *Evidence; PlayRun int }
@@ -656,6 +657,30 @@ type BudgetState struct {
 {"host_id":"7f3a91c2d4e5b607","day":"2026-09-16","resets_ts":"2026-09-17T00:00:00.000Z","limits":{"agent_runs":20,"play_runs":50,"research_requests":30,"spawns":5},"used":{"agent_runs":3,"play_runs":11,"research_requests":4,"spawns":1},"exhausted":[]}
 ```
 
+### 3.13a Cross-plane context — the codeplane bundle (v0.1.1a)
+
+An incident opened by a **code error** and an incident opened by **system pressure** are the same
+object to the operator; the agent that works them must see the same picture. The bundle makes
+"what is going on" explicit instead of leaving the agent to correlate a stack trace against a PSI
+spike by reading two dashboards:
+
+- **Carried on admission.** `Observation.Codeplane` (SPEC-TYPES §3.15.12) carries the code-plane
+  facts when `internal/sentinel` admits: `sig`, `group`, `release`, `regressed`, the top-5 recent
+  signatures with counts, and the representative sample reference. Sensor-born observations leave
+  it nil.
+- **Filled by convergence.** When a sensor rule fires on a host whose convergence map (SPEC-04 §3.9)
+  already links the event to an open sentinel group (e.g. a crash-loop that is filling the disk),
+  the ladder fills `Codeplane` from the group store before entering the agent rung: the agent's
+  prompt then reads "disk full because `payment-worker` crash-looped 412× since release 4f2a1c",
+  not "disk full".
+- **Persisted.** The bundle is written to the incident record (`Incident.Codeplane`) so park/resume,
+  reopens and post-hoc review keep the same material.
+- **Copied out.** The research request (SPEC-07) and the issue body (SPEC-09) embed the bundle
+  verbatim — one context, every consumer.
+- **Never trusted blindly.** The bundle is context, not evidence: the agent's proposed fix still
+  passes the verification tuple of §3.10, and a bundle whose `release` disagrees with the running
+  release is discarded with a `gap` record rather than shown as fact.
+
 ## 4. Wiring
 
 ### 4.1 Inbound (who calls the ladder)
@@ -663,7 +688,7 @@ type BudgetState struct {
 | Caller | Call | When |
 |---|---|---|
 | `internal/sensors` (SPEC-03) | `Admit` | a rule matched and the stabilization window is satisfied |
-| `internal/sentinel` (SPEC-04) | `Admit` | a group's event crossed the rule threshold or a release regression opened |
+| `internal/sentinel` (SPEC-04) | `Admit` | a group's event crossed the rule threshold or a release regression opened; the call carries `Observation.Codeplane` (§3.13a) |
 | `internal/sentinel` / `internal/sensors` | `CanaryObserved` | every canary injection that is observed in the ledger |
 | `internal/sentinel` (SPEC-04) | `SourceLiveness` read | the dashboard and the ladder share one expectation table |
 | `internal/lifecycle` (SPEC-12) | `Park` on SIGTERM/upgrade, `ReAdopt` at boot | drain and resume |

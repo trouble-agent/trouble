@@ -393,6 +393,7 @@ type Incident struct {
     IssueID     string      `json:"issue_id"`    // iss_ + ULID
     TaskID      string      `json:"task_id"`     // tsk_ + ULID (board row)
     ResearchID  string      `json:"research_id"` // res_ + ULID
+    Codeplane   *CodeplaneContext `json:"codeplane,omitempty"` // cross-plane bundle (SPEC-05 §3.13a)
     Evidence    *Evidence   `json:"evidence,omitempty"`
 }
 
@@ -1840,11 +1841,36 @@ type RedisStreamOffsets struct {        // live queue state; the zero value when
     DedupHits       int64  `json:"dedup_hits"`
     DedupMisses     int64  `json:"dedup_misses"`
     DedupConflicts  int64  `json:"dedup_conflicts"`
+    AOF             bool   `json:"aof"`              // server preflight: appendonly enabled (§2.1.1 rule 1)
+    Policy          string `json:"policy"`           // server preflight: maxmemory-policy (REQUIRED "noeviction")
+    EvictedKeys     int64  `json:"evicted_keys"`     // server preflight: INFO evicted_keys — non-zero is a red flag
+    OptionsChecked  bool   `json:"options_checked"`  // false when the connection lacks INFO/CONFIG rights (managed Redis)
     DedupWindow     string `json:"dedup_window"`     // "redis" (24h TTL) | "lru" (degraded, hub.dedup_lru)
     Backpressure    int64  `json:"backpressure_total"`
     Degraded        bool   `json:"degraded"`
     DegradedReason  string `json:"degraded_reason"`  // "" | redis_unavailable | redis_refusing | redis_auth | archive_paused
     Since           string `json:"since"`
+}
+
+type CodeplaneContext struct {          // SPEC-05 §3.13a — the sensor⇄sentinel cross-plane bundle (§3.15.12)
+    Side       string         `json:"side"`                 // "sentinel" | "sensor" — which plane produced it
+    Sig        string         `json:"sig,omitempty"`        // sentinel: the group signature
+    GroupID    string         `json:"grp,omitempty"`        // sentinel: the group id (SPEC-04)
+    Project    string         `json:"project,omitempty"`    // sentinel: project id
+    Release    string         `json:"release,omitempty"`    // sentinel: the running release of the errored code
+    Regressed  bool           `json:"regressed,omitempty"`  // sentinel: release regression currently open
+    Recent     []SigCount     `json:"recent,omitempty"`     // sentinel: top-5 recent signatures, count-descending
+    Sample     string         `json:"sample,omitempty"`     // sentinel: rec_id of the representative event
+    RuleID     string         `json:"rule_id,omitempty"`    // sensor: the rule that fired
+    Readings   map[string]string `json:"readings,omitempty"` // sensor: rule id / metric → stabilized reading ("io.full.avg10":"3.11")
+    TS         string         `json:"ts"`                   // bundle assembly time (RFC3339 ms UTC)
+}
+
+type SigCount struct {
+    Sig   string `json:"sig"`
+    Count int64  `json:"count"`
+    First string `json:"first_ts"`
+    Last  string `json:"last_ts"`
 }
 
 type HubStatus struct {                 // HealthResponse.Hub — the profile's stanza in the one health surface
@@ -1896,8 +1922,8 @@ type LedgerArchiveMarker struct {       // one append-only object per generation
 | internal/ledger | every kind | (writer of all) |
 | internal/scrub | nothing (pure) | — (returns ScrubResult) |
 | internal/sensors | Record, Rule, Breaker | event, gap, canary |
-| internal/sentinel | Record, Project, Group | event, group, gap, canary |
-| internal/ladder | Incident, Evidence, AutonomyGates | incident, verify, breaker |
+| internal/sentinel | Record, Project, Group, CodeplaneContext | event, group, gap, canary |
+| internal/ladder | Incident, Evidence, AutonomyGates, CodeplaneContext | incident, verify, breaker |
 | internal/registry | Descriptor, ToolCall, Play | tool_call, play_run |
 | internal/research | ResearchOutcome | research, gap |
 | internal/flow | BoardRow, SpawnRequest, Promotion | flow, spawn |
@@ -2118,6 +2144,8 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-HUB-012 | transient | export verification failed (read-back sha256/byte mismatch) → marker pending, retried by key | SPEC-13 |
 | TROUBLE-HUB-013 | permanent | live profile switch requested via reload → refused until restart | SPEC-13 |
 | TROUBLE-HUB-014 | permanent | retention tried to drop a generation whose archive marker is not `exported` and verified | SPEC-13 |
+| TROUBLE-HUB-015 | permanent | Redis deployment topology refused at boot preflight: cluster mode, or a `maxmemory-policy` other than `noeviction` (SPEC-13 §2.1.1 rule 2/3) | SPEC-13 |
+| TROUBLE-HUB-016 | permanent | Redis preflight failed with `server.redis.require_persistence=true` and `appendonly=no` — the queue would have an unbounded loss window (SPEC-13 §2.1.1 rule 1) | SPEC-13 |
 
 ## 6. Constants, enums and pinned formats
 

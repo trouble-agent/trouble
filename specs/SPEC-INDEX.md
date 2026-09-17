@@ -105,6 +105,7 @@ item ships — see §6.1) · **D** = deferred to v1.0 (AC text retained; v0.1 cl
 | AC-28 | AC-28 Sensor route matrix: with a hub endpoint configured, an event class routes to B (proxied) by default and to A (direct) when `routes.per_class` overrides it; with no hub endpoint every class takes A; a hub outage mid-run sends Route B traffic to the bounded spool and every spooled event replays exactly once after the hub returns; each landed record's `origin.route` equals the route that carried it and the dashboard shows the local-vs-relayed split. | SPEC-04 (route decision, config, spool replay), SPEC-12 (forward path, ack, zone) | B |
 | AC-29 | AC-29 Light-hub degradation: `[server] profile="light-hub"` with Redis + a DuckBrain namespace — duplicate `ForwardEnvelope` idempotency keys replayed across a Redis failover land exactly one ledger record; stopping Redis mid-burst makes senders see 429 + `Retry-After` while the local spool holds and the daemon keeps serving (no event loss, hub degrades to standalone ingestion); a closed ledger generation is exported to DuckBrain and only then dropped from the hot host, and with DuckBrain unreachable archival pauses with a gap record while ingestion continues; the ladder produces identical incident/verify sequences in both profiles for the same event stream. | SPEC-13 (profile, queue, dedup gate, archival), SPEC-12 (config, health, topology) | B |
 | AC-30 | AC-30 Ledger pagination: a 10M-record corpus is walked with `page_token` + `page_size` — page-size stability holds (no record repeated, none skipped across the walk, `next_page_token` empty exactly at the end), the retention sweep deletes whole generation files (+ `.idx` + archive marker) while a walk is in flight, and a token pointing at a dropped generation returns a `reset` hint + newest-first restart instead of an error loop; a missing or mismatched `{file}.idx` is rebuilt from the generation file. | SPEC-01 (tokens, sidecar, drop-generation retention), SPEC-10 (`/incidents`, `/groups` paging) | B |
+| AC-31 | AC-31 Cross-plane context: a sentinel `Admit` populates `Observation.Codeplane` (sig, group, release, regression, top-5 recent) and the bundle lands on the incident record; a sensor `Admit` whose convergence map links an open sentinel group arrives at the agent rung with BOTH planes' context; the research request and the issue body carry the bundle verbatim; a bundle whose release disagrees with the running release is discarded with a gap record, never shown as fact. | SPEC-05 (§3.13a), SPEC-04 (§3.9), SPEC-07, SPEC-09 | B |
 
 `[carried]` ACs: see §6.2 — prd-v2.3.html references AC-1..AC-17 as "carry" but does not restate their
 text; the scope keys above are derived from PRD §02 (directive map) and §10 (MVP bullets) and MUST be
@@ -175,7 +176,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | TROUBLE-DASHBOARD-0NN | SPEC-10 | 001–013 |
 | TROUBLE-SKILLS-0NN | SPEC-11 | 001–014 |
 | TROUBLE-LIFECYCLE-0NN | SPEC-12 | 001–017 |
-| TROUBLE-HUB-0NN | SPEC-13 | 001–014 |
+| TROUBLE-HUB-0NN | SPEC-13 | 001–016 |
 
 The authoritative catalog with meanings and classes is SPEC-TYPES §5. A spec MAY add a new code inside
 its own range only if the code is also added to SPEC-TYPES §5 in the same commit. Because the ranges are

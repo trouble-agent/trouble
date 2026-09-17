@@ -1,0 +1,57 @@
+# examples/config/30-flow.toml — EXAMPLE [flow] table (SPEC-08 §3.7).
+#
+# The hot-fix lane is OFF by default (PRD §11 guardrail): an operator turns it on
+# per host, after listing the repos it may touch. Every value below is an example.
+
+[flow]
+driver = "board-jsonl"               # board-jsonl | task-router | none
+review_mode = "auto"                 # auto | review | never
+board_path = "/srv/src/payment-api/.board"
+id_prefix = "tsk_"                   # the ULID suffix is always allocated from the board max
+validate_cmd = "boardctl -C /srv/src/payment-api validate"   # "" = in-process validation only
+registration_probe_interval = "5m"
+registration_stale_max = "1h"
+depends_on = []
+extra_tags = []
+scheduler_endpoint = "http://127.0.0.1:9090"
+scheduler_token_file = "/etc/trouble/scheduler.token"       # 0600, never argv, never a URL
+
+[flow.router]
+mode = "http"                        # http | cli
+endpoint = "http://127.0.0.1:9091"
+dispatch_path = "/dispatch"
+cli_path = "/usr/local/bin/router"
+token_env = "TROUBLE_ROUTER_TOKEN"
+token_file = "/etc/trouble/router.token"                    # 0600, wins over the env var
+timeout = "10s"
+retries = 3                          # 1s / 3s / 9s, then the durable queue
+
+[flow.projects.payment-api]
+name = "payment-api"
+repo = "/srv/src/payment-api"
+board_path = "/srv/src/payment-api/.board"
+enabled = true
+hotfix = true
+scheduler = "payment-api"            # the name the scheduler must report
+
+[flow.hotfix]
+enabled = false                      # the host master gate; OFF by default
+allowed_repos = ["/srv/src/payment-api"]
+unit_repo_map = { "payment-worker" = "/srv/src/payment-api" }
+foreman_spawn = "router_spawn"       # the only value in v0.1
+priority_class = "hotfix"            # must exist in the scheduler's admission registry
+verify_window = "10m"
+promote = "human"                    # human | auto-after-verify
+max_concurrent = 2                   # per host; hard cap 4 (a worktree is a full checkout)
+min_free_disk_gb = 10
+worktree_base = ".worktrees"         # repo-relative; absolute/.. /temp paths are refused
+worktree_exempt = []                 # huge checkouts: the owner serializes them
+lease_ttl = "30m"
+spawn_ack_timeout = "5s"
+spawn_worktree_timeout = "30s"
+max_attempts = 5
+min_severity = "high"
+mutex_wait = "5s"
+test_hint_cmd = ""                   # a probe command whose output hints failing tests
+models = { primary_model = "", primary_provider = "", fallback_model = "", fallback_provider = "" }
+capability_tags = ["hotfix", "trouble"]

@@ -1,0 +1,35 @@
+# research-classes.example.toml — EXAMPLE class-slug table (SPEC-07 §3.1).
+#
+# Nothing here is compiled in: the built-in entries cover every shipped source
+# generically, and this file is the shape an operator's own table takes. A file
+# entry with the same (source, subject, taxonomy) triple replaces the built-in in
+# place; entries the file does not mention are kept.
+#
+# `match` fields accept "*" (matches anything). `template` is optional and may use
+# the {subject} and {taxonomy} placeholders; without it the slug is literal.
+
+# An exact triple: PSI io pressure on the host itself, mapped to a fleet-specific
+# class the lab already knows.
+[[class_slug]]
+slug     = "host-io-pressure"
+match    = { source = "psi", subject = "io", taxonomy = "resource_exhaustion" }
+note     = "PSI io.full on the host itself"
+
+# A source wildcard with a template: every crash-looping service of this source
+# becomes <service>-crash-loop.
+[[class_slug]]
+slug     = "service-crash-loop"
+match    = { source = "dbus", subject = "*", taxonomy = "crash_loop" }
+template = "{subject}-crash-loop"
+
+# A fleet application's own class, pinned by its sentinel project slug.
+[[class_slug]]
+slug     = "app-unhandled-exception"
+match    = { source = "sentinel", subject = "*", taxonomy = "crash_loop" }
+template = "{subject}-unhandled-exception"
+
+# A taxonomy wildcard: anything matching this source/subject is one class.
+[[class_slug]]
+slug     = "warehouse-index-pressure"
+match    = { source = "*", subject = "warehouse-index", taxonomy = "*" }
+note     = "the warehouse index saturates on every host"

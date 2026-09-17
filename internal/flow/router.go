@@ -41,6 +41,24 @@ type dispatchPayload struct {
 	SubmittedTS   string   `json:"submitted_ts"`
 }
 
+// DispatchSpawn performs the §3.6 router dispatch for one hot-fix spawn
+// request. It is the production implementation of the spawnRequester seam the
+// composition root injects back: one wire format, produced once (the pinned
+// dispatchPayload), with the router deduping on the idem key. The worktree is
+// the router's to report; an ack without one returns "" and the spawn takes
+// the §6.20 timeout path.
+func (f *Flow) DispatchSpawn(ctx context.Context, req types.SpawnRequest) (string, string, error) {
+	row := types.BoardRow{
+		ID: req.TaskID, Sig: req.Sig, Inc: req.Inc, Repo: req.Repo,
+		Title: f.titleFor(req), Priority: "P1",
+	}
+	if row.ID == "" {
+		row.ID = types.NewID(types.PTsk)
+	}
+	ref, err := f.dispatch(ctx, row, types.SevHigh)
+	return ref, "", err
+}
+
 // dispatch marshals the payload and performs one dispatch attempt sequence.
 func (f *Flow) dispatch(ctx context.Context, row types.BoardRow, severity types.Severity) (string, error) {
 	p := dispatchPayload{

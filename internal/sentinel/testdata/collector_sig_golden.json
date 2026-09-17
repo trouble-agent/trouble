@@ -1,0 +1,57 @@
+{
+  "_comment": "Per-fixture sigs for SPEC-04 §7's collector row: every `.lines` fixture under testdata/logs is fed through the shipped dispatcher, and the events it produces must carry exactly these sigs, in order (the count, level and culprit of the same fixtures are asserted in collector_test.go). A mismatch means the canonical form moved: re-key this file in the same commit as the norm_version bump, regenerating it with `go test ./internal/sentinel -run TestCollectorFixtureSigsMatchGolden -update-golden`. A fixture added without a matching entry fails the test by design.",
+  "fixtures": [
+    {
+      "name": "go-panic/quiet",
+      "sigs": []
+    },
+    {
+      "name": "go-panic/single-fatal",
+      "sigs": [
+        "sentinel:sha256v1:72a5dfa5d6354c57"
+      ]
+    },
+    {
+      "name": "go-panic/two-interleaved",
+      "sigs": [
+        "sentinel:sha256v1:64300967b83b94be",
+        "sentinel:sha256v1:7f39e7a85d4bb7a8"
+      ]
+    },
+    {
+      "name": "node-reject/quiet",
+      "sigs": []
+    },
+    {
+      "name": "node-reject/two-rejections",
+      "sigs": [
+        "sentinel:sha256v1:c9fbe7e578be4df3",
+        "sentinel:sha256v1:685a4ab006a8e363"
+      ]
+    },
+    {
+      "name": "node-reject/unhandled",
+      "sigs": [
+        "sentinel:sha256v1:abab200623f2befd"
+      ]
+    },
+    {
+      "name": "py-traceback/handled-error",
+      "sigs": [
+        "sentinel:sha256v1:f210e8e5e5e56d1b"
+      ]
+    },
+    {
+      "name": "py-traceback/quiet",
+      "sigs": []
+    },
+    {
+      "name": "py-traceback/two-traces",
+      "sigs": [
+        "sentinel:sha256v1:049be719f3798be2",
+        "sentinel:sha256v1:b2c96ee7ebebf7bf"
+      ]
+    }
+  ],
+  "norm_version": 1
+}

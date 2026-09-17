@@ -1,0 +1,56 @@
+{{define "content"}}
+<section class="panel">
+<h2>incident {{.Incident.ID}}</h2>
+<dl class="detail">
+<dt>sig</dt><dd>{{.Incident.Sig}}</dd>
+<dt>state</dt><dd>{{.Incident.State}}</dd>
+<dt>rung</dt><dd>{{.Incident.Rung}} (entry {{.Incident.EntryRung}})</dd>
+<dt>severity</dt><dd>{{.Incident.Severity}}</dd>
+<dt>opened</dt><dd>{{.Incident.OpenedTS}}</dd>
+<dt>updated</dt><dd>{{.Incident.UpdatedTS}}</dd>
+<dt>reopens</dt><dd>{{.Incident.ReopenCount}}</dd>
+<dt>play runs</dt><dd>{{.Incident.PlayRuns}}</dd>
+<dt>agent runs</dt><dd>{{.Incident.AgentRuns}}</dd>
+{{if .Group}}<dt>group</dt><dd><a href="/groups/{{.Group.ID}}">{{.Group.ID}}</a> · {{.Group.Title}} · count {{.Group.Count}}</dd>{{end}}
+{{if .Evidence}}<dt>evidence</dt><dd>window {{.Evidence.WindowS}}s · observed {{.Evidence.EventsObserved}} · canary {{if .Evidence.CanarySeen}}seen{{else}}not seen{{end}} · result {{.Evidence.Result}}</dd>{{end}}
+</dl>
+</section>
+<section class="panel">
+<h2>story</h2>
+<dl class="detail">
+<dt>issue</dt><dd>{{if .Story.IssueRef}}{{.Story.IssueRef}}{{else}}—{{end}}</dd>
+<dt>board row</dt><dd>{{if .Story.BoardRow}}{{.Story.BoardRow}}{{else}}—{{end}}</dd>
+<dt>research</dt><dd>{{if .Story.ResearchID}}{{.Story.ResearchID}} {{.Story.Research}}{{else}}—{{end}}</dd>
+<dt>spawn</dt><dd>{{if .Story.SpawnID}}{{.Story.SpawnID}}{{else}}—{{end}}</dd>
+<dt>promotion</dt><dd>{{if .Story.Promotion}}{{.Story.Promotion}}{{else}}—{{end}}</dd>
+<dt>skill candidate</dt><dd>{{if .Story.Candidate}}{{.Story.Candidate}}{{else}}—{{end}}</dd>
+</dl>
+</section>
+<section class="panel">
+<h2>actions</h2>
+<form class="action" method="post" action="/api/incidents/{{.Incident.ID}}/ack" hx-post="/api/incidents/{{.Incident.ID}}/ack" hx-target="#incident-rows" hx-swap="outerHTML">
+<input type="hidden" name="expected_state" value="{{.Incident.State}}">
+<input type="hidden" name="ledger_seq" value="{{.Seq}}">
+<label for="ack-reason">ack reason</label>
+<input id="ack-reason" name="reason" type="text" maxlength="200" required{{if not .CanWrite}} disabled{{end}}>
+<label for="ack-until">hold for</label>
+<select id="ack-until" name="until"{{if not .CanWrite}} disabled{{end}}><option value="15m">15m</option><option value="1h">1h</option><option value="24h">24h</option></select>
+<button type="submit" data-requires="write"{{if not .CanWrite}} disabled{{end}}>acknowledge</button>
+{{if not .CanWrite}}<small class="why">requires a write-scope token (this session has {{.Scope}})</small>{{end}}
+</form>
+<form class="action" method="post" action="/api/incidents/{{.Incident.ID}}/close" hx-post="/api/incidents/{{.Incident.ID}}/close" hx-target="#incident-rows" hx-swap="outerHTML">
+<input type="hidden" name="expected_state" value="{{.Incident.State}}">
+<input type="hidden" name="ledger_seq" value="{{.Seq}}">
+<label for="close-reason">close reason</label>
+<input id="close-reason" name="reason" type="text" maxlength="200" required{{if not .CanWrite}} disabled{{end}}>
+<label for="close-resolution">resolution</label>
+<select id="close-resolution" name="resolution"{{if not .CanWrite}} disabled{{end}}><option value="fixed">fixed</option><option value="false_positive">false_positive</option><option value="wontfix">wontfix</option></select>
+<button type="submit" data-requires="write"{{if not .CanWrite}} disabled{{end}}>close</button>
+{{if not .CanWrite}}<small class="why">requires a write-scope token (this session has {{.Scope}})</small>{{end}}
+</form>
+</section>
+<section class="panel">
+<h2>timeline</h2>
+{{template "partial-incident-timeline" .}}
+</section>
+{{end}}

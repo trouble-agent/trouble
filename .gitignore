@@ -1,8 +1,13 @@
+bin/
 dagger.db
 *.db
-*.test
-*.prof
 *.db-shm
 *.db-wal
+*.prof
 .scrub-e2e-*
 .scrub-ingest-*
+*.test
+
+.sentinel-e2e-*
+.sentinel-load-*
+.sentinel-dbg-*

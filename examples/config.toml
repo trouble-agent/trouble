@@ -1,0 +1,73 @@
+# trouble v0.1 example configuration (SPEC-12).
+# Copy to ~/.config/trouble/config.toml and edit host-specific values.
+
+state_root = "~/.local/state/trouble"
+config_path = "~/.config/trouble/config.toml"
+
+[secrets]
+environment_file = "~/.config/trouble/trouble.env"
+
+[lifecycle]
+heartbeat_interval = "30s"
+heartbeat_stale_after = "90s"
+idle_heartbeat_interval = "60s"
+watchdog_sec = "60s"
+drain_timeout = "30s"
+upgrade_ready_timeout = "30s"
+rollback_depth = 2
+self_rss_warn = "80MB"
+clock_skew_tolerance = "5s"
+
+[stall]
+max_seq_age = "300s"
+
+[checker]
+interval = "60s"
+confirm_runs = 2
+alarm_command = []
+
+[ingest]
+bind = "127.0.0.1:7643"
+advertised_host = ""
+
+[ingest.auth]
+loopback_dsn = true
+nonloopback_mode = "token"
+public_require_proxy = true
+
+[dashboard]
+bind = "127.0.0.1:7644"
+
+[dashboard.auth]
+transport = "cookie"
+identity_provider = ""
+session_ttl = "24h"
+
+[hub]
+mode = "hub"
+url = ""
+forward_project_id = ""
+token = ""
+protocol_version = 1
+forward_batch_records = 200
+forward_batch_bytes = 524288
+retry_base = "2s"
+retry_max = "5m"
+dedup_lru = 65536
+
+[spool]
+budget_bytes = 268435456
+gap_reserve_bytes = 2097152
+fsync = "group"
+fsync_window_ms = 200
+
+[verify]
+zone_windows = { loopback = "10m", lan = "15m", tailnet = "20m", public = "30m" }
+
+[escalate]
+channels = []
+timeout = "10s"
+
+[origin]
+host_id = ""
+hub_id = ""

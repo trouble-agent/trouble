@@ -197,6 +197,11 @@ type index struct {
 	coldEvictions int64
 	coldWinStart  time.Time
 
+	// dash is the bounded recent-record ring SPEC-10 §3.3 renders from
+	// (dashread.go). It is projected in applyLocked, so a boot-time rebuild and a
+	// live append go through exactly one code path.
+	dash *dashRing
+
 	lastSeq atomic.Uint64
 
 	buildStats types.IndexStats
@@ -224,6 +229,7 @@ func newIndex(opts IndexOptions, rootDir, zone string, maxSchema int) *index {
 		refOverflow:   map[string]int{},
 		sources:       map[string]*sourceEntry{},
 		days:          map[string]*dayEntry{},
+		dash:          newDashRing(),
 		buildStats: types.IndexStats{
 			BudgetMS:    opts.BuildBudgetMS,
 			BudgetBytes: opts.BuildBudgetBytes,
@@ -864,6 +870,11 @@ func (ix *index) applyLocked(rec *types.Record) {
 		ix.applyIncidentLocked(rec, ts)
 	case types.KGap:
 		ix.applyGapLocked(rec)
+	}
+	// The dashboard's bounded render ring (SPEC-10 §3.3) is projected here so a
+	// boot rebuild and a live append cannot diverge.
+	if ix.dash != nil {
+		ix.dash.add(rec, ts)
 	}
 }
 

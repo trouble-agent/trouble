@@ -1,0 +1,717 @@
+package dashboard
+
+import (
+	"context"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/totalwindupflightsystems/trouble/internal/types"
+)
+
+// View models — SPEC-10 §3.1. These package-private types never appear in an
+// exported signature, an HTTP body or a ledger payload. Every string that
+// reaches a template passes through clean() (strings.ToValidUTF8) and every
+// title through truncRunes (200 runes, §6.7/§6.9): the dashboard is not the
+// scrubber (SPEC-02 is), but it must not be the place where invalid bytes
+// become an XSS or a blank page either.
+
+// maxTitleRunes is the layout truncation limit of §6.7 (render-time only — the
+// ledger keeps the full string).
+const maxTitleRunes = 200
+
+// incidentRow is one row of the open-incident table.
+type incidentRow struct {
+	Inc      string
+	Title    string
+	Severity types.Severity
+	State    types.LadderState
+	Rung     types.Rung
+	AgeS     float64
+	Age      string // display form of AgeS
+	LastAgeS float64
+	LastAge  string // display form of LastAgeS ("—" when unknown)
+	HasAge   bool
+	Sig      string
+}
+
+// groupRow is one row of the group table.
+type groupRow struct {
+	ID           string
+	Sig          string
+	SigShort     string
+	Title        string
+	Count        uint64
+	RateMin      float64
+	Rate         string
+	LastSeenTS   string
+	LastSeen     string
+	ReleaseRange []string
+	Releases     string
+	Source       string
+	IncidentID   string
+}
+
+// ruleRow is one row of the rules table.
+type ruleRow struct {
+	Name        string
+	Source      types.SigSource
+	EntryRung   types.Rung
+	Severity    types.Severity
+	Enabled     bool
+	LastFireTS  string
+	LastFire    string
+	Fires       uint64
+	Suppressed  uint64
+	Breaker     types.BreakerState
+	BreakerOpen string
+}
+
+// breakerRow is one row of the breaker table.
+type breakerRow struct {
+	Scope     string
+	State     types.BreakerState
+	OpenUntil string
+	Trips     int
+	Reason    string
+}
+
+// timelineEntry is one <li> of the incident timeline.
+type timelineEntry struct {
+	TS      string
+	Kind    string
+	ActorID string
+	Summary string
+	Inc     string
+}
+
+// budgetPanel is the /partials/budget payload (row 18).
+type budgetPanel struct {
+	RW        types.RuntimeWatermarks
+	Autonomy  types.AutonomyGates
+	Version   string
+	GitSHA    string
+	Binary    string
+	RSS       string
+	Ledger    string
+	Spool     string
+	Events    string
+	Worktrees int
+}
+
+// healthStrip is the accelerator strip's payload (§2.1.2 row 12).
+type healthStrip struct {
+	Seq      uint64
+	StallS   float64
+	Status   string
+	Mode     string
+	Kill     bool
+	Denied   uint64
+	CSRF     uint64
+	RL       uint64
+	RenderTS string
+	Banner   bool
+}
+
+// countersView is the §2.1 row 1 counter block.
+type countersView struct {
+	IncidentsOpen int
+	GroupsOpen    int
+	EventsPerMin  float64
+}
+
+// sanitizers -----------------------------------------------------------------
+
+// clean replaces invalid UTF-8 with U+FFFD (§6.9) and drops NUL bytes (which
+// a terminal-oriented ledger line should never carry).
+func clean(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	if strings.ContainsRune(s, '\x00') {
+		s = strings.ReplaceAll(s, "\x00", "")
+	}
+	return s
+}
+
+// truncRunes truncates a title at 200 runes for layout (§6.7).
+func truncRunes(s string) string {
+	if utf8.RuneCountInString(s) <= maxTitleRunes {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:maxTitleRunes]) + "…"
+}
+
+// sigShort is the compact sig form used in table cells.
+func sigShort(sig string) string {
+	sig = clean(sig)
+	if len(sig) <= 24 {
+		return sig
+	}
+	return sig[:24] + "…"
+}
+
+// fmtTS reduces an RFC3339 timestamp to its time-of-day part for table cells;
+// unparsable values render verbatim so the operator sees the raw value.
+func fmtTS(ts string) string {
+	if ts == "" {
+		return "—"
+	}
+	t, ok := parseTS(ts)
+	if !ok {
+		return clean(ts)
+	}
+	return t.Format("15:04:05")
+}
+
+// parseTS parses the pinned timestamp layout (types.TsLayout, RFC3339 UTC with
+// milliseconds) without allocating. time.Parse allocates per call, and the
+// fragment path parses up to two timestamps per row: at page_limit rows that was
+// the largest single allocation on the §2.9 hot path. Anything that is not the
+// pinned shape falls back to types.ParseUTC, so a hand-written timestamp still
+// renders.
+func parseTS(s string) (time.Time, bool) {
+	const layoutLen = len("2006-01-02T15:04:05.000Z")
+	if len(s) == layoutLen && s[4] == '-' && s[7] == '-' && s[10] == 'T' && s[13] == ':' && s[16] == ':' && s[19] == '.' && s[23] == 'Z' {
+		year, ok1 := atoiDigits(s[0:4])
+		month, ok2 := atoiDigits(s[5:7])
+		day, ok3 := atoiDigits(s[8:10])
+		hour, ok4 := atoiDigits(s[11:13])
+		min, ok5 := atoiDigits(s[14:16])
+		sec, ok6 := atoiDigits(s[17:19])
+		ms, ok7 := atoiDigits(s[20:23])
+		if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 && ok7 {
+			return time.Date(year, time.Month(month), day, hour, min, sec, ms*int(time.Millisecond), time.UTC), true
+		}
+	}
+	t, err := types.ParseUTC(s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// atoiDigits parses 1-4 ASCII digits without allocating.
+func atoiDigits(b string) (int, bool) {
+	if len(b) == 0 || len(b) > 4 {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n, true
+}
+
+// ageSeconds computes the age of a timestamp at now; ok=false when unknown.
+func ageSeconds(ts string, now time.Time) (float64, bool) {
+	if ts == "" {
+		return 0, false
+	}
+	t, ok := parseTS(ts)
+	if !ok {
+		return 0, false
+	}
+	d := now.Sub(t).Seconds()
+	if d < 0 {
+		d = 0
+	}
+	return d, true
+}
+
+// fmtAge renders an age in seconds for a table cell. It uses strconv rather
+// than fmt: a 100-row fragment formats two ages per row, and the §2.9 budget is
+// paid per request — the formatting path is on the hot path, not in an error
+// branch.
+func fmtAge(s float64, ok bool) string {
+	if !ok {
+		return "—"
+	}
+	switch {
+	case s < 60:
+		return strconv.FormatFloat(s, 'f', 0, 64) + "s"
+	case s < 3600:
+		return strconv.FormatFloat(s/60, 'f', 0, 64) + "m"
+	default:
+		return strconv.FormatFloat(s/3600, 'f', 1, 64) + "h"
+	}
+}
+
+// cleanIncident / cleanGroup / cleanEvidence / cleanStory sanitize every string
+// a detail page renders, so §6.9 holds on the pages that carry a typed struct
+// (the fragment paths already clean their row models).
+func cleanIncident(inc types.Incident) types.Incident {
+	inc.ID = clean(inc.ID)
+	inc.Sig = clean(inc.Sig)
+	inc.GroupID = clean(inc.GroupID)
+	inc.State = types.LadderState(clean(string(inc.State)))
+	inc.EntryRung = types.Rung(clean(string(inc.EntryRung)))
+	inc.Rung = types.Rung(clean(string(inc.Rung)))
+	inc.Severity = types.Severity(clean(string(inc.Severity)))
+	inc.OpenedTS = clean(inc.OpenedTS)
+	inc.UpdatedTS = clean(inc.UpdatedTS)
+	inc.ResolvedTS = clean(inc.ResolvedTS)
+	inc.VerifyWin = types.Duration(clean(string(inc.VerifyWin)))
+	inc.LeaseID = clean(inc.LeaseID)
+	inc.IssueID = clean(inc.IssueID)
+	inc.TaskID = clean(inc.TaskID)
+	inc.ResearchID = clean(inc.ResearchID)
+	return inc
+}
+
+func cleanGroup(g types.Group) types.Group {
+	g.ID = clean(g.ID)
+	g.Sig = clean(g.Sig)
+	g.Digest = clean(g.Digest)
+	g.Source = types.SigSource(clean(string(g.Source)))
+	g.Title = clean(g.Title)
+	g.FirstSeenTS = clean(g.FirstSeenTS)
+	g.LastSeenTS = clean(g.LastSeenTS)
+	g.IncidentID = clean(g.IncidentID)
+	g.CompactedTS = clean(g.CompactedTS)
+	rel := make([]string, 0, len(g.ReleaseRange))
+	for _, r := range g.ReleaseRange {
+		rel = append(rel, clean(r))
+	}
+	g.ReleaseRange = rel
+	return g
+}
+
+func cleanEvidence(ev types.Evidence) types.Evidence {
+	ev.TSWindowStart = clean(ev.TSWindowStart)
+	ev.TSWindowEnd = clean(ev.TSWindowEnd)
+	ev.CanaryID = clean(ev.CanaryID)
+	ev.Zone = clean(ev.Zone)
+	ev.Result = types.VerifyResultKind(clean(string(ev.Result)))
+	for i := range ev.SourcesExpected {
+		ev.SourcesExpected[i] = clean(ev.SourcesExpected[i])
+	}
+	for i := range ev.SourcesAlive {
+		ev.SourcesAlive[i] = clean(ev.SourcesAlive[i])
+	}
+	for i := range ev.SourcesQuiet {
+		ev.SourcesQuiet[i] = clean(ev.SourcesQuiet[i])
+	}
+	for i := range ev.SourcesMissing {
+		ev.SourcesMissing[i] = clean(ev.SourcesMissing[i])
+	}
+	return ev
+}
+
+func cleanStory(st Story) Story {
+	st.IssueRef = clean(st.IssueRef)
+	st.BoardRow = clean(st.BoardRow)
+	st.ResearchID = clean(st.ResearchID)
+	st.Research = clean(st.Research)
+	st.SpawnID = clean(st.SpawnID)
+	st.Promotion = clean(st.Promotion)
+	st.Candidate = clean(st.Candidate)
+	return st
+}
+
+func cleanSensor(sh types.SensorHealth) types.SensorHealth {
+	sh.Reason = clean(sh.Reason)
+	sh.LastSuccessTS = clean(sh.LastSuccessTS)
+	sh.LastEventTS = clean(sh.LastEventTS)
+	return sh
+}
+
+// fmtRate renders a per-minute rate (strconv for the same reason as fmtAge).
+func fmtRate(r float64) string { return strconv.FormatFloat(r, 'f', 1, 64) + "/min" }
+
+// row builders --------------------------------------------------------------
+
+// incidentRows maps open incidents (newest-updated first) into table rows and
+// returns the index seq the fragment was rendered from.
+func (s *server) incidentRows(ctx context.Context, limit int) ([]incidentRow, uint64) {
+	return s.incidentRowsFrom(s.deps.Index.OpenIncidents(limit))
+}
+
+// incidentRowsFrom is the shared row mapping for both open-incident accessors.
+// The title cache matters for the §2.9 budget: an incident projection carries a
+// group id, so a 100-row fragment would otherwise copy 100 group projections to
+// read one string each.
+func (s *server) incidentRowsFrom(incs []types.Incident) ([]incidentRow, uint64) {
+	now := s.now()
+	rows := make([]incidentRow, 0, len(incs))
+	titles := make(map[string]string, 8)
+	for i := range incs {
+		rows = append(rows, s.incidentRow(incs[i], now, titles))
+	}
+	return rows, s.deps.Index.LastSeq()
+}
+
+// incidentRowsSince is the since=<seq> variant (row 13).
+func (s *server) incidentRowsSince(ctx context.Context, since uint64, limit int) ([]incidentRow, uint64) {
+	return s.incidentRowsFrom(s.deps.Index.OpenIncidentsSince(since, limit))
+}
+
+func (s *server) incidentRow(inc types.Incident, now time.Time, titles map[string]string) incidentRow {
+	age, ok := ageSeconds(inc.OpenedTS, now)
+	if !ok {
+		age, _ = ageSeconds(inc.UpdatedTS, now)
+	}
+	row := incidentRow{
+		Inc:      clean(inc.ID),
+		Title:    truncRunes(s.incidentTitle(inc, titles)),
+		Severity: inc.Severity,
+		State:    inc.State,
+		Rung:     inc.Rung,
+		AgeS:     age,
+		Age:      fmtAge(age, true),
+		Sig:      clean(inc.Sig),
+	}
+	if age2, ok := s.deps.Index.LastEventAge(inc.Sig, now); ok {
+		row.LastAgeS, row.HasAge = age2, true
+	}
+	row.LastAge = fmtAge(row.LastAgeS, row.HasAge)
+	return row
+}
+
+// incidentTitle resolves the human title of an incident: the incident's group
+// title (the incident projection carries a sig and a group id, never a title),
+// then the group digest, then the sig, then the incident id. Titles are cached
+// per render, so a table of incidents that share a group costs one lookup.
+func (s *server) incidentTitle(inc types.Incident, cache map[string]string) string {
+	if inc.GroupID != "" && s.deps.Lookup != nil {
+		if t, ok := cache[inc.GroupID]; ok {
+			if t != "" {
+				return t
+			}
+		} else if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
+			t := clean(g.Title)
+			if t == "" {
+				t = clean(g.Digest)
+			}
+			cache[inc.GroupID] = t
+			if t != "" {
+				return t
+			}
+		}
+	}
+	if sig := clean(inc.Sig); sig != "" {
+		return sig
+	}
+	return clean(inc.ID)
+}
+
+// groupRows maps the ranked group table (row 4).
+func (s *server) groupRows(ctx context.Context, limit int) ([]groupRow, uint64) {
+	st := s.deps.Index.GroupsSince(0, limit)
+	rows := make([]groupRow, 0, len(st))
+	for i := range st {
+		rows = append(rows, groupRowOf(st[i]))
+	}
+	rows = rankGroups(rows)
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, s.deps.Index.LastSeq()
+}
+
+// groupRowsSince is the since=<seq> variant (row 15).
+func (s *server) groupRowsSince(ctx context.Context, since uint64, limit int) ([]groupRow, uint64) {
+	st := s.deps.Index.GroupsSince(since, limit)
+	rows := make([]groupRow, 0, len(st))
+	for i := range st {
+		rows = append(rows, groupRowOf(st[i]))
+	}
+	rows = rankGroups(rows)
+	if len(rows) > limit {
+		rows = rows[:limit]
+	}
+	return rows, s.deps.Index.LastSeq()
+}
+
+func groupRowOf(g types.GroupStat) groupRow {
+	// GroupStat carries no release range (that field lives on the Group
+	// projection, which /groups/{id} renders); the list view leaves it empty.
+	var rel []string
+	title := clean(g.Title)
+	if title == "" {
+		title = clean(g.Digest)
+	}
+	return groupRow{
+		ID:           clean(g.GroupID),
+		Sig:          clean(g.Sig),
+		SigShort:     sigShort(g.Sig),
+		Title:        truncRunes(title),
+		Count:        g.Count,
+		RateMin:      g.Rate1m,
+		Rate:         fmtRate(g.Rate1m),
+		LastSeenTS:   clean(g.LastSeenTS),
+		LastSeen:     fmtTS(g.LastSeenTS),
+		ReleaseRange: rel,
+		Releases:     strings.Join(rel, "…"),
+		Source:       clean(g.Source),
+		IncidentID:   clean(g.IncidentID),
+	}
+}
+
+// rankGroups orders group rows by rate, then count, then id (deterministic).
+func rankGroups(rows []groupRow) []groupRow {
+	out := make([]groupRow, len(rows))
+	copy(out, rows)
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0; j-- {
+			a, b := out[j-1], out[j]
+			if b.RateMin > a.RateMin ||
+				(b.RateMin == a.RateMin && b.Count > a.Count) ||
+				(b.RateMin == a.RateMin && b.Count == a.Count && b.ID < a.ID) {
+				out[j-1], out[j] = out[j], out[j-1]
+				continue
+			}
+			break
+		}
+	}
+	return out
+}
+
+// ruleRows joins the SPEC-03 rule snapshot with RuleStats and breaker state
+// (row 6/16).
+func (s *server) ruleRows() []ruleRow {
+	breakers := s.breakerByScope()
+	now := s.now()
+	rows := make([]ruleRow, 0, len(s.deps.Rules))
+	for _, rl := range s.deps.Rules {
+		row := ruleRow{
+			Name:      truncRunes(clean(rl.Name)),
+			Source:    rl.Source,
+			EntryRung: rl.EntryRung,
+			Severity:  rl.Severity,
+			Enabled:   rl.Enabled,
+		}
+		if s.deps.RuleStats != nil {
+			lastFire, fires, suppressed := s.deps.RuleStats(rl.Name)
+			row.LastFireTS = clean(lastFire)
+			row.Fires = fires
+			row.Suppressed = suppressed
+			if age, ok := ageSeconds(lastFire, now); ok {
+				row.LastFire = fmtAge(age, true) + " ago"
+			} else if lastFire != "" {
+				row.LastFire = clean(lastFire)
+			} else {
+				row.LastFire = "never"
+			}
+		} else {
+			row.LastFire = "never"
+		}
+		if b, ok := breakers["rule:"+rl.Name]; ok {
+			row.Breaker = b.State
+			row.BreakerOpen = clean(b.OpenUntil)
+		} else {
+			row.Breaker = types.BreakerClosed
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// breakerRows maps the breaker registry (row 7/17).
+func (s *server) breakerRows() []breakerRow {
+	var src []types.Breaker
+	if s.deps.Breakers != nil {
+		src = s.deps.Breakers()
+	}
+	rows := make([]breakerRow, 0, len(src))
+	for _, b := range src {
+		rows = append(rows, breakerRow{
+			Scope:     clean(b.Scope),
+			State:     b.State,
+			OpenUntil: clean(b.OpenUntil),
+			Trips:     b.Trips,
+			Reason:    truncRunes(clean(b.Reason)),
+		})
+	}
+	return rows
+}
+
+func (s *server) breakerByScope() map[string]types.Breaker {
+	out := map[string]types.Breaker{}
+	if s.deps.Breakers == nil {
+		return out
+	}
+	for _, b := range s.deps.Breakers() {
+		out[b.Scope] = b
+	}
+	return out
+}
+
+// timelineRows maps ledger records into timeline entries (row 14).
+func (s *server) timelineRows(inc string, since uint64, limit int) ([]timelineEntry, uint64) {
+	recs := s.deps.Index.RecordsForIncident(inc, since, limit)
+	rows := make([]timelineEntry, 0, len(recs))
+	for i := range recs {
+		rows = append(rows, timelineEntryOf(recs[i]))
+	}
+	return rows, s.deps.Index.LastSeq()
+}
+
+func timelineEntryOf(rec types.Record) timelineEntry {
+	return timelineEntry{
+		TS:      fmtTS(rec.TS),
+		Kind:    clean(string(rec.Kind)),
+		ActorID: clean(rec.Actor.ID),
+		Summary: truncRunes(clean(recordSummary(rec))),
+		Inc:     clean(rec.Inc),
+	}
+}
+
+// recordSummary renders a one-line payload summary without echoing arbitrary
+// payload structure: known transition/reason fields first, then kind+sig.
+func recordSummary(rec types.Record) string {
+	p := rec.Payload
+	if p != nil {
+		if tr, ok := p["transition"].(string); ok && tr != "" {
+			s := "transition " + tr
+			if rs, ok := p["reason"].(string); ok && rs != "" {
+				s += " · " + rs
+			}
+			if res, ok := p["resolution"].(string); ok && res != "" {
+				s += " · " + res
+			}
+			if via, ok := p["via"].(string); ok && via != "" {
+				s += " · via " + via
+			}
+			return s
+		}
+		if st, ok := p["state"].(string); ok && st != "" {
+			return "state " + st
+		}
+		if ec, ok := p["error_code"].(string); ok && ec != "" {
+			return "error " + ec
+		}
+	}
+	if rec.Sig != "" {
+		return string(rec.Kind) + " " + sigShort(rec.Sig)
+	}
+	return string(rec.Kind)
+}
+
+// sensorList returns the SPEC-03 sensor snapshot for /rules, applying the
+// §6.13 "no sample yet" rule so an enabled sensor that has not produced a
+// sample is visible as degraded instead of absent.
+func (s *server) sensorList() []types.SensorHealth {
+	if s.deps.Sensors == nil {
+		return nil
+	}
+	in := s.deps.Sensors()
+	out := make([]types.SensorHealth, 0, len(in))
+	for _, sh := range in {
+		if sh.LastSuccessTS == "" && sh.LastEventTS == "" {
+			sh.Enabled = true
+			sh.Degraded = true
+			if sh.Reason == "" {
+				sh.Reason = "no sample yet"
+			}
+		}
+		out = append(out, cleanSensor(sh))
+	}
+	return out
+}
+
+// budgetData assembles the runtime watermark panel (row 18).
+func (s *server) budgetData() budgetPanel {
+	var rw types.RuntimeWatermarks
+	if s.deps.Watermarks != nil {
+		rw = s.deps.Watermarks()
+	}
+	var gates types.AutonomyGates
+	if s.deps.Autonomy != nil {
+		gates = s.deps.Autonomy.Gates()
+	}
+	version, gitSHA := "", ""
+	if s.deps.Version != nil {
+		version, gitSHA, _, _ = s.deps.Version()
+	}
+	return budgetPanel{
+		RW:        rw,
+		Autonomy:  gates,
+		Version:   clean(version),
+		GitSHA:    clean(gitSHA),
+		Binary:    fmtLen(rw.BinaryBytes),
+		RSS:       fmtLen(rw.RSSBytes),
+		Ledger:    fmtLen(rw.LedgerBytes),
+		Spool:     fmtLen(rw.SpoolBytes),
+		Events:    fmtRate(rw.EventsPerMin),
+		Worktrees: rw.Worktrees,
+	}
+}
+
+// stripData assembles the accelerator strip (row 12) from the injected health
+// assembly plus the dashboard's own refusal counters.
+func (s *server) stripData(ctx context.Context) healthStrip {
+	hr := s.deps.Health(ctx)
+	return s.stripFrom(hr)
+}
+
+// stripDataWith is stripData with the autonomy gates overridden by a just-
+// written value (row 11's refreshed fragment).
+func (s *server) stripDataWith(ctx context.Context, gates types.AutonomyGates) healthStrip {
+	hr := s.deps.Health(ctx)
+	hr.Autonomy = gates
+	return s.stripFrom(hr)
+}
+
+func (s *server) stripFrom(hr types.HealthResponse) healthStrip {
+	now := s.now()
+	seq := s.deps.Index.LastSeq()
+	s.noteStrip(seq, hr.LedgerStallS, now)
+	st := healthStrip{
+		Seq:      seq,
+		StallS:   hr.LedgerStallS,
+		Status:   clean(hr.Status),
+		Mode:     clean(string(hr.Autonomy.Mode)),
+		Kill:     hr.Autonomy.KillSwitch,
+		Denied:   s.counters.denied.Load(),
+		CSRF:     s.counters.csrf.Load(),
+		RL:       s.counters.rl.Load(),
+		RenderTS: s.renderTS(),
+		Banner:   s.bannerState(),
+	}
+	if st.Status == "" {
+		st.Status = "unknown"
+	}
+	if st.Mode == "" {
+		st.Mode = "unknown"
+	}
+	return st
+}
+
+// noteStrip updates the §2.6 stale-render tracker: identical seqs accumulate,
+// and the banner turns on when three consecutive identical seqs coincide with
+// a stall counter at or above stall_alert_s.
+func (s *server) noteStrip(seq uint64, stallS float64, now time.Time) {
+	s.stallMu.Lock()
+	defer s.stallMu.Unlock()
+	if seq == s.stall.LastSeq {
+		s.stall.Repeat++
+	} else {
+		s.stall.LastSeq = seq
+		s.stall.Repeat = 0
+	}
+	s.stall.LastOK = types.FormatUTC(now)
+	s.stall.Banner = s.stall.Repeat >= 3 && stallS >= float64(s.cfg.StallAlertS)
+}
+
+func (s *server) bannerState() bool {
+	s.stallMu.Lock()
+	defer s.stallMu.Unlock()
+	return s.stall.Banner
+}
+
+// healthStall returns the lifecycle-provided ledger stall in seconds — never
+// recomputed from wall-clock deltas (§2.9, health.go).
+func (s *server) healthStall(ctx context.Context) float64 {
+	return s.deps.Health(ctx).LedgerStallS
+}
+
+// renderTS is the RFC3339 UTC millisecond render stamp every partial carries.
+func (s *server) renderTS() string { return types.FormatUTC(s.now()) }

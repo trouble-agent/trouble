@@ -1,0 +1,9 @@
+[Unit]
+Description=trouble stall checker timer
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=__INTERVAL__
+
+[Install]
+WantedBy=timers.target

@@ -20,6 +20,15 @@ shield that keeps DSN public keys verbatim while redacting everything else, per-
 the bundle/record/envelope entry points, and the persistence-boundary re-scan
 (`Verify` / `MandatoryScan`) that `internal/ledger` runs on every serialized line.
 
+`internal/sentinel` — the code plane (SPEC-04): the Sentry-SDK-compatible
+ingestion listener (envelope + legacy `/store/`), the generic-JSON on-ramp
+(`POST /api/{id}/event/`, one curl from any runtime), the log collectors
+(`go-panic`, `py-traceback`, `node-reject` over journald units and file tails),
+the group index with its rebuild-from-ledger path, release ordering and
+regression detection, quotas with the official rate-limit header format, the
+three loss policies, the spool, and the per-project canary that makes "no events"
+distinguishable from "no observation".
+
 `internal/types` is the shared type source of truth.
 
 `internal/registry` — the daemon's entire action surface (SPEC-06): the frozen v1 module SDK
@@ -41,7 +50,38 @@ budgets, storm breakers and suppression windows, the host agent lease, and park/
 restarts. It owns the `incident`, `verify` and `breaker` record kinds.
 
 
+`internal/dashboard` — the read-mostly face of the ledger (SPEC-10): the §2.1 route table (20 rows
+plus one deterministic 404 rule), token/scope auth with CSRF on every POST, the seven htmx polling
+fragments with their stale-render guard, server-rendered pages for incidents, groups, rules and
+breakers, and the §2.9 budget discipline — no handler opens a ledger file, fragments fit an 8 KB cap,
+and compression concurrency is bounded. Import rule: stdlib + `internal/types`, with every subsystem
+arriving through `Deps`.
+
 ## The scrubbing contract
+
+`internal/issues` — the issue desk (SPEC-09): the frozen four-method driver contract
+(`Name`/`Healthcheck`/`EnsureBySig`/`Comment`/`Close`), the anchor index keyed by
+`(driver, sig, project)` — one issue per sig for the life of the state root, with a fold inside the
+dedup window and a full recurrence block outside it — the sig/project/global caps that stop a
+chatty app or a flappy rule from spraying, the bounded spool (64 MiB / 20 000 entries / 72 h TTL)
+with its drop-oldest floor and its replay order, quiet-close with the five gates and the
+reopen-or-supersede branch, and two shipped drivers: `github` (search-first create so a lost 201
+adopts instead of duplicating, read-back verification, the exact §3.9.4 markers, the §3.9.5
+status→code table, a 0600 token file and argv refusal) and `duckbrain` (a KV layout with one key per
+comment and a write-then-read-back contract). It owns the `issue` record kind and is one of the five
+`gap` emitters. No module here shells out and no page is ever read: two HTTP APIs, one classified
+error per call.
+
+`internal/skills` — the skill loop (SPEC-11): a strict artifact schema with no field in which
+arbitrary code could be written (an unknown key, a `[stats]` table or an `exec`/`shell` key is a
+refusal, not a warning), a canonical signed byte form (`trouble.skill.v1` + a deterministic JSON
+projection + the play payload digest) verified against a config-listed ed25519 signer set, the
+version/floor/module/canary/approve gate chain, a pull-only distribution path (argv-only git reads:
+no push, no commit, no gc), the local candidate loop (draft → review → promote, signed with the
+host's own key), and the resolver that answers a recurrence with an exact sig match and refuses
+ambiguity. It owns the `skill` record kind.
+
+
 
 The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to
 disk, to the ledger, to the spool, to the skills-local directory, to an issue driver or to a board
@@ -71,6 +111,35 @@ breakers with per-scope caps, and liveness. Sensors are detection-only: they nor
 observation, evaluate rules against it, and emit `event`/`gap`/`canary` records through the ledger's
 `Append`. They never call the registry, never hold a tool handle and never spawn anything except
 `journalctl`.
+
+## The ingestion contract
+
+Four properties are design constraints in `internal/sentinel`, not features:
+
+* **SDK wire compatibility is a contract.** `docs/sentinel-compat.md` is the
+  matrix — routes, item types, encodings, size caps, auth forms, the 16-hex
+  secret divergence and every place the shipped code cannot follow the SPEC-04
+  text literally. It is rendered from the same tables the server uses
+  (`TestCompatMatrix` fails if the two drift).
+* **A quota breach destroys evidence**, because official SDK behaviour on 429 is
+  *discard*. So every drop writes a ledger record with its sig and disposition,
+  the loss policy is a configuration decision with three pinned behaviours, and
+  verification for a sig that lost its own events in the window is `invalid`,
+  never `passed`.
+* **Sentinel never observes itself into a green lie.** A per-project canary is
+  injected through the real HTTP path every `canary_interval`; a canary that does
+  not land makes verification `invalid` and emits `gap{cause=canary_missing}`.
+  `client_report` items are parsed, so SDK-side drops are data rather than
+  silence.
+* **The ingestion listener is an abuse surface.** Size caps, a gzip-bomb guard
+  (limited reader + a 100:1 ratio guard), a concurrency cap, per-IP and
+  per-project rates, read/write timeouts, an X-Forwarded-For trust policy and a
+  bind-matrix auth rule are all pinned and tested — a DSN public key is a public
+  key.
+
+Sentinel emits exactly four record kinds — `event`, `group`, `gap`, `canary` —
+and mints no cross-plane identity: it computes a `Sig` and hands it to the
+ledger, the dedup core and the ladder, which own incident identity.
 
 ## The durability contract
 
@@ -144,14 +213,25 @@ facts that surprise people) lives in `docs/operations.md` §12 and §13.
 * `specs/SPEC-INDEX.md` — suite map, the AC-to-spec matrix and the frozen v0.1 cut line.
 * `specs/SPEC-01-ledger.md` — the ledger, in full.
 * `specs/SPEC-03-sensors.md` — the detection plane, in full.
+* `specs/SPEC-09-issues.md` — the issue desk, in full.
+* `specs/SPEC-11-skills.md` — the skill loop, in full.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
 ## Build and test
 
 ```
 go build ./...
-go test -race -count=1 ./internal/...      # the CI gate for this package
-go test -race -count=1 -short ./internal/...  # skips the large synthetic-fixture budgets
+go test -count=1 ./internal/...              # the CI gate
+go test -count=1 -short ./internal/...        # skips the large fixtures and the 60s load test
+go test -count=1 -run TestLoadIngestThroughput ./internal/sentinel/   # SPEC-04 §7's load test
 ```
+
+`-short` keeps the whole tree safe to run in parallel (the load test degrades to a
+correctness smoke: one request in flight per worker and no throughput/latency/RSS
+assertions). The full 60s load test saturates the host for its duration, so run
+the tree with `-p 1` when it is in the same run — otherwise it can push
+`internal/ledger`'s fsync-window and `internal/scrub`'s µs/KiB assertions over
+their host-measured bounds. Measured numbers, and the reason the §7 latency budget
+is asserted at a host factor, are in `docs/operations.md` §9.
 
 MIT licensed.

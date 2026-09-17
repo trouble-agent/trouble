@@ -1,0 +1,24 @@
+{
+  "norm_version": 1,
+  "_comment": "Golden vectors of SPEC-04 §3.3. A mismatch fails CI and demands a norm_version bump plus a re-key of this file in the same commit. Regenerate with `go test ./internal/sentinel -run TestGoldenVectors -update-golden` after an intentional normalization change.",
+  "vectors": [
+    {
+      "name": "A — override",
+      "canonical": "sentinel/sha256v1\nfp=queue-wedge\u001fapp|worker|claim|worker.py|LINE|item = pool.get(timeout=1)\u001fapp|queue|get|queue.py|LINE|raise PoolExhausted(depth=N)\n",
+      "sig": "sentinel:sha256v1:d3e1e8197f4da958",
+      "bytes": 149
+    },
+    {
+      "name": "B — default",
+      "canonical": "sentinel/sha256v1\nlevel=error\nlogger=\nculprit=worker.claim\nframe=app|worker|claim|worker.py|LINE|item = pool.get(timeout=1)\nframe=app|queue|get|queue.py|LINE|raise PoolExhausted(depth=N)\n",
+      "sig": "sentinel:sha256v1:af7e89fe750191f9",
+      "bytes": 187
+    },
+    {
+      "name": "C — message fallback",
+      "canonical": "sentinel/sha256v1\nlevel=error\nlogger=\nculprit=\nframe=msg|queue wedge: pool exhausted depth=N\n",
+      "sig": "sentinel:sha256v1:198e825fb0db5e73",
+      "bytes": 93
+    }
+  ]
+}

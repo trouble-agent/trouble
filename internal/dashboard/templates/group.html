@@ -1,0 +1,27 @@
+{{define "content"}}
+<section class="panel">
+<h2>group {{.Group.ID}}</h2>
+<dl class="detail">
+<dt>sig</dt><dd>{{.Group.Sig}}</dd>
+<dt>digest</dt><dd>{{.Group.Digest}}</dd>
+<dt>source</dt><dd>{{.Group.Source}}</dd>
+<dt>title</dt><dd>{{.Group.Title}}</dd>
+<dt>count</dt><dd>{{.Group.Count}}</dd>
+<dt>first seen</dt><dd>{{.Group.FirstSeenTS}}</dd>
+<dt>last seen</dt><dd>{{.Group.LastSeenTS}}</dd>
+<dt>last event age</dt><dd>{{printf "%.0fs" .GroupLastAgeS}}</dd>
+<dt>releases</dt><dd>{{range .Group.ReleaseRange}}{{.}} {{end}}</dd>
+<dt>incident</dt><dd>{{if .Group.IncidentID}}<a href="/incidents/{{.Group.IncidentID}}">{{.Group.IncidentID}}</a>{{else}}—{{end}}</dd>
+</dl>
+</section>
+<section class="panel">
+<h2>counters (never dropped)</h2>
+<dl class="detail">
+<dt>events</dt><dd>{{.Group.Counters.Events}}</dd>
+<dt>suppressed</dt><dd>{{.Group.Counters.Suppressed}}</dd>
+<dt>redacted values</dt><dd>{{.Group.Counters.Redacted}}</dd>
+<dt>dropped events</dt><dd>{{.Group.Counters.Dropped}}</dd>
+<dt>sample rate</dt><dd>{{printf "%.2f" .Group.Counters.SampleRate}}</dd>
+</dl>
+</section>
+{{end}}

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/srv/app/a.py", line 10, in first
+    raise ValueError("first")
+ValueError: first
+Traceback (most recent call last):
+  File "/srv/app/b.py", line 20, in second
+    raise KeyError("second")
+KeyError: 'second'

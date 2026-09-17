@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/srv/app/worker.py", line 118, in claim
+    item = pool.get(timeout=1)
+  File "/srv/app/queue.py", line 44, in get
+    raise PoolExhausted(depth=912)
+app.queue.PoolExhausted: queue wedge: pool exhausted depth=912

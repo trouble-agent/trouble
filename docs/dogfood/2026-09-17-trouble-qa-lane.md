@@ -71,8 +71,23 @@ its single PHASE-B collect, saw `RUNNING`, and went straight to `interpret` /
 So the run did not silently lie about evidence — it honestly said it had none —
 but it still **closed as CLEAN**, one minute into a 7–15 minute battery. That is
 `QA-LANE-6`, and it is the same premature-completion pattern this skill exists to
-catch, sitting inside the verification lane. (This run then did what the lane
-did not: waited for the battery and collected it — see the section below.)
+catch, sitting inside the verification lane. The lane's own report card, verbatim:
+
+```
+🟢 · QA · trouble · 10m46s
+
+1 audited · 0 findings (0)
+• trouble — CLEAN: Only the launch cell is recorded (OK, agent=ed361cdd on agent-host-2,
+•   ttl=4h, battery detached); no FAIL or INFO cells exist, and phase-B collect has not reported
+•   results, so no findings are derivable.
+```
+
+A green check and `CLEAN` for the same battery whose `ci-pass` cell FAILed
+(below). Also observed: **no coverage row appeared in `<fleet-home>/qa/ledger.jsonl`
+for this run** — the newest `trouble` entry is still the 12:28:29Z one from the
+morning cycle, so a run that produced nothing also left no trace that it ran.
+(This run then did what the lane did not: waited for the battery and collected it
+— see the section below.)
 
 **Discovery is auditing empty stubs.** `qa_discover.py` filters `-pm`, `-sync`,
 dogfood and sync names but **not `-qa`**. Live dry-run:

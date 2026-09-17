@@ -20,3 +20,4 @@ dagger.db
 .gitreins/tasks.yaml
 .gitreins/history/
 .gitreins/verdicts/
+.gitreins/usage.jsonl

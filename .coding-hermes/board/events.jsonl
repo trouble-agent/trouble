@@ -1,0 +1,2 @@
+{"id":1,"timestamp":"2026-09-17 05:00:00.000000","event_type":"board_init","task_id":null,"actor":"hermes-kickoff","detail":"trouble project board created (repo github.com/trouble-agent/trouble pending first push, workdir ~/trouble, DuckBrain ns trouble)","tick_number":null}
+{"id":2,"timestamp":"2026-09-17 05:00:00.000000","event_type":"task_created","task_id":null,"actor":"hermes-kickoff","detail":"{\"source\":\"scheduler onboarding 2026-09-17\",\"tasks\":[\"TRBL-001\",\"TRBL-002\",\"TRBL-003\"]}","tick_number":null}

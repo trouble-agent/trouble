@@ -1,0 +1,20 @@
+gitreins:
+  guards:
+    secrets: true
+    lint: false
+    tests: true
+    test_mode: diff
+    test_command: "go test ./... -count=1"
+    static_analysis: false
+  evaluator:
+    model: deepseek-v4-flash
+    max_iterations: 200
+    max_time: "30m"
+    max_input_tokens: "1M"
+    max_output_tokens: "384k"
+    static_analysis_diagnostics: false
+  history:
+    enabled: true
+    storage: git
+  pipeline:
+    stages: []

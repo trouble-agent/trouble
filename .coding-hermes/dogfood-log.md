@@ -47,3 +47,21 @@ while `<fleet-home>/scripts/dogfood-pick.py` does not. This tick therefore ran
 against the repo behind the sync row (`local:~/trouble`) rather than a
 project with its own board — harmless here, but a wasted slot for a sync row
 with no product.
+
+2026-09-17 | dogfood (cron, target row trouble-qa → QA lane for ~/trouble) | 🟡 PROMISING-BUT-ROUGH | existing lane output audited in ~25m (2 claims reproduced); fresh targeted tick launched a battery in 8.5m but graded the run CLEAN one minute in | 11 (6 filed QA-LANE-1..6, 1 TRBL-012, 4 log-only) | install_seconds=N/A — SKIPPED-install-bunker (spawn deadline_exceeded on agent-host-3 AND agent-2 AND agent-4 at ~300s each; QA-LANE-5) | build c363daf; findings QA-LANE-1..6 + TRBL-012; artifacts docs/dogfood/2026-09-17-trouble-qa-lane.md, docs/dogfood/2026-09-17-trouble-qa-diagnostics.md, skills/trouble-qa-lane-usage/SKILL.md
+
+Target = the QA lane itself (scheduler row `trouble-qa`), not a second pass over
+the repo: the lane's own contracts ("reproduce at most ONE claimed failure";
+"evidence is board rows + ledger + DuckBrain record") are what was tested. Two of
+three open QA-TROUBLE rows reproduced exactly as written, so the lane's judgement
+is real. Its plumbing is not: phase A took 8.5 min against a documented 60-120s
+(two spawn attempts, first attempt's agent cefd6920 leaked and still running, two
+concurrent syncs sharing one evidence path), the sync ships 141 MB of workdir
+(111 MB gitignored `.worktrees/`), discovery picks `*-qa` stub workdirs (no
+source, not a git repo) and files harness findings on real project boards, a
+`FILED=1` was observed next to `fatal: pathspec … beyond a symbolic link` (row on
+disk, uncommitted), and — the headline — the pipeline graded the run CLEAN with
+filed:0 one minute into a 7-15 min battery, so the real cells were never pulled.
+This run then collected that battery by hand (cells recorded in the integration
+report). Neither the QA battery nor this run's install leg could spawn a fresh
+agent on any of three bunker boxes beyond the one that was already up.

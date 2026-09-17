@@ -587,21 +587,44 @@ func (e *Engine) ScrubFields(ctx context.Context, projectID string, fields map[s
 	}
 
 	tbl := e.table(projectID)
-	// The prefilter is per buffer: when it misses every declared field, no rule
-	// can match any of them and the pass is skipped entirely (§3.6 rule 10).
-	// One prefilter pass over the declared fields: when neither a keyword nor a
-	// signal fires anywhere, no rule can match any field and the pass is skipped.
-	scan := true
-	var fieldsGate gateState
+	// The prefilter is per buffer: when it misses on every declared field, no
+	// rule can match any of them and the pass is skipped entirely (§3.6 rule
+	// 10). Each field gets its OWN gate: a rule is evaluated on a field only
+	// when that field's own bytes contain one of the rule's anchors (or fire
+	// one of its signals). A rule's match always lies within the bytes that
+	// carry its anchor, so per-field gating is provably output-identical to
+	// bundle-wide gating — and it keeps a `PWD=` in env from un-gating rules
+	// on the message, stack and headers fields.
+	scan := false
+	fieldsGate := make([]gateState, len(declared))
+	var fieldsGateBundle gateState
 	if tbl.prefilter {
-		fieldsGate = gateState{on: true, matched: make([]uint64, e.trigWords)}
-		for _, f := range declared {
-			fieldsGate.sigs |= e.trig.fire(f.buf, fieldsGate.matched)
+		var union []uint64
+		var unionSigs signalMask
+		for i, f := range declared {
+			m := make([]uint64, e.trigWords)
+			sigs := e.trig.fire(f.buf, m)
+			fieldsGate[i] = gateState{on: true, matched: m, sigs: sigs}
+			if !maskEmpty(m) || sigs != 0 {
+				scan = true
+			}
+			// the rescan loop (§3.6 rule 9) keeps the bundle-wide gate: a
+			// rescan rule is evaluated "over the marker-bearing buffer", so
+			// anchor text a replacement injected mid-pass must still ungate it
+			if union == nil {
+				union = make([]uint64, e.trigWords)
+			}
+			for j, w := range m {
+				union[j] |= w
+			}
+			unionSigs |= sigs
 		}
-		scan = !maskEmpty(fieldsGate.matched) || fieldsGate.sigs != 0
+		fieldsGateBundle = gateState{on: true, matched: union, sigs: unionSigs}
 		if !scan {
 			e.st.prefMiss.Add(1)
 		}
+	} else {
+		scan = true
 	}
 	if scan {
 		// shield in: no rule may see a configured public key (§3.5)
@@ -612,8 +635,13 @@ func (e *Engine) ScrubFields(ctx context.Context, projectID string, fields map[s
 			if r.rescan {
 				continue
 			}
-			for _, f := range declared {
-				if !r.targets.has(f.target) || fieldsGate.ruleGated(r.gate, r.signals) {
+			for i, f := range declared {
+				if !r.targets.has(f.target) {
+					continue
+				}
+				// when the table prefilter is off, fieldsGate[i] is the zero
+				// gateState, which never gates (§3.6 rule 10's kill switch)
+				if g := fieldsGate[i]; g.ruleGated(r.gate, r.signals) {
 					continue
 				}
 				// the reservation is per field: headerSpans/flagSpans computed for
@@ -621,11 +649,11 @@ func (e *Engine) ScrubFields(ctx context.Context, projectID string, fields map[s
 				var reserved []span
 				if r.name == "env_assign" || r.name == "kv_secret_assign" {
 					reserved = append(reserved,
-						e.spansFor(tbl, "cli_flag_secret", f.target, f.buf, nil, fieldsGate)...)
+						e.spansFor(tbl, "cli_flag_secret", f.target, f.buf, nil, fieldsGate[i])...)
 				}
 				if r.name == "kv_secret_assign" || r.name == "pii_identity_kv" {
 					reserved = append(reserved,
-						e.spansFor(tbl, "auth_header", f.target, f.buf, nil, fieldsGate)...)
+						e.spansFor(tbl, "auth_header", f.target, f.buf, nil, fieldsGate[i])...)
 				}
 				start := time.Now()
 				spans, err := e.ruleSpans(r.compiledRule, tbl, f.buf, reserved)
@@ -650,7 +678,11 @@ func (e *Engine) ScrubFields(ctx context.Context, projectID string, fields map[s
 				continue
 			}
 			for _, f := range declared {
-				if !r.targets.has(f.target) || fieldsGate.ruleGated(r.gate, r.signals) {
+				if !r.targets.has(f.target) {
+					continue
+				}
+				// rescan keeps the bundle-wide gate: see the union comment above
+				if fieldsGateBundle.ruleGated(r.gate, r.signals) {
 					continue
 				}
 				spans, err := e.ruleSpans(r.compiledRule, tbl, f.buf, nil)

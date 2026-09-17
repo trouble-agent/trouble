@@ -5,7 +5,7 @@ Area prefix: TROUBLE-LIFECYCLE
 Package: internal/lifecycle
 Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity, ProfileConfig, HubStatus
 Local types: explainRow, unitTemplate, bindProbe, stallVerdict, spoolSegment, spoolState, upgradePlan, secretFileCheck, zoneWindow
-ACs: AC-14, AC-18, AC-25, AC-26, AC-28, AC-29
+ACs: AC-14, AC-18, AC-25, AC-26, AC-27, AC-28, AC-29
 PRD: §09, §11, §12
 
 ## 1. Purpose

@@ -5,7 +5,7 @@ Area prefix: TROUBLE-FLOW
 Package: internal/flow
 Consumed types: BoardRow, BoardEvent, FileTaskRequest, FileTaskResult, FlowDriver, FlowProject, FlowTimelineStep, RouterConfig, ForemanBrief, SpawnRequest, HotfixLease, Promotion, FlowConfig, HotfixConfig, DriverHealth, IssueRef, SpoolEntry, Record, RecordKind, Sig, Duration, Prefix, Actor, Origin, Severity, Incident, AutonomyGates, Evidence, VerifyResultKind, Rule, ResearchOutcome, DoNotTouch, ToolCall, Descriptor, Diff, DiffEntry, IdempotencyClass, ErrorClass
 Local types: rowStyle, boardIndex, leaseKey, spawnKey, budgetClock, recordSink, issueDesk, briefSource, moduleRegistrar
-ACs: AC-9, AC-19, AC-21, AC-26
+ACs: AC-9, AC-19, AC-21, AC-22, AC-26
 PRD: §08, §11, §12
 
 ## 1. Purpose

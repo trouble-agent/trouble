@@ -5,7 +5,7 @@ Area prefix: (none — this file allocates error-code AREAS, it does not define 
 Package: (none — repository meta-document)
 Consumed types: ErrorCode, Record, RecordKind, Prefix, Sig (ownership map only)
 Local types: — 
-ACs: AC-1..AC-30 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
+ACs: AC-1..AC-31 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
 PRD: §10, §11, §12
 
 ## 1. Purpose
@@ -54,18 +54,18 @@ deferred table), `deferred` (specified at interface level only; see §3.3).
 |---|---|---|---|---|
 | SPEC-INDEX | suite map, AC matrix, cut line | §10, §11, §12 | all (index) | frozen |
 | SPEC-TYPES | shared types + error catalog | §03, §06, §06b, §06c, §07, §08, §11 | all (type substrate) | frozen |
-| SPEC-01 | ledger: record schema, sig format, ids, durability | §03, §04a, §06b, §11 | AC-6, AC-22, AC-26, AC-30 | frozen |
+| SPEC-01 | ledger: record schema, sig format, ids, durability | §03, §04a, §06b, §11 | AC-6, AC-22, AC-24, AC-26, AC-30 | frozen |
 | SPEC-02 | scrubbing subsystem (safety, pre-persistence) | §11 (guardrails), §04b | AC-18, AC-22 | frozen |
 | SPEC-03 | sensors: PSI, journald, D-Bus, disk, timers, inotify, rules | §04a, §11 | AC-1, AC-2, AC-4, AC-19 | frozen |
-| SPEC-04 | sentinel: ingestion contract, grouping, releases, collectors, sensor routes | §04b, §10, §11 | AC-10..AC-15, AC-18, AC-19, AC-22, AC-28 | frozen |
-| SPEC-05 | ladder: state machine, verification, autonomy gates | §05, §06b, §11, §12 | AC-3, AC-4, AC-5, AC-20, AC-21, AC-22, AC-26 | frozen |
+| SPEC-04 | sentinel: ingestion contract, grouping, releases, collectors, sensor routes | §04b, §10, §11 | AC-10..AC-15, AC-18, AC-19, AC-22, AC-28, AC-31 | frozen |
+| SPEC-05 | ladder: state machine, verification, autonomy gates | §05, §06b, §11, §12 | AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31 | frozen |
 | SPEC-06 | registry: module SDK v1, plays, do-not-touch, polkit | §06, §11 | AC-7, AC-23 | frozen |
-| SPEC-07 | research: Off-by-One contract, class-slug derivation | §05, §12 | AC-17, AC-20 | frozen |
-| SPEC-08 | flow: board-jsonl row, task-router, hot-fix spawn | §08, §11, §12 | AC-9, AC-19, AC-21, AC-26 | frozen |
-| SPEC-09 | issues: driver contract, github + duckbrain | §07, §11 | AC-8, AC-22 | frozen |
-| SPEC-10 | dashboard: routes, auth, scopes, CSRF, live updates, paging | §04c, §11 | AC-16, AC-19, AC-30 | frozen |
-| SPEC-11 | skills: artifact schema, local promote loop, pull distribution | §06c, §12 | AC-24 (partial), AC-26 | partial |
-| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology, server profiles | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26, AC-28, AC-29 | partial |
+| SPEC-07 | research: Off-by-One contract, class-slug derivation | §05, §12 | AC-3, AC-17, AC-20, AC-31 | frozen |
+| SPEC-08 | flow: board-jsonl row, task-router, hot-fix spawn | §08, §11, §12 | AC-9, AC-19, AC-21, AC-22, AC-26 | frozen |
+| SPEC-09 | issues: driver contract, github + duckbrain | §07, §11 | AC-8, AC-22, AC-31 | frozen |
+| SPEC-10 | dashboard: routes, auth, scopes, CSRF, live updates, paging | §04c, §11 | AC-16, AC-19, AC-26, AC-30 | frozen |
+| SPEC-11 | skills: artifact schema, local promote loop, pull distribution | §06c, §12 | AC-24 (partial), AC-25, AC-26 | partial |
+| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology, server profiles | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26, AC-27, AC-28, AC-29 | partial |
 | SPEC-13 | server profiles: standalone | light-hub (Redis buffer/dedup + DuckBrain archival) | §03, §11, §12 | AC-29 | frozen |
 
 ### 3.2 AC matrix (binding)
@@ -105,7 +105,7 @@ item ships — see §6.1) · **D** = deferred to v1.0 (AC text retained; v0.1 cl
 | AC-28 | AC-28 Sensor route matrix: with a hub endpoint configured, an event class routes to B (proxied) by default and to A (direct) when `routes.per_class` overrides it; with no hub endpoint every class takes A; a hub outage mid-run sends Route B traffic to the bounded spool and every spooled event replays exactly once after the hub returns; each landed record's `origin.route` equals the route that carried it and the dashboard shows the local-vs-relayed split. | SPEC-04 (route decision, config, spool replay), SPEC-12 (forward path, ack, zone) | B |
 | AC-29 | AC-29 Light-hub degradation: `[server] profile="light-hub"` with Redis + a DuckBrain namespace — duplicate `ForwardEnvelope` idempotency keys replayed across a Redis failover land exactly one ledger record; stopping Redis mid-burst makes senders see 429 + `Retry-After` while the local spool holds and the daemon keeps serving (no event loss, hub degrades to standalone ingestion); a closed ledger generation is exported to DuckBrain and only then dropped from the hot host, and with DuckBrain unreachable archival pauses with a gap record while ingestion continues; the ladder produces identical incident/verify sequences in both profiles for the same event stream. | SPEC-13 (profile, queue, dedup gate, archival), SPEC-12 (config, health, topology) | B |
 | AC-30 | AC-30 Ledger pagination: a 10M-record corpus is walked with `page_token` + `page_size` — page-size stability holds (no record repeated, none skipped across the walk, `next_page_token` empty exactly at the end), the retention sweep deletes whole generation files (+ `.idx` + archive marker) while a walk is in flight, and a token pointing at a dropped generation returns a `reset` hint + newest-first restart instead of an error loop; a missing or mismatched `{file}.idx` is rebuilt from the generation file. | SPEC-01 (tokens, sidecar, drop-generation retention), SPEC-10 (`/incidents`, `/groups` paging) | B |
-| AC-31 | AC-31 Cross-plane context: a sentinel `Admit` populates `Observation.Codeplane` (sig, group, release, regression, top-5 recent) and the bundle lands on the incident record; a sensor `Admit` whose convergence map links an open sentinel group arrives at the agent rung with BOTH planes' context; the research request and the issue body carry the bundle verbatim; a bundle whose release disagrees with the running release is discarded with a gap record, never shown as fact. | SPEC-05 (§3.13a), SPEC-04 (§3.9), SPEC-07, SPEC-09 | B |
+| AC-31 | AC-31 Cross-plane context: a sentinel `Admit` populates `Observation.Codeplane` (sig, group, release, regression, top-5 recent) and the bundle lands on the incident record; a sensor `Admit` whose convergence map links an open sentinel group arrives at the agent rung with BOTH planes' context; the research request and the issue body carry the bundle verbatim; a bundle whose release disagrees with the running release is discarded with a gap record, never shown as fact. | SPEC-05 §3.13a, SPEC-04 §3.9a, SPEC-07 §3.10a, SPEC-09 §3.13a | B |
 
 `[carried]` ACs: see §6.2 — prd-v2.3.html references AC-1..AC-17 as "carry" but does not restate their
 text; the scope keys above are derived from PRD §02 (directive map) and §10 (MVP bullets) and MUST be
@@ -254,7 +254,7 @@ The scheme is `TROUBLE-<AREA>-<NNN>` with the AREA tokens allocated in §3.5 and
 | AC-25 | "light agent" binary is deferred | Status `P`: v0.1 ships the hub/satellite split in configuration (same code paths, T1 = hub with zero satellites), the forward path (SPEC-12 §3.7), the spool, and skill pull-down. The separate light binary is v1.0. |
 | AC-27 | "proxy" binary is deferred | Status `D`: v0.1 specifies the forward/spool/replay mechanism the proxy would use (SPEC-12 §3.7) but ships no proxy binary. No v0.1 spec section claims proxy coverage. |
 | AC-19 | "live incident appears within 2s" needs a live-update choice; SSE is deferred | Resolved in SPEC-10 §2: 2s polling of htmx partials is the v0.1 mechanism; SSE is named as the reserved v1.0 route but is not specified as in-scope. |
-| AC-28, AC-29, AC-30 (added in v0.1.1) | none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile and ledger page tokens are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are *different* artifacts from the `light-hub` server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes) | Status `B` for all three. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process. |
+| AC-28, AC-29, AC-30, AC-31 (added in v0.1.1) | none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile, ledger page tokens and the cross-plane codeplane bundle are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are *different* artifacts from the `light-hub` server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes) | Status `B` for all four. AC-31 carries the same reasoning as AC-28..AC-30: the bundle is a field on records the shipped `Admit`, research and issue paths already carry (`Observation.Codeplane` → `Incident.Codeplane` → the research request payload and the issue body), it adds no deferred process and no deferred artifact, and refusing a mismatched bundle is a `gap` record inside the shipped sentinel. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process. |
 
 ### 6.2 AC-1..AC-17 text absence
 
@@ -293,7 +293,13 @@ Run BEFORE the commit; every step must pass with a recorded command and output.
    type definition in SPEC-TYPES.md §3. No orphans. No type defined twice with different shapes
    (enforced by "defined exactly once in SPEC-TYPES.md").
 2. **AC coverage both ways** — every AC in §3.2 maps to ≥1 spec section; every spec section is either
-   covered by an AC or explicitly tagged `design constraint` in its heading text.
+   covered by an AC or explicitly tagged `design constraint` in its heading text. The AC universe checked
+   here is derived from the matrix itself: adding `AC-nn` to §3.2 needs no edit to the tool, and a hole in
+   the sequence (a missing `AC-nn` below the highest row) is a hard failure.
+2b. **Matrix → metadata** — for every AC row, every spec named in that row's spec column MUST declare that
+   AC in its own `ACs:` metadata line, failing as
+   `AC-31: matrix assigns SPEC-09 but SPEC-09 does not declare it`. This is the direction that let the
+   AC-31 row name four owning specs while none of them declared it and the loop still printed PASS.
 3. **Interfaces compile by inspection** — every Go signature in a spec's §2 matches the types and method
    sets in SPEC-TYPES; every HTTP route in a spec's §2 appears in that area's route table exactly once.
 4. **Error codes** — every `TROUBLE-<AREA>-<NNN>` in every spec exists in SPEC-TYPES §5, is unique, and
@@ -321,6 +327,7 @@ git grep -nE 'TBD|Phase 2|TODO|consider' -- specs/   # step 6 (manual review of 
   whenever a spec's AC coverage changes.
 - Every spec file is a new node under `~/trouble/specs/`; `specs/tools/selfcheck.py` is the
   only executable artifact in the suite (stdlib-only Python, no deps) and is the CI entry point for the
-  consistency loop. Since v0.1.1 it also validates `SPEC-13` (file set 01..13) and the AC range
-  `AC-1..AC-30`, which is the mechanical half of keeping this index honest.
+  consistency loop. Since v0.1.1 it also validates `SPEC-13` (file set 01..13) and the AC range —
+  `AC-1..AC-31` as of v0.1.1a, derived from §3.2 rather than hardcoded — plus the matrix→metadata
+  declaration check of §7 step 2b, which is the mechanical half of keeping this index honest.
 - No fleet repository is modified: trouble is greenfield at `~/trouble`.

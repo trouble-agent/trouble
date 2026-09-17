@@ -5,7 +5,7 @@ Area prefix: TROUBLE-SKILLS
 Package: internal/skills
 Consumed types: Skill, SkillGuards, Provenance, SkillStats, SkillCandidate, Play, PlayTask, Descriptor, Incident, ResearchOutcome, Evidence, Record, Actor, Origin, Duration, SkillsConfig, SkillSigner, SkillsStatus, SkillRow
 Local types: skillArtifact, canonicalProjection, localIndex, installRow, canaryRecord, holdEntry, matchResult, pullReport, authorizer
-ACs: AC-24 (partial — see SPEC-INDEX §6.1), AC-26
+ACs: AC-24 (partial — see SPEC-INDEX §6.1), AC-25, AC-26
 PRD: §06c, §12
 
 ## 1. Purpose

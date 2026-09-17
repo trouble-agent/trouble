@@ -5,7 +5,7 @@ Area prefix: TROUBLE-LEDGER
 Package: `internal/ledger`
 Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
 Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
-ACs: AC-6, AC-22, AC-26, AC-30
+ACs: AC-6, AC-22, AC-24, AC-26, AC-30
 PRD: §03, §04a, §06b, §11
 
 ## 1. Purpose

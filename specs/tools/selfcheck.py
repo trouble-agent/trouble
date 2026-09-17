@@ -5,7 +5,10 @@ Stdlib only. Run from anywhere:  python3 specs/tools/selfcheck.py
 
 Steps implemented
   1  every type consumed by a spec resolves in SPEC-TYPES.md (no orphans, no double defs)
-  2  every AC in the SPEC-INDEX matrix maps to >= 1 spec, and every spec has >= 1 AC
+  2  every AC in the SPEC-INDEX matrix maps to >= 1 spec, and every spec has >= 1 AC; the AC
+     universe is DERIVED from the parsed matrix (no hardcoded range: a new AC-nn row needs no
+     edit here, and a hole in the sequence is still a hard failure)
+  2b every spec named in an AC row's spec column declares that AC in its own `ACs:` metadata line
   3  interface/cross-reference hygiene: SPEC-nn refs resolve, PRD section ids resolve
   4  every error code exists in the SPEC-TYPES catalog, is unique, and is in its area's range
   5  cross-references (spec<->spec, spec<->PRD) resolve
@@ -196,9 +199,15 @@ def main() -> int:
             elif sid not in ac_matrix_specs[ac]:
                 fail(f"{sid}: claims {ac} but the matrix assigns it to {sorted(ac_matrix_specs[ac]) or 'nobody'}")
 
-    # step 2 — AC coverage both ways
-    for i in range(1, 31):
-        ac = f"AC-{i}"
+    # step 2 — AC coverage both ways. The universe is derived from the parsed matrix, never from a
+    # literal range: adding AC-nn to the matrix needs no edit here, and a hole in the sequence
+    # (AC-n missing below the highest row) is still a hard failure.
+    if not ac_matrix_specs:
+        fail("AC matrix not parsed from SPEC-INDEX.md §3.2")
+    ac_universe = sorted(ac_matrix_specs, key=lambda a: int(a.split("-")[1]))
+    top = int(ac_universe[-1].split("-")[1]) if ac_universe else 0
+    for n in range(1, top + 1):
+        ac = f"AC-{n}"
         if ac not in ac_matrix_specs:
             fail(f"{ac}: missing from the SPEC-INDEX AC matrix")
         elif not ac_matrix_specs[ac]:
@@ -206,6 +215,16 @@ def main() -> int:
     for sid, acs in coverage.items():
         if not acs:
             fail(f"{sid}: no ACs declared")
+
+    # step 2b — the direction that was missing: a spec a matrix row names as an owner MUST declare
+    # the AC in its own metadata line. Without this an AC row can name four owning specs while none
+    # of them carries the AC, and the loop still prints PASS.
+    for ac in ac_universe:
+        for sid in sorted(ac_matrix_specs[ac]):
+            if sid not in coverage:
+                continue  # SPEC-INDEX owns the matrix; SPEC-TYPES is the type substrate
+            if ac not in coverage[sid]:
+                fail(f"{ac}: matrix assigns {sid} but {sid} does not declare it")
 
     # ---------- report ------------------------------------------------------
     print("=" * 78)
@@ -223,8 +242,7 @@ def main() -> int:
     print(f"files: {len(names)}   bytes: {total}   shared types: {len(types)}   error codes: {len(catalog)}   areas: {len(ranges)}")
     print()
     print("AC coverage (AC -> specs):")
-    for i in range(1, 31):
-        ac = f"AC-{i}"
+    for ac in ac_universe:
         print(f"  {ac:<6} {'B' if ac_rows.get(ac) == 'B' else ac_rows.get(ac, '?')}  {', '.join(sorted(ac_matrix_specs.get(ac, []))) or 'UNMAPPED'}")
     print()
     if warns:

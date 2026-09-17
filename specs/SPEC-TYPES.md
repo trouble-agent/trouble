@@ -5,7 +5,7 @@ Area prefix: (none — this file defines the error-CODE catalog for every area)
 Package: `internal/types`
 Consumed types: — (this file defines them)
 Local types: —
-ACs: AC-1..AC-30 (all — every AC depends on the shared record/identity model)
+ACs: AC-1..AC-31 (all — every AC depends on the shared record/identity model)
 PRD: §03, §06, §06b, §06c, §07, §08, §11
 
 ## 1. Purpose
@@ -423,7 +423,7 @@ type GapRecord struct {
     FromTS   string `json:"from_ts"`
     ToTS     string `json:"to_ts"`
     EstLost  int    `json:"est_lost"`  // best estimate; -1 when unknowable
-    Cause    string `json:"cause"`     // open value set, e.g. cursor_invalid | child_died | queue_overflow | bus_down | psi_unarmed | canary_missing | heartbeat_stale | journal_unprivileged | file_rotated | file_truncated | file_removed | parser_error | spool_write_failed | ingest_reject_storm | driver_down | scrub_invalid_utf8 | research_lab_unreachable | research_strict_decoder_reject | research_solver_unavailable | research_poll_timeout | research_corpus_unreadable | forward_rejected | spool_evicted
+    Cause    string `json:"cause"`     // open value set, e.g. cursor_invalid | child_died | queue_overflow | bus_down | psi_unarmed | canary_missing | heartbeat_stale | journal_unprivileged | file_rotated | file_truncated | file_removed | parser_error | spool_write_failed | ingest_reject_storm | driver_down | scrub_invalid_utf8 | research_lab_unreachable | research_strict_decoder_reject | research_solver_unavailable | research_poll_timeout | research_corpus_unreadable | forward_rejected | spool_evicted | codeplane_release_mismatch
 }
 
 type AutonomyMode string
@@ -1297,6 +1297,9 @@ type RouteConfig struct {              // [sentinel.routes]
 {"default":"auto","per_class":{"psi:io_pressure":"direct","sentinel:sha256v1":"proxy"}}
 ```
 
+`GapRecord.Cause` gains the value `codeplane_release_mismatch` (SPEC-04 §3.9a) — reported as a TYPES-GAP line
+so SPEC-TYPES §3.7's cause set stays the single source of truth.
+
 #### 3.15.4 Contributed by SPEC-05
 
 _SPEC-05 — ladder: state machine, verification, autonomy gates (trouble v0.1)_
@@ -1734,7 +1737,7 @@ type Subject struct { // the research request payload the driver turns into SPEC
     Slug        string         `json:"slug"`
     Description string         `json:"description"`
     Cadence     string         `json:"cadence"`
-    Context     map[string]any `json:"context"` // fingerprint, stack, release, unit
+    Context     map[string]any `json:"context"` // fingerprint, stack, release, unit, codeplane (SPEC-07 §3.10a)
 }
 ```
 
@@ -1925,9 +1928,9 @@ type LedgerArchiveMarker struct {       // one append-only object per generation
 | internal/sentinel | Record, Project, Group, CodeplaneContext | event, group, gap, canary |
 | internal/ladder | Incident, Evidence, AutonomyGates, CodeplaneContext | incident, verify, breaker |
 | internal/registry | Descriptor, ToolCall, Play | tool_call, play_run |
-| internal/research | ResearchOutcome | research, gap |
+| internal/research | ResearchOutcome, CodeplaneContext | research, gap |
 | internal/flow | BoardRow, SpawnRequest, Promotion | flow, spawn |
-| internal/issues | IssueRef, DriverHealth | issue, gap |
+| internal/issues | IssueRef, DriverHealth, CodeplaneContext | issue, gap |
 | internal/dashboard | HealthResponse (read-only consumer) | (none; reads ledger + index) |
 | internal/skills | Skill, SkillCandidate, SkillStats | skill |
 | internal/lifecycle | ConfigValue, Heartbeat, ForwardEnvelope | config, lifecycle |

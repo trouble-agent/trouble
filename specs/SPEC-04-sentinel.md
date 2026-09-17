@@ -3,9 +3,9 @@
 Spec: SPEC-04
 Area prefix: TROUBLE-SENTINEL
 Package: internal/sentinel
-Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser, RouteMode, RouteDecision, RouteConfig
+Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser, RouteMode, RouteDecision, RouteConfig, CodeplaneContext
 Local types: dsn, envelopeHeader, envelopeItem, itemPolicy, authMaterial, quotaWindow, ledgerSink, scrubber, lineSource, logLine, assembleState, tailState, releaseOrder, routeTable, routeMatch
-ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22, AC-28
+ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22, AC-28, AC-31
 PRD: §04b, §10, §11
 
 ## 1. Purpose
@@ -100,6 +100,7 @@ func (s *Server) InjectCanary(projectID string) (eventID string, err error)
 func (s *Server) ObserveRecord(rec types.Record) error  // hub-side group index update for forwarded records
 func (s *Server) Groups() []types.Group                 // read view for SPEC-10; never mutates
 func (s *Server) SigOf(ev types.SentryEvent) (types.Sig, error)
+func (s *Server) CodeplaneFor(sig types.Sig) (types.CodeplaneContext, bool) // cross-plane bundle for an open group (§3.9a; SPEC-05 §3.13a)
 
 type ledgerSink interface { Append(types.Record) error; LastSeq() uint64 }            // *ledger.Writer
 type scrubber interface {
@@ -481,6 +482,76 @@ with the same `retry_after` value, which is what turns a flood into an orderly s
 429 cliff. `RateLimitDecision.Header` carries the exact string emitted, so the ledger and the
 dashboard can show what the server told the SDK.
 
+### 3.9a The codeplane bundle on admission, and the convergence map (v0.1.1a)
+
+`internal/sentinel` is the only subsystem that knows what the *code* plane was doing at the moment an
+incident opens. The `Admit` call therefore carries that knowledge on the `Observation` itself, and the same
+map lets a sensor-born admission inherit it (AC-31). SPEC-05 §3.13a owns what the ladder does with the
+bundle; this section owns how it is assembled and when it is refused.
+
+**The convergence map (sentinel-owned, read-only).** The sentinel keeps `convergence map[Sig]GroupID` — the
+open groups whose subject a sensor rule can also observe (a unit, a path, a container, a project). It is
+derived from the group store, never from config, and it is rebuilt at boot from the last 15 minutes of
+`group` records (`convergence_window`, a constant in v0.1: the map is a correlation aid, not a store). It
+holds at most 4096 entries (`convergence_max_entries`) and evicts least-recently-seen first; an entry leaves
+when its group closes or its last event falls out of the window. One accessor is published:
+
+```go
+func (s *Server) CodeplaneFor(sig types.Sig) (types.CodeplaneContext, bool) // open-group facts, or ok=false
+```
+
+The ladder calls it on a sensor-born admission (SPEC-05 §3.13a) to fill the sentinel half of that bundle.
+The sensor plane never reads the group store directly and never writes the sentinel half of a bundle.
+
+**What the sentinel contributes on `Admit`.** Every admission from this package fills `Observation.Codeplane`
+(SPEC-TYPES §3.15.12; the ladder persists it as `Incident.Codeplane`) with the facts the sentinel is the
+authority for, and nothing it is not:
+
+| Bundle field | Source in this spec | Populated when |
+|---|---|---|
+| `Side` | constant `"sentinel"` | always |
+| `Sig`, `GroupID`, `Project` | the group that crossed the threshold (§3.3) | always on a sentinel admission |
+| `Release` | the group's last-seen release (§3.4, `Group.ReleaseRange[1]`) | a release has been seen for the group |
+| `Regressed` | the open regression flag for the release pair (§3.4) | a regression is open |
+| `Recent` | the group's signature counters, top-5 by count | always on a sentinel admission |
+| `Sample` | the `rec_id` of the representative event already attached to the group | the group has a sample |
+| `TS` | assembly time, RFC3339 ms UTC | always |
+
+The sensor half (`Side="sensor"`, `RuleID`, `Readings`) is never written here: the two planes write disjoint
+fields, so a bundle is never a merge decision.
+
+**The release-mismatch rule (normative).** Assembly compares the bundle's `Release` with the project's
+*running release* — the newest release seen for that project under §3.4's `releaseOrder`, i.e. the release
+the sentinel believes is deployed. Both values non-empty and unequal (older or newer) means the group
+describes code that is not the code running, so the bundle is **discarded at assembly**:
+
+1. `Observation.Codeplane` is left `nil`. The mismatched bundle never reaches the ladder, and therefore
+   reaches neither the agent rung nor the research request (SPEC-07 §3.10a) nor the issue body
+   (SPEC-09 §3.13a).
+2. Exactly one `gap` record is written: `cause="codeplane_release_mismatch"`, `sensor="sentinel"`,
+   `scope=<sig>`, `est_lost=0`, `payload {sig, grp, bundle_release, running_release}`. The pair
+   `(sig, bundle_release)` is memoized for `convergence_window`, so a burst of stale-release admissions
+   writes one record rather than one per event.
+3. The admission proceeds unchanged: the ingestion status was committed by §2.1 before assembly, the
+   discard path serves **0 HTTP responses of its own**, and the incident opens exactly as it would with no
+   bundle at all.
+
+A bundle is context, never evidence: it changes no rung, no gate and no verification input (SPEC-05 §3.10,
+§3.13a).
+
+Edge cases owned by this section:
+
+- **Group closed between assembly and the ladder call** — the bundle still describes the observed moment
+  (`TS` is the ordering authority); the ladder does not re-read the store.
+- **Empty `Release`** — an absent fact, never a mismatch: the field stays empty and the bundle is kept (§3.4).
+- **A stale convergence entry** — `CodeplaneFor` returns `ok=false` after the group closed or aged out, and
+  the sensor-born admission proceeds with its own rule context only.
+- **Restart between assembly and consumption** — the persisted `Incident.Codeplane` is the copy of record
+  (SPEC-05 §3.13a); the map is not consulted a second time.
+
+`GapRecord.Cause` gains the value `codeplane_release_mismatch` (§3.9a) — reported as a TYPES-GAP line so
+SPEC-TYPES §3.7's cause set stays the single source of truth.
+
 ### 3.10a Sensor transport routes — Route A (direct) and Route B (proxied)
 
 The in-code sensor (the trouble-sensor SDK shim, or the agent's own sensor library) writes to *its*
@@ -601,6 +672,7 @@ type CollectorParser struct {         // config + health surface for the log col
 | `internal/sentinel` | `internal/types` (Project, SentryEvent, ClientReport, Group, Record, Sig, GapRecord), `internal/ledger` (`ledgerSink`), `internal/scrub` (`scrubber`); its own `journalctl` child and file tailer for collectors (no `internal/sensors` dependency) | `event`, `group`, `gap`, `canary` records |
 | `internal/lifecycle` | `sentinel.Config` + `sentinel.Server.Handler()` | mounts the ingestion listener on :7643 with a bind preflight (SPEC-12 §2) |
 | `internal/ladder` | `Group`, `Sig`, `Evidence.CanarySeen`/`CanaryID` | `incident`, `verify`, `breaker` (never writes sentinel state) |
+| `internal/sentinel` -> `internal/ladder` | `Observation.Codeplane` (§3.9a) — the cross-plane bundle assembled on admission, `nil` when the bundle was refused; the ladder persists it as `Incident.Codeplane` (SPEC-05 §3.13a) and reads it back through `CodeplaneFor` on a sensor-born admission | `gap` cause `codeplane_release_mismatch` (mismatch path only) |
 | `internal/dashboard` | `ProjectRuntime`, `Groups()`, `Sources()`, `ReleaseCoverage` | reads only |
 
 ### 4.2 Boot and drain order
@@ -706,6 +778,11 @@ type. 023 is the one code this round adds to the SENTINEL range (001–023, SPEC
 block is validated before the listener binds, so an unhonourable routing policy is a boot refusal, never a
 runtime surprise on one class of traffic.
 
+**The codeplane bundle adds no codes.** Refusing a mismatched bundle (§3.9a) is accounted by a `gap`
+record with cause `codeplane_release_mismatch` and by nothing else: the discard is post-admission, so no
+HTTP status changes and the SENTINEL range 001-023 is untouched by this round; no ladder error is raised,
+because context loss never degrades an incident.
+
 ## 6. Edge cases
 
 1. **gzip bomb**: the decompressor is a limited reader capped at 1MB + 64KB, plus the 100:1 ratio
@@ -777,6 +854,7 @@ runtime surprise on one class of traffic.
 | `internal/sentinel/load_test.go` | 8 workers, gzip'd 4KB envelopes, one project, 60s | **target 2,000 req/s sustained, p99 ≤ 25ms, p999 ≤ 100ms, 5xx = 0, RSS growth ≤ 8MB**; measured reference: 6,199 req/s with 100-line group-commit and 1,972 req/s with fsync-per-line — the target proves group-commit is actually in use and leaves 3.1× headroom |
 | `internal/sentinel/routes_test.go` | the route matrix of §3.10a (6 rows): auto under `hub.url` set/empty × `hub.mode` hub/satellite; per-class override via longest sig-prefix; unmatched class → `default`; boot refusal on `proxy` with no hub endpoint (023) and on a prefix mapped twice; `origin.route` stamped on A and on B | every matrix row resolves to its pinned route; 100% of written records carry a non-empty `origin.route`; the refusal case is exit 13 with **0 HTTP responses served** |
 | `internal/sentinel/routespool_test.go` | Route B with the hub killed mid-batch: spool segment written, backoff retries, replay after the hub returns; torn spool segment; drop-oldest with exact footer-derived `EstLost`; duplicate replay of one idempotency key | 0 events lost while `spool_bytes ≤ budget`; every spooled event lands **exactly once**; `origin.route="B"` survives the spool round-trip |
+| `internal/sentinel/codeplane_test.go` | bundle assembly (§3.9a): a threshold crossing carries every field the sentinel owns and nothing else; a regression flags `Regressed`; a release-less group leaves `Release` empty and keeps the bundle; the convergence map rebuilds from 15m of `group` records after a restart and evicts least-recently-seen at 4096; a stale-release bundle is discarded -> `Observation.Codeplane == nil` + exactly 1 `gap` cause `codeplane_release_mismatch`; 100 stale-release admissions of one pair write 1 record; `CodeplaneFor` returns `ok=false` for a closed group | every listed field asserted non-empty on the fixture and the sensor half asserted empty; `Codeplane == nil` on the mismatch and **0 HTTP responses served** by the discard path; 0 second gap records for the memoized pair |
 
 AC-derived tests: AC-10 `e2e_test.go` (real SDK envelope shapes + legacy store + DSN auth forms);
 AC-11 `group_test.go` (counters and rate); AC-12 `release_test.go`; AC-13 `quota_test.go` (official
@@ -785,7 +863,8 @@ AC-15 `collector_*_test.go` + `genericjson_test.go`; AC-18 `e2e_test.go` two-pro
 (Go SDK on host A, `curl` on host B, both landing in the same digest, quota held while one floods);
 AC-19 `release_test.go` release-diff inputs; AC-22 `e2e_test.go` (sensor/collector/sentinel → one
 digest → one group); AC-28 `routes_test.go` (route matrix + override + refusal) + `routespool_test.go`
-(B-failure spool replay, exactly-once) + the `origin.route` assertion in `group_test.go`.
+(B-failure spool replay, exactly-once) + the `origin.route` assertion in `group_test.go`; AC-31
+`codeplane_test.go` (bundle assembly, convergence map, mismatch discard, 0 HTTP responses served).
 
 Memory: `TestMain` asserts steady RSS ≤ 80MB after 1,000,000 events (measured trivial path
 7.0 → 15.6MB) and ≤ 192MB under the load test; the binary stays inside the 8–15MB budget because

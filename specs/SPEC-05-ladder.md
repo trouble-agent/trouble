@@ -3,9 +3,9 @@
 Spec: SPEC-05
 Area prefix: TROUBLE-LADDER
 Package: internal/ladder
-Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort
+Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort, CodeplaneContext
 Local types: Ladder, Deps, Config, Observation, AdmitResult, Transition, Window, ParkReason, ParkReport, ReAdoptReport, PendingItem, PlayRunner, RuleEvaluator, LedgerWriter, IndexReader, Outlet, Notifier, Clock, RunSummary, StabilizationState, SourcePath
-ACs: AC-3, AC-4, AC-5, AC-20, AC-21, AC-22, AC-26
+ACs: AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31
 PRD: §05, §06b, §11, §12
 
 ## 1. Purpose
@@ -669,7 +669,7 @@ spike by reading two dashboards:
   signatures with counts, and the representative sample reference. Sensor-born observations leave
   it nil.
 - **Filled by convergence.** When a sensor rule fires on a host whose convergence map (SPEC-04 §3.9)
-  already links the event to an open sentinel group (e.g. a crash-loop that is filling the disk),
+  already links the event to an open sentinel group (SPEC-04 §3.9a; e.g. a crash-loop that is filling the disk),
   the ladder fills `Codeplane` from the group store before entering the agent rung: the agent's
   prompt then reads "disk full because `payment-worker` crash-looped 412× since release 4f2a1c",
   not "disk full".
@@ -883,6 +883,21 @@ re-minted here.
 - `for=-1s` and `for=25h` → `stabilize_default` + TROUBLE-LADDER-019; `for=0` admits immediately.
 - Entry rungs: `record`, `play`, `research`, `agent` each walk the expected rung sequence (AC-3), and a
   ceiling of `play` ends at outlets + escalate rather than entering research.
+
+`internal/ladder/codeplane_test.go` (AC-31)
+- Sentinel-born admission: the `Admit` call that carries `Observation.Codeplane` persists it to
+  `Incident.Codeplane` byte-identically, and a park + resume re-reads the same bytes.
+- Sensor-born admission with a convergence-map hit (SPEC-04 §3.9a): the rung's `Incident.Codeplane` holds
+  BOTH planes — `Side`, `RuleID` and `Readings` from the firing rule, `Sig`/`GroupID`/`Release`/`Regressed`/
+  `Recent` from the sentinel accessor; with no hit the field stays nil and the rung runs unchanged.
+- The bundle changes no rung: the same scripted stream with and without a bundle produces the same
+  `LadderState` sequence and the same record kinds (context, never evidence — §3.10 is untouched).
+- A bundle whose `Release` disagrees with the running release never arrives: the admission is processed with
+  `Codeplane == nil` and the run holds exactly the one `gap` record the sentinel wrote (SPEC-04 §3.9a) and
+  **0 ladder-side gap records** (ownership assertion).
+- Copy-out join: the `Subject.Context["codeplane"]` handed to the `ResearchPort` fake is byte-equal to
+  `Incident.Codeplane` (SPEC-07 §3.10a), and the issue body rendered by the `Outlet` fake contains the same
+  bytes (SPEC-09 §3.13a).
 
 Whole package: `go test -race -count=1 ./internal/ladder/...` ≤ 60s, zero skipped tests, and the
 `Evidence` fixture file shared with SPEC-TYPES' JSON round-trip test so the tuple cannot drift.

@@ -3,9 +3,9 @@
 Spec: SPEC-09
 Area prefix: TROUBLE-ISSUES
 Package: internal/issues
-Consumed types: IssueDriver, IssueRef, EnsureBySigRequest, EnsureBySigResponse, DriverHealth, SpoolEntry, IssueDeskConfig, IssueCaps, IssueDriverConfig, IssueCapState, IssueAttempt, Incident, Group, Evidence, GapRecord, Record, RecordKind, Severity, Duration, Prefix, Origin, Actor, Sig, LadderState, Rung, ScrubResult, ErrorClass
+Consumed types: IssueDriver, IssueRef, EnsureBySigRequest, EnsureBySigResponse, DriverHealth, SpoolEntry, IssueDeskConfig, IssueCaps, IssueDriverConfig, IssueCapState, IssueAttempt, CodeplaneContext, Incident, Group, Evidence, GapRecord, Record, RecordKind, Severity, Duration, Prefix, Origin, Actor, Sig, LadderState, Rung, ScrubResult, ErrorClass
 Local types: ghIssueWire, ghCommentWire, ghSearchWire, ghRateLimitWire, dbDocument, dbCommentDoc, anchorEntry, attemptBudget, spoolQueue
-ACs: AC-8, AC-22
+ACs: AC-8, AC-22, AC-31
 PRD: §07, §11
 
 ## 1. Purpose
@@ -741,11 +741,45 @@ type IssueAttempt struct {
 `GapRecord.Cause` gains the value `driver_down` (§3.3) — reported as a TYPES-GAP line so SPEC-TYPES §3.7's
 cause set stays the single source of truth.
 
+### 3.13a The codeplane bundle on the issue body (v0.1.1a)
+
+An issue that a human opens must carry the same cross-plane context the agent and the lab saw: a stack trace
+with its release and its recent-signature counts is a work item, a stack trace alone is a puzzle. SPEC-05
+§3.13a owns the bundle; this section owns the rendering obligation.
+
+- **Position.** When `Incident.Codeplane` is non-nil the body of §3.9.3 carries one extra section, placed
+  between the field table and `**Evidence bundle (scrubbed)**`, in exactly this shape:
+
+````markdown
+**Codeplane bundle**
+
+```json
+{"side":"sentinel","sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","grp":"grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH","project":"7","release":"payment-api@2.4.1","regressed":true,"recent":[{"sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","count":412,"first_ts":"2026-09-16T09:14:03.221Z","last_ts":"2026-09-16T09:15:41.009Z"}],"ts":"2026-09-16T09:15:41.009Z"}
+```
+````
+
+- **Verbatim.** The bytes inside the fence are `json.Marshal(*inc.Codeplane)` (SPEC-TYPES §3.15.12) unchanged:
+  no prose re-rendering, no field renaming, no re-indenting, no dropping of empty fields. A block a reader
+  cannot diff against the incident record is not the same evidence, so byte-equality is the test (§7).
+- **Absent bundle.** `Codeplane == nil` → no heading, no empty fence, and **zero other byte deltas**: for a
+  pure-system incident the body stays byte-identical to the §3.9.3 golden, which is what keeps that golden
+  test meaningful and every already-published body stable.
+- **Never the anchor.** §3.2's anchor rule and the two marker lines of §3.9.3 (`<!-- trouble:sig=… -->` and
+  `<!-- trouble:inc=… driver=… ver=1 -->`) remain the identity of the issue: the bundle is additive context,
+  never the thing a read-back search matches on, and never a substitute for the incident link. A body that
+  carries a bundle and not both markers is a rendering bug, and the desk never sends one.
+- **Truncation order.** §3.9.3's order gains one step, markers always last: evidence bundle → codeplane
+  block → markers. A body over `body_max_bytes` (60 000) loses the fence before it loses a marker, and
+  `payload.truncated=true` is set as today.
+- **Scrubbing.** The marshalled bundle is assembled from the already-scrubbed incident and the whole body is
+  re-scrubbed as one blob before the call (§3.9.3 and the cross-spec contract table of §4): no bundle field
+  is exempt. `redactions applied` counts that pass exactly as it does today.
+
 ## 4. Wiring
 
 | Producer | Consumes | Emits kinds |
 |---|---|---|
-| internal/issues | IssueDeskConfig, Incident, Evidence, ScrubResult, SpoolEntry | `issue`, `gap` |
+| internal/issues | IssueDeskConfig, Incident, CodeplaneContext, Evidence, ScrubResult, SpoolEntry | `issue`, `gap` |
 
 Data flow (one incident, default config):
 
@@ -759,6 +793,7 @@ SPEC-05 ladder reaches rung=outlets, state=verifying
   → any healthcheck failure → ledger(issue healthcheck) + ledger(gap cause=driver_down); INCIDENT CONTINUES
   → SPEC-08 files a row with the same sig → Desk.Link(task_id) → comment + ledger(issue op=link)
   → SPEC-07 returns a brief for the sig  → Desk.Link(research_id) → comment + ledger(issue op=link)
+  → Incident.Codeplane non-nil           → body renders the bundle block verbatim (§3.13a) → 0 extra calls
   → quiet-close sweep (5m): resolved + quiet 24h + evidence passed + no open row/brief + driver ok
                                           → driver.Close → comment + ledger(issue op=close)
 ```
@@ -780,6 +815,7 @@ Cross-spec contracts this package depends on:
 | verification evidence tuple | SPEC-05, SPEC-TYPES §3.7 | pre-condition for quiet-close (`result=passed`) |
 | `BoardRow.Sig`, `BoardRow.IssueRefs[]`, board row open/closed state | SPEC-08 | linkage + the "no open row" close gate |
 | `ResearchOutcome` for a sig | SPEC-07 | linkage + the "no open brief" close gate |
+| `Incident.Codeplane`, the persisted cross-plane bundle | SPEC-05 §3.13a, SPEC-TYPES §3.15.12 | body rendering only (§3.13a); never re-derived here, never a substitute for the §3.2 anchor |
 | `GapRecord`, gap emission rights | SPEC-TYPES §3.7, SPEC-INDEX §3.4 | outage and drop accounting |
 | token/key files 0600, "never in argv" | SPEC-12 §3.6, SPEC-02 | config explain + boot validation |
 
@@ -803,6 +839,10 @@ All ten codes of the area range are used; every one is in SPEC-TYPES §5 with th
 Every code raised to the ladder is mirrored into `Record.payload.error_code` (SPEC-INDEX §5 rule 3), so the
 audit trail needs no log file. `policy_refused` is not used by this area: the desk's refusals are policy
 decisions expressed as caps (`TROUBLE-ISSUES-004`), not polkit/do-not-touch refusals.
+
+**The codeplane bundle adds no codes.** Rendering it is part of the existing `EnsureBySig`/`Comment` bodies
+and raises none of `TROUBLE-ISSUES-001..010` on its own: a nil bundle renders nothing and writes no record,
+and a bundle present or absent changes no driver call, no cap and no spool decision.
 
 ## 6. Edge cases
 
@@ -858,6 +898,7 @@ decisions expressed as caps (`TROUBLE-ISSUES-004`), not polkit/do-not-touch refu
 | `internal/issues/link_test.go` | AC-22 end to end: one bug through sensor + sentinel + collector, with a fake SPEC-08 row writer and a fake SPEC-07 brief → 1 issue, `TaskID` and `ResearchID` set, cross-ref comments, 0 duplicates; board row `IssueRefs[]` filled both directions | 1 incident, 1 group, 1 issue, 1 board row, 0 duplicates across 500 synthetic recurrences |
 | `internal/issues/ledger_payload_test.go` | every §3.3 payload schema round-trips against its golden JSON fixture; every emitted code is in `TROUBLE-ISSUES-001..010`; `retryable` present on every coded record; `seq` monotonic via the ledger test double | 100 % schema matches; 0 codes outside the range; `actor.version`/`git_sha` present on every record |
 | `internal/issues/ac8_test.go` (AC-8) | file → comment on recurrence → close after quiet, against a fake driver, asserting the ladder-visible `IssueRef` at each step | issue filed within 1 `op_deadline`; recurrence folded ≤2 s p95 on a local fake; close after exactly 24 h of quiet |
+| `internal/issues/codeplane_test.go` (AC-31) | the body golden **with** a bundle: the block byte-exact and in the §3.13a position (after the field table, before the evidence bundle); the body golden **without** a bundle: byte-identical to the §3.9.3 template (0 deltas); a fixture missing either marker line is rejected; truncation at 60 000 drops the fence and keeps both markers; `redactions applied` unchanged by the bundle | both goldens byte-identical; 0 bodies emitted without the two marker lines; truncation removes the fence bytes only |
 
 Conformance battery detail (the 14 cases, because this battery is the contract's executable form): the same
 table is run against `github` and `duckbrain` with a fake transport, and the fake counts calls — a case that

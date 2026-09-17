@@ -3,9 +3,9 @@
 Spec: SPEC-07
 Area prefix: TROUBLE-RESEARCH
 Package: internal/research
-Consumed types: Record, RecordKind, Sig, SigSource, Origin, Actor, Prefix, Incident, GapRecord, Duration, ClassSlug, DiscoverRequest, DiscoverResponse, SubmitRequest, SubmitResponse, QueueStatus, ResearchOutcome, PlayTask, SentryEvent, Evidence, SpawnRequest, IssueRef, SkillCandidate, ResearchDriver
+Consumed types: Record, RecordKind, Sig, SigSource, Origin, Actor, Prefix, Incident, GapRecord, Duration, ClassSlug, DiscoverRequest, DiscoverResponse, SubmitRequest, SubmitResponse, QueueStatus, ResearchOutcome, PlayTask, SentryEvent, Evidence, SpawnRequest, IssueRef, SkillCandidate, ResearchDriver, CodeplaneContext
 Local types: Deps, Service (package-owned; §3.0), driverOffByOne, driverNone, driverWebhook, table, slugEntry, taxonomyRule, subjectFacts, corpus, corpusHit, labHealth, researchCost, pollState, wireDiscoverRequest, wireSubmitRequest, wireQueueStatus, wireLabError, wireHealth, wireStats
-ACs: AC-17, AC-20
+ACs: AC-3, AC-17, AC-20, AC-31
 PRD: §05, §11, §12
 
 ## 1. Purpose
@@ -482,6 +482,32 @@ the worker's `submitted` map, rebuilt at boot from the ledger.
    in the cache, so the rung re-probes the **class** with D1 every `duplicate_recheck_interval` (3m)
    inside the same poll budget instead of polling an id it does not have.
 
+### 3.10a The codeplane bundle on the research request (v0.1.1a)
+
+The request that reaches the lab carries the same cross-plane context the agent sees, so a lab answer is
+written against the code plane that produced the failure instead of this rung's summary of it. SPEC-05
+§3.13a owns the bundle; this section owns the wire obligation, and it is one obligation: **verbatim**.
+
+- **Where it lands.** Inside the submit body of §2.3 B, at `context.codeplane` — that is, inside the
+  `Subject.Context` map (SPEC-TYPES §3.15.9). The exactly-four-top-level-fields rule of §2.3 B is unchanged,
+  and `fingerprint`, `stack`, `release` and `unit` stay the keys §3.3 defines.
+- **Verbatim, never re-derived.** `context.codeplane` is the marshalled `Incident.Codeplane`, byte-equal to
+  `json.Marshal` of the persisted bundle (SPEC-TYPES §3.15.12): no field renamed, dropped, defaulted,
+  re-sorted or recomputed from the group store, and never merged with the evidence `bundle` argument of
+  §3.7. Re-derivation here would make the lab's answer stand on facts the incident record does not contain.
+- **Single source.** When `inc.Codeplane` is non-nil it replaces any caller-supplied
+  `Subject.Context["codeplane"]`: the persisted bundle is the one the ladder carries, and a second copy is a
+  second truth.
+- **Absent bundle.** `inc.Codeplane == nil` (a pure-system incident, or one whose bundle the sentinel refused
+  at assembly, SPEC-04 §3.9a) → the `codeplane` key is **absent** from the object. No placeholder, no empty
+  object, no explicit `null`: the lab must be able to tell "system-only incident" from "code-plane incident
+  with no code-plane facts".
+- **Scrubbing.** The embedded object is part of the body and passes the §4.4 egress scrub exactly as the rest
+  of the request does — same targets, whole body, no exempt field. The bundle's strings are assembled from
+  already-scrubbed events, which is a convenience, not the control.
+- **Discover carries none.** D1/D2 (§3.2) send the three match fields of §2.3 A and no bundle: the cache
+  lookup is a class-level probe, and the bundle is rung context.
+
 ## 4. Wiring
 
 ### 4.1 Connections
@@ -489,6 +515,7 @@ the worker's `submitted` map, rebuilt at boot from the ledger.
 | Direction | Party | Contract |
 |---|---|---|
 | consumed by | `internal/ladder` (SPEC-05) | `Service.Run`, `Resume`, `Park`; consumes `ResearchOutcome` + the two digests |
+| carries | `Incident.Codeplane` (SPEC-TYPES §3.15.12) | the §3.10a obligation: the persisted bundle is embedded at `context.codeplane` on submit, byte-for-byte; `nil` → the key is absent from the body |
 | calls | `internal/ledger` (SPEC-01) · `internal/scrub` (SPEC-02) · `internal/types` | `Deps.Append` (`research` + `gap` only) · `Deps.Scrub` on every outbound body and inbound brief · `Sig`, `ClassSlug`, `DiscoverRequest`, `SubmitRequest`, `QueueStatus`, `ResearchOutcome` |
 | read by | `internal/flow` (SPEC-08) · `internal/issues` (SPEC-09) · `internal/skills` (SPEC-11) · `internal/dashboard` (SPEC-10) | the `res_` id via `SpawnRequest.ResearchBriefID`, `IssueRef.ResearchID`, `SkillCandidate.ResearchID`, `ForemanBrief.ResearchBrief`; outcome values via `Service.Outcomes(sig)` (`Promoter.Draft` takes `[]ResearchOutcome`) |
 | surfaced by | `internal/dashboard` (SPEC-10) | reads `research` records from the ledger (no new shared struct) |
@@ -547,6 +574,11 @@ before they reach the ledger or the prompt, and `Record.redactions` counts both 
 
 Every code above appears in `payload.error_code` of the `research` record it describes (SPEC-INDEX §5 rule
 3). The ladder's own view of a degraded research rung is its own record and code (SPEC-05).
+
+**The codeplane bundle adds no codes and no gap causes.** A bundle that is absent — because the incident
+is system-only, or because the sentinel refused it at assembly (SPEC-04 §3.9a) — changes nothing below: the
+submit proceeds without the key, the codes 001-010 remain the only failures a request can produce, and the
+request budget of §3.8 is untouched by §3.10a.
 
 ### 5.1 Timeouts and the ladder path
 
@@ -613,6 +645,7 @@ SPEC-03 and SPEC-05 (SPEC-INDEX §3.4).
 | `internal/research/prompt_test.go` | Golden prompts **with** a brief (brief text present, `brief_digest` matching, `resolve_outright` surfaced) and **without** (exactly the one-line header plus the "no research brief available" sentence); the brief never escapes its fence; a brief naming an unregistered module yields text only; `prompt_digest == Digest(prompt)` on both fixtures; prompt ≤32KB. |
 | `internal/research/degrade_matrix_test.go` | The 7-row matrix (driver `none`, unreachable, 400, 409, 503, poll timeout, brief invalid): each row asserts state, reason, `error_code`, gap presence and that the ladder proceeds. Plus: 0 HTTP requests with driver `none`; ≤54 requests and ≤62KB in / ≤40KB out for the worst-case rung; the daily counter reads 200 after 200 submits across a simulated restart; the submit fuse opens after 3 consecutive 400s while discover keeps working. |
 | `internal/research/adapter_test.go` | `Request`/`Poll` driven through a stub ladder adapter: a supplied `sub["slug"]` is used verbatim (0 derivation calls) and an absent one derives; `Outcomes(sig)` returns records newest-first after a simulated boot replay; with `apply_brief_as_play=true` and a registry-valid answer the brief carries `play_draft` and `resolve_outright:true`, and with a module outside the registry the draft is dropped while the brief text survives. |
+| `internal/research/codeplane_test.go` (AC-31) | `context.codeplane` byte-equality against `json.Marshal(*inc.Codeplane)` on the §3.3 fixture; `inc.Codeplane == nil` → the key is absent, asserted by key membership on the decoded object AND on the golden wire bytes; a caller-supplied `context.codeplane` is replaced by the persisted bundle; the embedded object survives the §4.4 scrub round-trip with `Record.redactions` counted; the D1/D2 bodies carry no `codeplane` key | byte-equal golden wire body; presence asserted by key membership, never by an empty object; 1 submit request per case, `httptest` only |
 | `internal/research/ac_test.go` | `TestAC17_UnknownClassForwardsAndAgentConsumesBrief` — an unknown class with `off-by-one` enabled produces one submit, one brief, and an agent prompt whose digest is recorded. `TestAC20_LinksAndUnreachableDegrade` — the `res_` id appears on the incident, the `research` record, the `agent_run` payload and the spawn/issue/skill stub records; with the lab forced unreachable the ladder advances while exactly one `gap` record (`research_lab_unreachable`) lands in the ledger. |
 
 Gates: ≤54 requests and ≤12m05s per rung; 0 HTTP requests when the driver is `none`; ≥1 `gap` record for

@@ -5,7 +5,7 @@ Area prefix: TROUBLE-DASHBOARD
 Package: internal/dashboard
 Consumed types: HealthResponse, SourceLiveness, RuntimeWatermarks, Token, Scope, AutonomyGates, Incident, Group, IssueRef, Breaker, Evidence, Record, Actor, RecordKind, SensorHealth, Rule, GapRecord, Promotion, SpawnRequest, ResearchOutcome, SkillCandidate
 Local types: identityProvider, principal, scopeSet, route, dashError, csrfValue, tokenFile, pageData, incidentRow, groupRow, ruleRow, breakerRow, timelineEntry, budgetPanel, healthStrip, stallState
-ACs: AC-16, AC-19, AC-30
+ACs: AC-16, AC-19, AC-26, AC-30
 PRD: §04c, §11
 
 ## 1. Purpose

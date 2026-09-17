@@ -61,7 +61,7 @@ Area prefix: (none — this file allocates error-code AREAS, it does not define 
 Package: (none — repository meta-document)
 Consumed types: ErrorCode, Record, RecordKind, Prefix, Sig (ownership map only)
 Local types: — 
-ACs: AC-1..AC-30 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
+ACs: AC-1..AC-31 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
 PRD: §10, §11, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p>This file is the binding index for the trouble spec suite. It answers three questions only:</p>
@@ -126,7 +126,7 @@ deferred table), <code>deferred</code> (specified at interface level only; see �
 <td>SPEC-01</td>
 <td>ledger: record schema, sig format, ids, durability</td>
 <td>§03, §04a, §06b, §11</td>
-<td>AC-6, AC-22, AC-26, AC-30</td>
+<td>AC-6, AC-22, AC-24, AC-26, AC-30</td>
 <td>frozen</td>
 </tr>
 <tr>
@@ -147,14 +147,14 @@ deferred table), <code>deferred</code> (specified at interface level only; see �
 <td>SPEC-04</td>
 <td>sentinel: ingestion contract, grouping, releases, collectors, sensor routes</td>
 <td>§04b, §10, §11</td>
-<td>AC-10..AC-15, AC-18, AC-19, AC-22, AC-28</td>
+<td>AC-10..AC-15, AC-18, AC-19, AC-22, AC-28, AC-31</td>
 <td>frozen</td>
 </tr>
 <tr>
 <td>SPEC-05</td>
 <td>ladder: state machine, verification, autonomy gates</td>
 <td>§05, §06b, §11, §12</td>
-<td>AC-3, AC-4, AC-5, AC-20, AC-21, AC-22, AC-26</td>
+<td>AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31</td>
 <td>frozen</td>
 </tr>
 <tr>
@@ -168,42 +168,42 @@ deferred table), <code>deferred</code> (specified at interface level only; see �
 <td>SPEC-07</td>
 <td>research: Off-by-One contract, class-slug derivation</td>
 <td>§05, §12</td>
-<td>AC-17, AC-20</td>
+<td>AC-3, AC-17, AC-20, AC-31</td>
 <td>frozen</td>
 </tr>
 <tr>
 <td>SPEC-08</td>
 <td>flow: board-jsonl row, task-router, hot-fix spawn</td>
 <td>§08, §11, §12</td>
-<td>AC-9, AC-19, AC-21, AC-26</td>
+<td>AC-9, AC-19, AC-21, AC-22, AC-26</td>
 <td>frozen</td>
 </tr>
 <tr>
 <td>SPEC-09</td>
 <td>issues: driver contract, github + duckbrain</td>
 <td>§07, §11</td>
-<td>AC-8, AC-22</td>
+<td>AC-8, AC-22, AC-31</td>
 <td>frozen</td>
 </tr>
 <tr>
 <td>SPEC-10</td>
 <td>dashboard: routes, auth, scopes, CSRF, live updates, paging</td>
 <td>§04c, §11</td>
-<td>AC-16, AC-19, AC-30</td>
+<td>AC-16, AC-19, AC-26, AC-30</td>
 <td>frozen</td>
 </tr>
 <tr>
 <td>SPEC-11</td>
 <td>skills: artifact schema, local promote loop, pull distribution</td>
 <td>§06c, §12</td>
-<td>AC-24 (partial), AC-26</td>
+<td>AC-24 (partial), AC-25, AC-26</td>
 <td>partial</td>
 </tr>
 <tr>
 <td>SPEC-12</td>
 <td>lifecycle: unit, watchdog, upgrades, config, topology, server profiles</td>
 <td>§09, §11, §12</td>
-<td>AC-14, AC-18, AC-25 (partial), AC-26, AC-28, AC-29</td>
+<td>AC-14, AC-18, AC-25 (partial), AC-26, AC-27, AC-28, AC-29</td>
 <td>partial</td>
 </tr>
 <tr>
@@ -411,7 +411,7 @@ item ships — see §6.1) · <strong>D</strong> = deferred to v1.0 (AC text reta
 <tr>
 <td>AC-31</td>
 <td>AC-31 Cross-plane context: a sentinel <code>Admit</code> populates <code>Observation.Codeplane</code> (sig, group, release, regression, top-5 recent) and the bundle lands on the incident record; a sensor <code>Admit</code> whose convergence map links an open sentinel group arrives at the agent rung with BOTH planes' context; the research request and the issue body carry the bundle verbatim; a bundle whose release disagrees with the running release is discarded with a gap record, never shown as fact.</td>
-<td>SPEC-05 (§3.13a), SPEC-04 (§3.9), SPEC-07, SPEC-09</td>
+<td>SPEC-05 §3.13a, SPEC-04 §3.9a, SPEC-07 §3.10a, SPEC-09 §3.13a</td>
 <td>B</td>
 </tr>
 </tbody>
@@ -788,9 +788,9 @@ resolved config, the ledger writer and the spool, and nothing consumes it in rev
 <td>Resolved in SPEC-10 §2: 2s polling of htmx partials is the v0.1 mechanism; SSE is named as the reserved v1.0 route but is not specified as in-scope.</td>
 </tr>
 <tr>
-<td>AC-28, AC-29, AC-30 (added in v0.1.1)</td>
-<td>none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile and ledger page tokens are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are <em>different</em> artifacts from the <code>light-hub</code> server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes)</td>
-<td>Status <code>B</code> for all three. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process.</td>
+<td>AC-28, AC-29, AC-30, AC-31 (added in v0.1.1)</td>
+<td>none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile, ledger page tokens and the cross-plane codeplane bundle are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are <em>different</em> artifacts from the <code>light-hub</code> server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes)</td>
+<td>Status <code>B</code> for all four. AC-31 carries the same reasoning as AC-28..AC-30: the bundle is a field on records the shipped <code>Admit</code>, research and issue paths already carry (<code>Observation.Codeplane</code> → <code>Incident.Codeplane</code> → the research request payload and the issue body), it adds no deferred process and no deferred artifact, and refusing a mismatched bundle is a <code>gap</code> record inside the shipped sentinel. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process.</td>
 </tr>
 </tbody>
 </table>
@@ -822,7 +822,13 @@ TROUBLE-LIFECYCLE-017 and marks verification <code>invalid</code> for the affect
    type definition in SPEC-TYPES.md §3. No orphans. No type defined twice with different shapes
    (enforced by "defined exactly once in SPEC-TYPES.md").</li>
 <li><strong>AC coverage both ways</strong> — every AC in §3.2 maps to ≥1 spec section; every spec section is either
-   covered by an AC or explicitly tagged <code>design constraint</code> in its heading text.</li>
+   covered by an AC or explicitly tagged <code>design constraint</code> in its heading text. The AC universe checked
+   here is derived from the matrix itself: adding <code>AC-nn</code> to §3.2 needs no edit to the tool, and a hole in
+   the sequence (a missing <code>AC-nn</code> below the highest row) is a hard failure.
+2b. <strong>Matrix → metadata</strong> — for every AC row, every spec named in that row's spec column MUST declare that
+   AC in its own <code>ACs:</code> metadata line, failing as
+   <code>AC-31: matrix assigns SPEC-09 but SPEC-09 does not declare it</code>. This is the direction that let the
+   AC-31 row name four owning specs while none of them declared it and the loop still printed PASS.</li>
 <li><strong>Interfaces compile by inspection</strong> — every Go signature in a spec's §2 matches the types and method
    sets in SPEC-TYPES; every HTTP route in a spec's §2 appears in that area's route table exactly once.</li>
 <li><strong>Error codes</strong> — every <code>TROUBLE-&lt;AREA&gt;-&lt;NNN&gt;</code> in every spec exists in SPEC-TYPES §5, is unique, and
@@ -848,8 +854,9 @@ git grep -nE &#39;TBD|Phase 2|TODO|consider&#39; -- specs/   # step 6 (manual re
   whenever a spec's AC coverage changes.</li>
 <li>Every spec file is a new node under <code>~/trouble/specs/</code>; <code>specs/tools/selfcheck.py</code> is the
   only executable artifact in the suite (stdlib-only Python, no deps) and is the CI entry point for the
-  consistency loop. Since v0.1.1 it also validates <code>SPEC-13</code> (file set 01..13) and the AC range
-  <code>AC-1..AC-30</code>, which is the mechanical half of keeping this index honest.</li>
+  consistency loop. Since v0.1.1 it also validates <code>SPEC-13</code> (file set 01..13) and the AC range —
+  <code>AC-1..AC-31</code> as of v0.1.1a, derived from §3.2 rather than hardcoded — plus the matrix→metadata
+  declaration check of §7 step 2b, which is the mechanical half of keeping this index honest.</li>
 <li>No fleet repository is modified: trouble is greenfield at <code>~/trouble</code>.</li>
 </ul>
 </section><section id="spec-01-ledger"><div class="filetag">SPEC-01-ledger.md</div>
@@ -859,7 +866,7 @@ Area prefix: TROUBLE-LEDGER
 Package: <code>internal/ledger</code>
 Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
 Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
-ACs: AC-6, AC-22, AC-26, AC-30
+ACs: AC-6, AC-22, AC-24, AC-26, AC-30
 PRD: §03, §04a, §06b, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/ledger</code> is the single durable store of trouble: one append-only JSONL ledger per host, written by
@@ -4825,9 +4832,9 @@ printed reason otherwise.</p>
 <p>Spec: SPEC-04
 Area prefix: TROUBLE-SENTINEL
 Package: internal/sentinel
-Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser, RouteMode, RouteDecision, RouteConfig
+Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser, RouteMode, RouteDecision, RouteConfig, CodeplaneContext
 Local types: dsn, envelopeHeader, envelopeItem, itemPolicy, authMaterial, quotaWindow, ledgerSink, scrubber, lineSource, logLine, assembleState, tailState, releaseOrder, routeTable, routeMatch
-ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22, AC-28
+ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22, AC-28, AC-31
 PRD: §04b, §10, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/sentinel</code> is trouble's code plane: an embedded, Sentry-SDK-compatible ingestion service
@@ -4952,6 +4959,7 @@ records). <code>GET /health.json</code> lives on the dashboard listener (SPEC-10
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">ObserveRecord</span><span class="p">(</span><span class="nx">rec</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">Record</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="w">  </span><span class="c1">// hub-side group index update for forwarded records</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">Groups</span><span class="p">()</span><span class="w"> </span><span class="p">[]</span><span class="nx">types</span><span class="p">.</span><span class="nx">Group</span><span class="w">                 </span><span class="c1">// read view for SPEC-10; never mutates</span>
 <span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">SigOf</span><span class="p">(</span><span class="nx">ev</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">SentryEvent</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">Sig</span><span class="p">,</span><span class="w"> </span><span class="kt">error</span><span class="p">)</span>
+<span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">CodeplaneFor</span><span class="p">(</span><span class="nx">sig</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">Sig</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">CodeplaneContext</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="p">)</span><span class="w"> </span><span class="c1">// cross-plane bundle for an open group (§3.9a; SPEC-05 §3.13a)</span>
 
 <span class="kd">type</span><span class="w"> </span><span class="nx">ledgerSink</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">Append</span><span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">Record</span><span class="p">)</span><span class="w"> </span><span class="kt">error</span><span class="p">;</span><span class="w"> </span><span class="nx">LastSeq</span><span class="p">()</span><span class="w"> </span><span class="kt">uint64</span><span class="w"> </span><span class="p">}</span><span class="w">            </span><span class="c1">// *ledger.Writer</span>
 <span class="kd">type</span><span class="w"> </span><span class="nx">scrubber</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="p">{</span>
@@ -5758,6 +5766,103 @@ is the default for projects whose errors are the point, and it costs disk.</p>
 with the same <code>retry_after</code> value, which is what turns a flood into an orderly slowdown instead of a
 429 cliff. <code>RateLimitDecision.Header</code> carries the exact string emitted, so the ledger and the
 dashboard can show what the server told the SDK.</p>
+<h3 id="39a-the-codeplane-bundle-on-admission-and-the-convergence-map-v011a">3.9a The codeplane bundle on admission, and the convergence map (v0.1.1a)</h3>
+<p><code>internal/sentinel</code> is the only subsystem that knows what the <em>code</em> plane was doing at the moment an
+incident opens. The <code>Admit</code> call therefore carries that knowledge on the <code>Observation</code> itself, and the same
+map lets a sensor-born admission inherit it (AC-31). SPEC-05 §3.13a owns what the ladder does with the
+bundle; this section owns how it is assembled and when it is refused.</p>
+<p><strong>The convergence map (sentinel-owned, read-only).</strong> The sentinel keeps <code>convergence map[Sig]GroupID</code> — the
+open groups whose subject a sensor rule can also observe (a unit, a path, a container, a project). It is
+derived from the group store, never from config, and it is rebuilt at boot from the last 15 minutes of
+<code>group</code> records (<code>convergence_window</code>, a constant in v0.1: the map is a correlation aid, not a store). It
+holds at most 4096 entries (<code>convergence_max_entries</code>) and evicts least-recently-seen first; an entry leaves
+when its group closes or its last event falls out of the window. One accessor is published:</p>
+<div class="codehilite"><pre><span></span><code><span class="kd">func</span><span class="w"> </span><span class="p">(</span><span class="nx">s</span><span class="w"> </span><span class="o">*</span><span class="nx">Server</span><span class="p">)</span><span class="w"> </span><span class="nx">CodeplaneFor</span><span class="p">(</span><span class="nx">sig</span><span class="w"> </span><span class="nx">types</span><span class="p">.</span><span class="nx">Sig</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">CodeplaneContext</span><span class="p">,</span><span class="w"> </span><span class="kt">bool</span><span class="p">)</span><span class="w"> </span><span class="c1">// open-group facts, or ok=false</span>
+</code></pre></div>
+
+<p>The ladder calls it on a sensor-born admission (SPEC-05 §3.13a) to fill the sentinel half of that bundle.
+The sensor plane never reads the group store directly and never writes the sentinel half of a bundle.</p>
+<p><strong>What the sentinel contributes on <code>Admit</code>.</strong> Every admission from this package fills <code>Observation.Codeplane</code>
+(SPEC-TYPES §3.15.12; the ladder persists it as <code>Incident.Codeplane</code>) with the facts the sentinel is the
+authority for, and nothing it is not:</p>
+<table>
+<thead>
+<tr>
+<th>Bundle field</th>
+<th>Source in this spec</th>
+<th>Populated when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Side</code></td>
+<td>constant <code>"sentinel"</code></td>
+<td>always</td>
+</tr>
+<tr>
+<td><code>Sig</code>, <code>GroupID</code>, <code>Project</code></td>
+<td>the group that crossed the threshold (§3.3)</td>
+<td>always on a sentinel admission</td>
+</tr>
+<tr>
+<td><code>Release</code></td>
+<td>the group's last-seen release (§3.4, <code>Group.ReleaseRange[1]</code>)</td>
+<td>a release has been seen for the group</td>
+</tr>
+<tr>
+<td><code>Regressed</code></td>
+<td>the open regression flag for the release pair (§3.4)</td>
+<td>a regression is open</td>
+</tr>
+<tr>
+<td><code>Recent</code></td>
+<td>the group's signature counters, top-5 by count</td>
+<td>always on a sentinel admission</td>
+</tr>
+<tr>
+<td><code>Sample</code></td>
+<td>the <code>rec_id</code> of the representative event already attached to the group</td>
+<td>the group has a sample</td>
+</tr>
+<tr>
+<td><code>TS</code></td>
+<td>assembly time, RFC3339 ms UTC</td>
+<td>always</td>
+</tr>
+</tbody>
+</table>
+<p>The sensor half (<code>Side="sensor"</code>, <code>RuleID</code>, <code>Readings</code>) is never written here: the two planes write disjoint
+fields, so a bundle is never a merge decision.</p>
+<p><strong>The release-mismatch rule (normative).</strong> Assembly compares the bundle's <code>Release</code> with the project's
+<em>running release</em> — the newest release seen for that project under §3.4's <code>releaseOrder</code>, i.e. the release
+the sentinel believes is deployed. Both values non-empty and unequal (older or newer) means the group
+describes code that is not the code running, so the bundle is <strong>discarded at assembly</strong>:</p>
+<ol>
+<li><code>Observation.Codeplane</code> is left <code>nil</code>. The mismatched bundle never reaches the ladder, and therefore
+   reaches neither the agent rung nor the research request (SPEC-07 §3.10a) nor the issue body
+   (SPEC-09 §3.13a).</li>
+<li>Exactly one <code>gap</code> record is written: <code>cause="codeplane_release_mismatch"</code>, <code>sensor="sentinel"</code>,
+   <code>scope=&lt;sig&gt;</code>, <code>est_lost=0</code>, <code>payload {sig, grp, bundle_release, running_release}</code>. The pair
+   <code>(sig, bundle_release)</code> is memoized for <code>convergence_window</code>, so a burst of stale-release admissions
+   writes one record rather than one per event.</li>
+<li>The admission proceeds unchanged: the ingestion status was committed by §2.1 before assembly, the
+   discard path serves <strong>0 HTTP responses of its own</strong>, and the incident opens exactly as it would with no
+   bundle at all.</li>
+</ol>
+<p>A bundle is context, never evidence: it changes no rung, no gate and no verification input (SPEC-05 §3.10,
+§3.13a).</p>
+<p>Edge cases owned by this section:</p>
+<ul>
+<li><strong>Group closed between assembly and the ladder call</strong> — the bundle still describes the observed moment
+  (<code>TS</code> is the ordering authority); the ladder does not re-read the store.</li>
+<li><strong>Empty <code>Release</code></strong> — an absent fact, never a mismatch: the field stays empty and the bundle is kept (§3.4).</li>
+<li><strong>A stale convergence entry</strong> — <code>CodeplaneFor</code> returns <code>ok=false</code> after the group closed or aged out, and
+  the sensor-born admission proceeds with its own rule context only.</li>
+<li><strong>Restart between assembly and consumption</strong> — the persisted <code>Incident.Codeplane</code> is the copy of record
+  (SPEC-05 §3.13a); the map is not consulted a second time.</li>
+</ul>
+<p><code>GapRecord.Cause</code> gains the value <code>codeplane_release_mismatch</code> (§3.9a) — reported as a TYPES-GAP line so
+SPEC-TYPES §3.7's cause set stays the single source of truth.</p>
 <h3 id="310a-sensor-transport-routes-route-a-direct-and-route-b-proxied">3.10a Sensor transport routes — Route A (direct) and Route B (proxied)</h3>
 <p>The in-code sensor (the trouble-sensor SDK shim, or the agent's own sensor library) writes to <em>its</em>
 trouble agent, and that agent decides how the event reaches the system. Two routes exist, both
@@ -5954,6 +6059,11 @@ route would reintroduce the drift this section exists to remove.</p>
 <td><code>internal/ladder</code></td>
 <td><code>Group</code>, <code>Sig</code>, <code>Evidence.CanarySeen</code>/<code>CanaryID</code></td>
 <td><code>incident</code>, <code>verify</code>, <code>breaker</code> (never writes sentinel state)</td>
+</tr>
+<tr>
+<td><code>internal/sentinel</code> -&gt; <code>internal/ladder</code></td>
+<td><code>Observation.Codeplane</code> (§3.9a) — the cross-plane bundle assembled on admission, <code>nil</code> when the bundle was refused; the ladder persists it as <code>Incident.Codeplane</code> (SPEC-05 §3.13a) and reads it back through <code>CodeplaneFor</code> on a sensor-born admission</td>
+<td><code>gap</code> cause <code>codeplane_release_mismatch</code> (mismatch path only)</td>
 </tr>
 <tr>
 <td><code>internal/dashboard</code></td>
@@ -6204,6 +6314,10 @@ plus <code>overloaded</code> for the per-IP/concurrency paths — a comment upda
 type. 023 is the one code this round adds to the SENTINEL range (001–023, SPEC-INDEX §3.5): the routes
 block is validated before the listener binds, so an unhonourable routing policy is a boot refusal, never a
 runtime surprise on one class of traffic.</p>
+<p><strong>The codeplane bundle adds no codes.</strong> Refusing a mismatched bundle (§3.9a) is accounted by a <code>gap</code>
+record with cause <code>codeplane_release_mismatch</code> and by nothing else: the discard is post-admission, so no
+HTTP status changes and the SENTINEL range 001-023 is untouched by this round; no ladder error is raised,
+because context loss never degrades an incident.</p>
 <h2 id="6-edge-cases">6. Edge cases</h2>
 <ol>
 <li><strong>gzip bomb</strong>: the decompressor is a limited reader capped at 1MB + 64KB, plus the 100:1 ratio
@@ -6337,6 +6451,11 @@ runtime surprise on one class of traffic.</p>
 <td>Route B with the hub killed mid-batch: spool segment written, backoff retries, replay after the hub returns; torn spool segment; drop-oldest with exact footer-derived <code>EstLost</code>; duplicate replay of one idempotency key</td>
 <td>0 events lost while <code>spool_bytes ≤ budget</code>; every spooled event lands <strong>exactly once</strong>; <code>origin.route="B"</code> survives the spool round-trip</td>
 </tr>
+<tr>
+<td><code>internal/sentinel/codeplane_test.go</code></td>
+<td>bundle assembly (§3.9a): a threshold crossing carries every field the sentinel owns and nothing else; a regression flags <code>Regressed</code>; a release-less group leaves <code>Release</code> empty and keeps the bundle; the convergence map rebuilds from 15m of <code>group</code> records after a restart and evicts least-recently-seen at 4096; a stale-release bundle is discarded -&gt; <code>Observation.Codeplane == nil</code> + exactly 1 <code>gap</code> cause <code>codeplane_release_mismatch</code>; 100 stale-release admissions of one pair write 1 record; <code>CodeplaneFor</code> returns <code>ok=false</code> for a closed group</td>
+<td>every listed field asserted non-empty on the fixture and the sensor half asserted empty; <code>Codeplane == nil</code> on the mismatch and <strong>0 HTTP responses served</strong> by the discard path; 0 second gap records for the memoized pair</td>
+</tr>
 </tbody>
 </table>
 <p>AC-derived tests: AC-10 <code>e2e_test.go</code> (real SDK envelope shapes + legacy store + DSN auth forms);
@@ -6346,7 +6465,8 @@ AC-15 <code>collector_*_test.go</code> + <code>genericjson_test.go</code>; AC-18
 (Go SDK on host A, <code>curl</code> on host B, both landing in the same digest, quota held while one floods);
 AC-19 <code>release_test.go</code> release-diff inputs; AC-22 <code>e2e_test.go</code> (sensor/collector/sentinel → one
 digest → one group); AC-28 <code>routes_test.go</code> (route matrix + override + refusal) + <code>routespool_test.go</code>
-(B-failure spool replay, exactly-once) + the <code>origin.route</code> assertion in <code>group_test.go</code>.</p>
+(B-failure spool replay, exactly-once) + the <code>origin.route</code> assertion in <code>group_test.go</code>; AC-31
+<code>codeplane_test.go</code> (bundle assembly, convergence map, mismatch discard, 0 HTTP responses served).</p>
 <p>Memory: <code>TestMain</code> asserts steady RSS ≤ 80MB after 1,000,000 events (measured trivial path
 7.0 → 15.6MB) and ≤ 192MB under the load test; the binary stays inside the 8–15MB budget because
 sentinel adds no dependency beyond stdlib (SPEC-TYPES §6.1).</p>
@@ -6380,9 +6500,9 @@ for the whole listener.</p>
 <p>Spec: SPEC-05
 Area prefix: TROUBLE-LADDER
 Package: internal/ladder
-Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort
+Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort, CodeplaneContext
 Local types: Ladder, Deps, Config, Observation, AdmitResult, Transition, Window, ParkReason, ParkReport, ReAdoptReport, PendingItem, PlayRunner, RuleEvaluator, LedgerWriter, IndexReader, Outlet, Notifier, Clock, RunSummary, StabilizationState, SourcePath
-ACs: AC-3, AC-4, AC-5, AC-20, AC-21, AC-22, AC-26
+ACs: AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31
 PRD: §05, §06b, §11, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/ladder</code> is the only component that decides what work a detection gets, and the only one that
@@ -7610,7 +7730,7 @@ spike by reading two dashboards:</p>
   signatures with counts, and the representative sample reference. Sensor-born observations leave
   it nil.</li>
 <li><strong>Filled by convergence.</strong> When a sensor rule fires on a host whose convergence map (SPEC-04 §3.9)
-  already links the event to an open sentinel group (e.g. a crash-loop that is filling the disk),
+  already links the event to an open sentinel group (SPEC-04 §3.9a; e.g. a crash-loop that is filling the disk),
   the ladder fills <code>Codeplane</code> from the group store before entering the agent rung: the agent's
   prompt then reads "disk full because <code>payment-worker</code> crash-looped 412× since release 4f2a1c",
   not "disk full".</li>
@@ -8036,6 +8156,20 @@ re-minted here.</p>
 - <code>for=-1s</code> and <code>for=25h</code> → <code>stabilize_default</code> + TROUBLE-LADDER-019; <code>for=0</code> admits immediately.
 - Entry rungs: <code>record</code>, <code>play</code>, <code>research</code>, <code>agent</code> each walk the expected rung sequence (AC-3), and a
   ceiling of <code>play</code> ends at outlets + escalate rather than entering research.</p>
+<p><code>internal/ladder/codeplane_test.go</code> (AC-31)
+- Sentinel-born admission: the <code>Admit</code> call that carries <code>Observation.Codeplane</code> persists it to
+  <code>Incident.Codeplane</code> byte-identically, and a park + resume re-reads the same bytes.
+- Sensor-born admission with a convergence-map hit (SPEC-04 §3.9a): the rung's <code>Incident.Codeplane</code> holds
+  BOTH planes — <code>Side</code>, <code>RuleID</code> and <code>Readings</code> from the firing rule, <code>Sig</code>/<code>GroupID</code>/<code>Release</code>/<code>Regressed</code>/
+  <code>Recent</code> from the sentinel accessor; with no hit the field stays nil and the rung runs unchanged.
+- The bundle changes no rung: the same scripted stream with and without a bundle produces the same
+  <code>LadderState</code> sequence and the same record kinds (context, never evidence — §3.10 is untouched).
+- A bundle whose <code>Release</code> disagrees with the running release never arrives: the admission is processed with
+  <code>Codeplane == nil</code> and the run holds exactly the one <code>gap</code> record the sentinel wrote (SPEC-04 §3.9a) and
+  <strong>0 ladder-side gap records</strong> (ownership assertion).
+- Copy-out join: the <code>Subject.Context["codeplane"]</code> handed to the <code>ResearchPort</code> fake is byte-equal to
+  <code>Incident.Codeplane</code> (SPEC-07 §3.10a), and the issue body rendered by the <code>Outlet</code> fake contains the same
+  bytes (SPEC-09 §3.13a).</p>
 <p>Whole package: <code>go test -race -count=1 ./internal/ladder/...</code> ≤ 60s, zero skipped tests, and the
 <code>Evidence</code> fixture file shared with SPEC-TYPES' JSON round-trip test so the tuple cannot drift.</p>
 <h2 id="8-hilo-impact">8. hilo impact</h2>
@@ -9580,9 +9714,9 @@ artifact is written only by an explicit <code>trouble install --polkit</code> on
 <p>Spec: SPEC-07
 Area prefix: TROUBLE-RESEARCH
 Package: internal/research
-Consumed types: Record, RecordKind, Sig, SigSource, Origin, Actor, Prefix, Incident, GapRecord, Duration, ClassSlug, DiscoverRequest, DiscoverResponse, SubmitRequest, SubmitResponse, QueueStatus, ResearchOutcome, PlayTask, SentryEvent, Evidence, SpawnRequest, IssueRef, SkillCandidate, ResearchDriver
+Consumed types: Record, RecordKind, Sig, SigSource, Origin, Actor, Prefix, Incident, GapRecord, Duration, ClassSlug, DiscoverRequest, DiscoverResponse, SubmitRequest, SubmitResponse, QueueStatus, ResearchOutcome, PlayTask, SentryEvent, Evidence, SpawnRequest, IssueRef, SkillCandidate, ResearchDriver, CodeplaneContext
 Local types: Deps, Service (package-owned; §3.0), driverOffByOne, driverNone, driverWebhook, table, slugEntry, taxonomyRule, subjectFacts, corpus, corpusHit, labHealth, researchCost, pollState, wireDiscoverRequest, wireSubmitRequest, wireQueueStatus, wireLabError, wireHealth, wireStats
-ACs: AC-17, AC-20
+ACs: AC-3, AC-17, AC-20, AC-31
 PRD: §05, §11, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p>The research rung asks Off-by-One for a pre-solved answer before an agent is spent. PRD §05 ②½
@@ -10290,6 +10424,31 @@ the worker's <code>submitted</code> map, rebuilt at boot from the ledger.</p>
    in the cache, so the rung re-probes the <strong>class</strong> with D1 every <code>duplicate_recheck_interval</code> (3m)
    inside the same poll budget instead of polling an id it does not have.</li>
 </ol>
+<h3 id="310a-the-codeplane-bundle-on-the-research-request-v011a">3.10a The codeplane bundle on the research request (v0.1.1a)</h3>
+<p>The request that reaches the lab carries the same cross-plane context the agent sees, so a lab answer is
+written against the code plane that produced the failure instead of this rung's summary of it. SPEC-05
+§3.13a owns the bundle; this section owns the wire obligation, and it is one obligation: <strong>verbatim</strong>.</p>
+<ul>
+<li><strong>Where it lands.</strong> Inside the submit body of §2.3 B, at <code>context.codeplane</code> — that is, inside the
+  <code>Subject.Context</code> map (SPEC-TYPES §3.15.9). The exactly-four-top-level-fields rule of §2.3 B is unchanged,
+  and <code>fingerprint</code>, <code>stack</code>, <code>release</code> and <code>unit</code> stay the keys §3.3 defines.</li>
+<li><strong>Verbatim, never re-derived.</strong> <code>context.codeplane</code> is the marshalled <code>Incident.Codeplane</code>, byte-equal to
+  <code>json.Marshal</code> of the persisted bundle (SPEC-TYPES §3.15.12): no field renamed, dropped, defaulted,
+  re-sorted or recomputed from the group store, and never merged with the evidence <code>bundle</code> argument of
+  §3.7. Re-derivation here would make the lab's answer stand on facts the incident record does not contain.</li>
+<li><strong>Single source.</strong> When <code>inc.Codeplane</code> is non-nil it replaces any caller-supplied
+  <code>Subject.Context["codeplane"]</code>: the persisted bundle is the one the ladder carries, and a second copy is a
+  second truth.</li>
+<li><strong>Absent bundle.</strong> <code>inc.Codeplane == nil</code> (a pure-system incident, or one whose bundle the sentinel refused
+  at assembly, SPEC-04 §3.9a) → the <code>codeplane</code> key is <strong>absent</strong> from the object. No placeholder, no empty
+  object, no explicit <code>null</code>: the lab must be able to tell "system-only incident" from "code-plane incident
+  with no code-plane facts".</li>
+<li><strong>Scrubbing.</strong> The embedded object is part of the body and passes the §4.4 egress scrub exactly as the rest
+  of the request does — same targets, whole body, no exempt field. The bundle's strings are assembled from
+  already-scrubbed events, which is a convenience, not the control.</li>
+<li><strong>Discover carries none.</strong> D1/D2 (§3.2) send the three match fields of §2.3 A and no bundle: the cache
+  lookup is a class-level probe, and the bundle is rung context.</li>
+</ul>
 <h2 id="4-wiring">4. Wiring</h2>
 <h3 id="41-connections">4.1 Connections</h3>
 <table>
@@ -10305,6 +10464,11 @@ the worker's <code>submitted</code> map, rebuilt at boot from the ledger.</p>
 <td>consumed by</td>
 <td><code>internal/ladder</code> (SPEC-05)</td>
 <td><code>Service.Run</code>, <code>Resume</code>, <code>Park</code>; consumes <code>ResearchOutcome</code> + the two digests</td>
+</tr>
+<tr>
+<td>carries</td>
+<td><code>Incident.Codeplane</code> (SPEC-TYPES §3.15.12)</td>
+<td>the §3.10a obligation: the persisted bundle is embedded at <code>context.codeplane</code> on submit, byte-for-byte; <code>nil</code> → the key is absent from the body</td>
 </tr>
 <tr>
 <td>calls</td>
@@ -10455,6 +10619,10 @@ before they reach the ledger or the prompt, and <code>Record.redactions</code> c
 </table>
 <p>Every code above appears in <code>payload.error_code</code> of the <code>research</code> record it describes (SPEC-INDEX §5 rule
 3). The ladder's own view of a degraded research rung is its own record and code (SPEC-05).</p>
+<p><strong>The codeplane bundle adds no codes and no gap causes.</strong> A bundle that is absent — because the incident
+is system-only, or because the sentinel refused it at assembly (SPEC-04 §3.9a) — changes nothing below: the
+submit proceeds without the key, the codes 001-010 remain the only failures a request can produce, and the
+request budget of §3.8 is untouched by §3.10a.</p>
 <h3 id="51-timeouts-and-the-ladder-path">5.1 Timeouts and the ladder path</h3>
 <p><code>connect_timeout</code> 2s, <code>request_timeout</code> 5s (discover/queue/stats), <code>submit_timeout</code> 10s, <code>corpus_timeout</code>
 3s, <code>poll_timeout</code> 12m. Worst-case research wall time is 12m05s on the worker goroutine only: the rung's
@@ -10543,6 +10711,10 @@ SPEC-03 and SPEC-05 (SPEC-INDEX §3.4).</p>
 <td><code>Request</code>/<code>Poll</code> driven through a stub ladder adapter: a supplied <code>sub["slug"]</code> is used verbatim (0 derivation calls) and an absent one derives; <code>Outcomes(sig)</code> returns records newest-first after a simulated boot replay; with <code>apply_brief_as_play=true</code> and a registry-valid answer the brief carries <code>play_draft</code> and <code>resolve_outright:true</code>, and with a module outside the registry the draft is dropped while the brief text survives.</td>
 </tr>
 <tr>
+<td><code>internal/research/codeplane_test.go</code> (AC-31)</td>
+<td><code>context.codeplane</code> byte-equality against <code>json.Marshal(*inc.Codeplane)</code> on the §3.3 fixture; <code>inc.Codeplane == nil</code> → the key is absent, asserted by key membership on the decoded object AND on the golden wire bytes; a caller-supplied <code>context.codeplane</code> is replaced by the persisted bundle; the embedded object survives the §4.4 scrub round-trip with <code>Record.redactions</code> counted; the D1/D2 bodies carry no <code>codeplane</code> key</td>
+</tr>
+<tr>
 <td><code>internal/research/ac_test.go</code></td>
 <td><code>TestAC17_UnknownClassForwardsAndAgentConsumesBrief</code> — an unknown class with <code>off-by-one</code> enabled produces one submit, one brief, and an agent prompt whose digest is recorded. <code>TestAC20_LinksAndUnreachableDegrade</code> — the <code>res_</code> id appears on the incident, the <code>research</code> record, the <code>agent_run</code> payload and the spawn/issue/skill stub records; with the lab forced unreachable the ladder advances while exactly one <code>gap</code> record (<code>research_lab_unreachable</code>) lands in the ledger.</td>
 </tr>
@@ -10577,7 +10749,7 @@ Area prefix: TROUBLE-FLOW
 Package: internal/flow
 Consumed types: BoardRow, BoardEvent, FileTaskRequest, FileTaskResult, FlowDriver, FlowProject, FlowTimelineStep, RouterConfig, ForemanBrief, SpawnRequest, HotfixLease, Promotion, FlowConfig, HotfixConfig, DriverHealth, IssueRef, SpoolEntry, Record, RecordKind, Sig, Duration, Prefix, Actor, Origin, Severity, Incident, AutonomyGates, Evidence, VerifyResultKind, Rule, ResearchOutcome, DoNotTouch, ToolCall, Descriptor, Diff, DiffEntry, IdempotencyClass, ErrorClass
 Local types: rowStyle, boardIndex, leaseKey, spawnKey, budgetClock, recordSink, issueDesk, briefSource, moduleRegistrar
-ACs: AC-9, AC-19, AC-21, AC-26
+ACs: AC-9, AC-19, AC-21, AC-22, AC-26
 PRD: §08, §11, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/flow</code> turns a finding into work in a work system, and — for a confirmed code bug on an
@@ -11861,9 +12033,9 @@ the number the ≤30 s worktree budget must never approach in a test.</p>
 <p>Spec: SPEC-09
 Area prefix: TROUBLE-ISSUES
 Package: internal/issues
-Consumed types: IssueDriver, IssueRef, EnsureBySigRequest, EnsureBySigResponse, DriverHealth, SpoolEntry, IssueDeskConfig, IssueCaps, IssueDriverConfig, IssueCapState, IssueAttempt, Incident, Group, Evidence, GapRecord, Record, RecordKind, Severity, Duration, Prefix, Origin, Actor, Sig, LadderState, Rung, ScrubResult, ErrorClass
+Consumed types: IssueDriver, IssueRef, EnsureBySigRequest, EnsureBySigResponse, DriverHealth, SpoolEntry, IssueDeskConfig, IssueCaps, IssueDriverConfig, IssueCapState, IssueAttempt, CodeplaneContext, Incident, Group, Evidence, GapRecord, Record, RecordKind, Severity, Duration, Prefix, Origin, Actor, Sig, LadderState, Rung, ScrubResult, ErrorClass
 Local types: ghIssueWire, ghCommentWire, ghSearchWire, ghRateLimitWire, dbDocument, dbCommentDoc, anchorEntry, attemptBudget, spoolQueue
-ACs: AC-8, AC-22
+ACs: AC-8, AC-22, AC-31
 PRD: §07, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/issues</code> is the issue desk: the outlet that turns a sig-keyed incident into a tracked issue in an
@@ -12895,6 +13067,39 @@ ref.</p>
 
 <p><code>GapRecord.Cause</code> gains the value <code>driver_down</code> (§3.3) — reported as a TYPES-GAP line so SPEC-TYPES §3.7's
 cause set stays the single source of truth.</p>
+<h3 id="313a-the-codeplane-bundle-on-the-issue-body-v011a">3.13a The codeplane bundle on the issue body (v0.1.1a)</h3>
+<p>An issue that a human opens must carry the same cross-plane context the agent and the lab saw: a stack trace
+with its release and its recent-signature counts is a work item, a stack trace alone is a puzzle. SPEC-05
+§3.13a owns the bundle; this section owns the rendering obligation.</p>
+<ul>
+<li><strong>Position.</strong> When <code>Incident.Codeplane</code> is non-nil the body of §3.9.3 carries one extra section, placed
+  between the field table and <code>**Evidence bundle (scrubbed)**</code>, in exactly this shape:</li>
+</ul>
+<div class="codehilite"><pre><span></span><code><span class="gs">**Codeplane bundle**</span>
+
+<span class="sb">```json</span>
+<span class="p">{</span><span class="nt">&quot;side&quot;</span><span class="p">:</span><span class="s2">&quot;sentinel&quot;</span><span class="p">,</span><span class="nt">&quot;sig&quot;</span><span class="p">:</span><span class="s2">&quot;sentinel:sha256v1:9f2c1d3e4b5a6c7d&quot;</span><span class="p">,</span><span class="nt">&quot;grp&quot;</span><span class="p">:</span><span class="s2">&quot;grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH&quot;</span><span class="p">,</span><span class="nt">&quot;project&quot;</span><span class="p">:</span><span class="s2">&quot;7&quot;</span><span class="p">,</span><span class="nt">&quot;release&quot;</span><span class="p">:</span><span class="s2">&quot;payment-api@2.4.1&quot;</span><span class="p">,</span><span class="nt">&quot;regressed&quot;</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">&quot;recent&quot;</span><span class="p">:[{</span><span class="nt">&quot;sig&quot;</span><span class="p">:</span><span class="s2">&quot;sentinel:sha256v1:9f2c1d3e4b5a6c7d&quot;</span><span class="p">,</span><span class="nt">&quot;count&quot;</span><span class="p">:</span><span class="mi">412</span><span class="p">,</span><span class="nt">&quot;first_ts&quot;</span><span class="p">:</span><span class="s2">&quot;2026-09-16T09:14:03.221Z&quot;</span><span class="p">,</span><span class="nt">&quot;last_ts&quot;</span><span class="p">:</span><span class="s2">&quot;2026-09-16T09:15:41.009Z&quot;</span><span class="p">}],</span><span class="nt">&quot;ts&quot;</span><span class="p">:</span><span class="s2">&quot;2026-09-16T09:15:41.009Z&quot;</span><span class="p">}</span>
+<span class="sb">```</span>
+</code></pre></div>
+
+<ul>
+<li><strong>Verbatim.</strong> The bytes inside the fence are <code>json.Marshal(*inc.Codeplane)</code> (SPEC-TYPES §3.15.12) unchanged:
+  no prose re-rendering, no field renaming, no re-indenting, no dropping of empty fields. A block a reader
+  cannot diff against the incident record is not the same evidence, so byte-equality is the test (§7).</li>
+<li><strong>Absent bundle.</strong> <code>Codeplane == nil</code> → no heading, no empty fence, and <strong>zero other byte deltas</strong>: for a
+  pure-system incident the body stays byte-identical to the §3.9.3 golden, which is what keeps that golden
+  test meaningful and every already-published body stable.</li>
+<li><strong>Never the anchor.</strong> §3.2's anchor rule and the two marker lines of §3.9.3 (<code>&lt;!-- trouble:sig=… --&gt;</code> and
+  <code>&lt;!-- trouble:inc=… driver=… ver=1 --&gt;</code>) remain the identity of the issue: the bundle is additive context,
+  never the thing a read-back search matches on, and never a substitute for the incident link. A body that
+  carries a bundle and not both markers is a rendering bug, and the desk never sends one.</li>
+<li><strong>Truncation order.</strong> §3.9.3's order gains one step, markers always last: evidence bundle → codeplane
+  block → markers. A body over <code>body_max_bytes</code> (60 000) loses the fence before it loses a marker, and
+  <code>payload.truncated=true</code> is set as today.</li>
+<li><strong>Scrubbing.</strong> The marshalled bundle is assembled from the already-scrubbed incident and the whole body is
+  re-scrubbed as one blob before the call (§3.9.3 and the cross-spec contract table of §4): no bundle field
+  is exempt. <code>redactions applied</code> counts that pass exactly as it does today.</li>
+</ul>
 <h2 id="4-wiring">4. Wiring</h2>
 <table>
 <thead>
@@ -12907,7 +13112,7 @@ cause set stays the single source of truth.</p>
 <tbody>
 <tr>
 <td>internal/issues</td>
-<td>IssueDeskConfig, Incident, Evidence, ScrubResult, SpoolEntry</td>
+<td>IssueDeskConfig, Incident, CodeplaneContext, Evidence, ScrubResult, SpoolEntry</td>
 <td><code>issue</code>, <code>gap</code></td>
 </tr>
 </tbody>
@@ -12922,6 +13127,7 @@ cause set stays the single source of truth.</p>
   → any healthcheck failure → ledger(issue healthcheck) + ledger(gap cause=driver_down); INCIDENT CONTINUES
   → SPEC-08 files a row with the same sig → Desk.Link(task_id) → comment + ledger(issue op=link)
   → SPEC-07 returns a brief for the sig  → Desk.Link(research_id) → comment + ledger(issue op=link)
+  → Incident.Codeplane non-nil           → body renders the bundle block verbatim (§3.13a) → 0 extra calls
   → quiet-close sweep (5m): resolved + quiet 24h + evidence passed + no open row/brief + driver ok
                                           → driver.Close → comment + ledger(issue op=close)
 </code></pre></div>
@@ -12971,6 +13177,11 @@ file itself.</p>
 <td><code>ResearchOutcome</code> for a sig</td>
 <td>SPEC-07</td>
 <td>linkage + the "no open brief" close gate</td>
+</tr>
+<tr>
+<td><code>Incident.Codeplane</code>, the persisted cross-plane bundle</td>
+<td>SPEC-05 §3.13a, SPEC-TYPES §3.15.12</td>
+<td>body rendering only (§3.13a); never re-derived here, never a substitute for the §3.2 anchor</td>
 </tr>
 <tr>
 <td><code>GapRecord</code>, gap emission rights</td>
@@ -13072,6 +13283,9 @@ file itself.</p>
 <p>Every code raised to the ladder is mirrored into <code>Record.payload.error_code</code> (SPEC-INDEX §5 rule 3), so the
 audit trail needs no log file. <code>policy_refused</code> is not used by this area: the desk's refusals are policy
 decisions expressed as caps (<code>TROUBLE-ISSUES-004</code>), not polkit/do-not-touch refusals.</p>
+<p><strong>The codeplane bundle adds no codes.</strong> Rendering it is part of the existing <code>EnsureBySig</code>/<code>Comment</code> bodies
+and raises none of <code>TROUBLE-ISSUES-001..010</code> on its own: a nil bundle renders nothing and writes no record,
+and a bundle present or absent changes no driver call, no cap and no spool decision.</p>
 <h2 id="6-edge-cases">6. Edge cases</h2>
 <ol>
 <li><strong>Create committed but the response was lost.</strong> The desk never re-creates blindly: it searches for the sig
@@ -13168,6 +13382,11 @@ decisions expressed as caps (<code>TROUBLE-ISSUES-004</code>), not polkit/do-not
 <td>file → comment on recurrence → close after quiet, against a fake driver, asserting the ladder-visible <code>IssueRef</code> at each step</td>
 <td>issue filed within 1 <code>op_deadline</code>; recurrence folded ≤2 s p95 on a local fake; close after exactly 24 h of quiet</td>
 </tr>
+<tr>
+<td><code>internal/issues/codeplane_test.go</code> (AC-31)</td>
+<td>the body golden <strong>with</strong> a bundle: the block byte-exact and in the §3.13a position (after the field table, before the evidence bundle); the body golden <strong>without</strong> a bundle: byte-identical to the §3.9.3 template (0 deltas); a fixture missing either marker line is rejected; truncation at 60 000 drops the fence and keeps both markers; <code>redactions applied</code> unchanged by the bundle</td>
+<td>both goldens byte-identical; 0 bodies emitted without the two marker lines; truncation removes the fence bytes only</td>
+</tr>
 </tbody>
 </table>
 <p>Conformance battery detail (the 14 cases, because this battery is the contract's executable form): the same
@@ -13246,7 +13465,7 @@ Area prefix: (none — this file defines the error-CODE catalog for every area)
 Package: <code>internal/types</code>
 Consumed types: — (this file defines them)
 Local types: —
-ACs: AC-1..AC-30 (all — every AC depends on the shared record/identity model)
+ACs: AC-1..AC-31 (all — every AC depends on the shared record/identity model)
 PRD: §03, §06, §06b, §06c, §07, §08, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p>Every Go type that crosses a package boundary in trouble is defined here, once, with a complete JSON
@@ -13634,7 +13853,7 @@ never appears in an exported signature, an HTTP body, a TOML schema, a ledger pa
 <span class="w">    </span><span class="nx">FromTS</span><span class="w">   </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;from_ts&quot;`</span>
 <span class="w">    </span><span class="nx">ToTS</span><span class="w">     </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;to_ts&quot;`</span>
 <span class="w">    </span><span class="nx">EstLost</span><span class="w">  </span><span class="kt">int</span><span class="w">    </span><span class="s">`json:&quot;est_lost&quot;`</span><span class="w">  </span><span class="c1">// best estimate; -1 when unknowable</span>
-<span class="w">    </span><span class="nx">Cause</span><span class="w">    </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;cause&quot;`</span><span class="w">     </span><span class="c1">// open value set, e.g. cursor_invalid | child_died | queue_overflow | bus_down | psi_unarmed | canary_missing | heartbeat_stale | journal_unprivileged | file_rotated | file_truncated | file_removed | parser_error | spool_write_failed | ingest_reject_storm | driver_down | scrub_invalid_utf8 | research_lab_unreachable | research_strict_decoder_reject | research_solver_unavailable | research_poll_timeout | research_corpus_unreadable | forward_rejected | spool_evicted</span>
+<span class="w">    </span><span class="nx">Cause</span><span class="w">    </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;cause&quot;`</span><span class="w">     </span><span class="c1">// open value set, e.g. cursor_invalid | child_died | queue_overflow | bus_down | psi_unarmed | canary_missing | heartbeat_stale | journal_unprivileged | file_rotated | file_truncated | file_removed | parser_error | spool_write_failed | ingest_reject_storm | driver_down | scrub_invalid_utf8 | research_lab_unreachable | research_strict_decoder_reject | research_solver_unavailable | research_poll_timeout | research_corpus_unreadable | forward_rejected | spool_evicted | codeplane_release_mismatch</span>
 <span class="p">}</span>
 
 <span class="kd">type</span><span class="w"> </span><span class="nx">AutonomyMode</span><span class="w"> </span><span class="kt">string</span>
@@ -14465,6 +14684,8 @@ it is never a shared type.</p>
 <div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="nt">&quot;default&quot;</span><span class="p">:</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span><span class="nt">&quot;per_class&quot;</span><span class="p">:{</span><span class="nt">&quot;psi:io_pressure&quot;</span><span class="p">:</span><span class="s2">&quot;direct&quot;</span><span class="p">,</span><span class="nt">&quot;sentinel:sha256v1&quot;</span><span class="p">:</span><span class="s2">&quot;proxy&quot;</span><span class="p">}}</span>
 </code></pre></div>
 
+<p><code>GapRecord.Cause</code> gains the value <code>codeplane_release_mismatch</code> (SPEC-04 §3.9a) — reported as a TYPES-GAP line
+so SPEC-TYPES §3.7's cause set stays the single source of truth.</p>
 <h4 id="3154-contributed-by-spec-05">3.15.4 Contributed by SPEC-05</h4>
 <p><em>SPEC-05 — ladder: state machine, verification, autonomy gates (trouble v0.1)</em></p>
 <p><code>ParkRecord</code> — appears in a ledger payload and is cross-referenced by SPEC-08 (worktree reaping) and
@@ -14860,7 +15081,7 @@ adapter compiles and is testable in isolation; they must not drift.</p>
 <span class="w">    </span><span class="nx">Slug</span><span class="w">        </span><span class="kt">string</span><span class="w">         </span><span class="s">`json:&quot;slug&quot;`</span>
 <span class="w">    </span><span class="nx">Description</span><span class="w"> </span><span class="kt">string</span><span class="w">         </span><span class="s">`json:&quot;description&quot;`</span>
 <span class="w">    </span><span class="nx">Cadence</span><span class="w">     </span><span class="kt">string</span><span class="w">         </span><span class="s">`json:&quot;cadence&quot;`</span>
-<span class="w">    </span><span class="nx">Context</span><span class="w">     </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">any</span><span class="w"> </span><span class="s">`json:&quot;context&quot;`</span><span class="w"> </span><span class="c1">// fingerprint, stack, release, unit</span>
+<span class="w">    </span><span class="nx">Context</span><span class="w">     </span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">any</span><span class="w"> </span><span class="s">`json:&quot;context&quot;`</span><span class="w"> </span><span class="c1">// fingerprint, stack, release, unit, codeplane (SPEC-07 §3.10a)</span>
 <span class="p">}</span>
 </code></pre></div>
 
@@ -15073,7 +15294,7 @@ spec's body rather than in its folded block; they are listed here so the invento
 </tr>
 <tr>
 <td>internal/research</td>
-<td>ResearchOutcome</td>
+<td>ResearchOutcome, CodeplaneContext</td>
 <td>research, gap</td>
 </tr>
 <tr>
@@ -15083,7 +15304,7 @@ spec's body rather than in its folded block; they are listed here so the invento
 </tr>
 <tr>
 <td>internal/issues</td>
-<td>IssueRef, DriverHealth</td>
+<td>IssueRef, DriverHealth, CodeplaneContext</td>
 <td>issue, gap</td>
 </tr>
 <tr>
@@ -16488,7 +16709,7 @@ Area prefix: TROUBLE-DASHBOARD
 Package: internal/dashboard
 Consumed types: HealthResponse, SourceLiveness, RuntimeWatermarks, Token, Scope, AutonomyGates, Incident, Group, IssueRef, Breaker, Evidence, Record, Actor, RecordKind, SensorHealth, Rule, GapRecord, Promotion, SpawnRequest, ResearchOutcome, SkillCandidate
 Local types: identityProvider, principal, scopeSet, route, dashError, csrfValue, tokenFile, pageData, incidentRow, groupRow, ruleRow, breakerRow, timelineEntry, budgetPanel, healthStrip, stallState
-ACs: AC-16, AC-19, AC-30
+ACs: AC-16, AC-19, AC-26, AC-30
 PRD: §04c, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/dashboard</code> is the read-mostly face of the ledger: one embedded HTTP server in the same binary as
@@ -17647,7 +17868,7 @@ Area prefix: TROUBLE-SKILLS
 Package: internal/skills
 Consumed types: Skill, SkillGuards, Provenance, SkillStats, SkillCandidate, Play, PlayTask, Descriptor, Incident, ResearchOutcome, Evidence, Record, Actor, Origin, Duration, SkillsConfig, SkillSigner, SkillsStatus, SkillRow
 Local types: skillArtifact, canonicalProjection, localIndex, installRow, canaryRecord, holdEntry, matchResult, pullReport, authorizer
-ACs: AC-24 (partial — see SPEC-INDEX §6.1), AC-26
+ACs: AC-24 (partial — see SPEC-INDEX §6.1), AC-25, AC-26
 PRD: §06c, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/skills</code> turns a verified incident fix into a signed, immutable skill artifact (procedural memory),
@@ -18601,7 +18822,7 @@ Area prefix: TROUBLE-LIFECYCLE
 Package: internal/lifecycle
 Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity, ProfileConfig, HubStatus
 Local types: explainRow, unitTemplate, bindProbe, stallVerdict, spoolSegment, spoolState, upgradePlan, secretFileCheck, zoneWindow
-ACs: AC-14, AC-18, AC-25, AC-26, AC-28, AC-29
+ACs: AC-14, AC-18, AC-25, AC-26, AC-27, AC-28, AC-29
 PRD: §09, §11, §12</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/lifecycle</code> owns everything that decides whether the daemon is <em>allowed to run, allowed to serve,
@@ -20871,5 +21092,5 @@ rule that makes Redis a queue instead of a store; the drop-gate of §3.5 step 5 
 history from being deleted before it is archived; and the profile-invariance claim of §1.2, which is
 asserted by test and must never become an assumption.</p>
 </section>
-<div class="footer">generated from ~/trouble/specs/ · main @ 12ee1ed docs: specs-review.html generator + generated review copy · print-friendly: each section page-breaks</div>
+<div class="footer">generated from ~/trouble/specs/ · main @ a6881de board: normalize task ids to TRBL-001/002/003 (seed typo left 02/03; blocks refs aligned) · print-friendly: each section page-breaks</div>
 </div></body></html>

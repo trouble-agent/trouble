@@ -2,9 +2,10 @@
 """ac_matrix.py — the v0.1 exit gate: every AC in the SPEC-INDEX matrix against
 the evidence actually present in the tree.
 
-SPEC-INDEX §3.2 is the binding AC contract: 27 ACs, each mapped to one or more
-owning specs, each marked B (built in v0.1), P (partial) or D (deferred). This
-script answers, mechanically and without judgement:
+SPEC-INDEX §3.2 is the binding AC contract: 31 ACs (derived from the matrix — the `index ACs`
+line below is the count, never a literal in this file), each mapped to one or more owning specs,
+each marked B (built in v0.1), P (partial) or D (deferred). This script answers, mechanically and
+without judgement:
 
   1. which ACs the index declares, and which specs own each one;
   2. where each AC is named in the tree (headers, comments, test function names);

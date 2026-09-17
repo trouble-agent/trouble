@@ -1,2 +1,6 @@
 dagger.db
 *.db
+*.test
+*.prof
+*.db-shm
+*.db-wal

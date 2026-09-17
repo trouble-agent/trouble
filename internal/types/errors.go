@@ -37,14 +37,21 @@ const (
 	CodeLedger012 ErrorCode = "TROUBLE-LEDGER-012"
 )
 
-// SPEC-02 codes the ledger propagates unchanged (SPEC-01 §4.2).
+// SPEC-02 codes (internal/scrub). SPEC-01 §4.2 propagates 006 and 008 unchanged
+// from the write-boundary re-scan; the rest are emitted by the engine.
 const (
+	CodeScrub001 ErrorCode = "TROUBLE-SCRUB-001"
+	CodeScrub002 ErrorCode = "TROUBLE-SCRUB-002"
+	CodeScrub003 ErrorCode = "TROUBLE-SCRUB-003"
+	CodeScrub004 ErrorCode = "TROUBLE-SCRUB-004"
+	CodeScrub005 ErrorCode = "TROUBLE-SCRUB-005"
 	CodeScrub006 ErrorCode = "TROUBLE-SCRUB-006"
+	CodeScrub007 ErrorCode = "TROUBLE-SCRUB-007"
 	CodeScrub008 ErrorCode = "TROUBLE-SCRUB-008"
 )
 
-// CodeClass is the canonical class of every code this repository emits from
-// SPEC-01 (SPEC-TYPES §5). Codes not listed here are not emitted by the ledger.
+// CodeClass is the canonical class of every code this repository emits
+// (SPEC-TYPES §5).
 var CodeClass = map[ErrorCode]ErrorClass{
 	CodeLedger001: ErrClassPermanent,
 	CodeLedger002: ErrClassPermanent,
@@ -58,7 +65,13 @@ var CodeClass = map[ErrorCode]ErrorClass{
 	CodeLedger010: ErrClassTransient,
 	CodeLedger011: ErrClassPermanent,
 	CodeLedger012: ErrClassPermanent,
+	CodeScrub001:  ErrClassPermanent,
+	CodeScrub002:  ErrClassPermanent,
+	CodeScrub003:  ErrClassTransient,
+	CodeScrub004:  ErrClassPermanent,
+	CodeScrub005:  ErrClassTransient,
 	CodeScrub006:  ErrClassPermanent,
+	CodeScrub007:  ErrClassPermanent,
 	CodeScrub008:  ErrClassPermanent,
 }
 

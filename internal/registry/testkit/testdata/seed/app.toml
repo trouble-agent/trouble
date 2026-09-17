@@ -1,0 +1,6 @@
+# Baseline state for the internal/registry/testkit fixtures (SPEC-06 §2.4).
+# RunAll copies this seed tree into every fixture's temp root, so a fixture may
+# reference {tmp}/app.toml without the Fixture struct growing a setup field.
+retries = 3
+host = "db-1"
+enabled = true

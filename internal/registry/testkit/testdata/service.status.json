@@ -1,0 +1,8 @@
+[
+  {
+    "name": "service.status/user-unit",
+    "args": { "unit": "payment-worker.service", "scope": "user" },
+    "mutates": false,
+    "second_apply": "pure"
+  }
+]

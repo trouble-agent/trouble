@@ -192,12 +192,21 @@ type compileScope struct {
 	scopes      []string
 	playScope   bool // SPEC-06: unknown result.output.<k> is false, never an error
 	allowNoVars bool
+	// playRegisters are the play's own <register> names (SPEC-06 §3.7): a name
+	// equal to one, or dotted below one, is a dynamic value of unknown type.
+	playRegisters map[string]bool
 }
 
 func (s compileScope) typeOf(name string) (valueType, bool) {
 	if s.playScope {
 		if t, ok := playFields[name]; ok {
 			return t, true
+		}
+		if _, ok := s.playRegisters[name]; ok {
+			return vtInvalid, true
+		}
+		if i := strings.IndexByte(name, '.'); i > 0 && s.playRegisters[name[:i]] {
+			return vtInvalid, true
 		}
 		// SPEC-03 §3.4 last row (referenced by SPEC-06): an unknown
 		// result.output.<k> / registered.<name> in a play is false +
@@ -228,6 +237,12 @@ func (s compileScope) typeOf(name string) (valueType, bool) {
 }
 
 // playFields is SPEC-06's additive row of the namespace.
+//
+// SPEC-06 §3.7 names the play namespace as inc, sig, severity, rule, unit,
+// evidence.* and the play's own <register> names; the entries below are the
+// literal SPEC-06 names, kept additively beside the SPEC-03 §3.4 play rows so
+// neither spec's vectors are lost. `register` names are supplied per compile
+// through compileScope.playRegisters.
 var playFields = map[string]valueType{
 	"result.changed":   vtBool,
 	"item":             vtString,
@@ -236,6 +251,24 @@ var playFields = map[string]valueType{
 	"inc.state":        vtString,
 	"autonomy.mode":    vtString,
 	"result.output.ok": vtBool,
+	// SPEC-06 §3.7 rows.
+	"inc":                       vtString,
+	"sig":                       vtString,
+	"severity":                  vtString,
+	"rule":                      vtString,
+	"unit":                      vtString,
+	"evidence.ts_window_start":  vtString,
+	"evidence.ts_window_end":    vtString,
+	"evidence.window_s":         vtNumber,
+	"evidence.events_observed":  vtNumber,
+	"evidence.canary_seen":      vtBool,
+	"evidence.canary_id":        vtString,
+	"evidence.sources_expected": vtStringList,
+	"evidence.sources_alive":    vtStringList,
+	"evidence.sources_quiet":    vtStringList,
+	"evidence.sources_missing":  vtStringList,
+	"evidence.zone":             vtString,
+	"evidence.result":           vtString,
 }
 
 // ---- lexer ----

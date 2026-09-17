@@ -12,8 +12,58 @@ SPEC-INDEX` are the authority, and code lands against them.
 `internal/ledger` — the append-only JSONL audit ledger (SPEC-01): record schema, seq allocation,
 group-commit durability, torn-line recovery, daily rotation and part rollover, compaction into
 generation files, the bounded in-memory index with its degradation ladder, the query surface and
-the storage-tier decision. `internal/types` is the shared type source of truth; `internal/scrub`
-carries the persistence-boundary re-scan entry point (the full scrubbing engine is SPEC-02).
+the storage-tier decision.
+
+`internal/scrub` — the single safety gate between the outside world and every byte trouble persists
+(SPEC-02): the compiled-in 18-rule table (13 mandatory, 5 optional), per-target byte budgets, the
+shield that keeps DSN public keys verbatim while redacting everything else, per-project overrides,
+the bundle/record/envelope entry points, and the persistence-boundary re-scan
+(`Verify` / `MandatoryScan`) that `internal/ledger` runs on every serialized line.
+
+`internal/types` is the shared type source of truth.
+
+`internal/registry` — the daemon's entire action surface (SPEC-06): the frozen v1 module SDK
+(`Descriptor`/`Check`/`Apply`/`Verify`), the six-stage call contract
+(authorize → validate → dry-run → apply → verify → audit) with its intent/outcome audit pair, the
+generated draft 2020-12 schemas and their closed validator, plays as data with the shared `when:`
+condition language, the compiled-in do-not-touch floor (with additive merge and weakening refusal),
+the polkit install-time contract, the `testkit` conformance harness, and the thirteen shipped
+modules `config.{get,set,list}`, `service.{status,reload,restart}`, `file.{read,patch}`,
+`proc.{top,connections}` and `flow.{file_issue,create_task,comment}`. No module shells out: there is
+no `os/exec` anywhere in the package, and a module that accepts a `command`/`argv`/`shell` args key
+cannot register.
+
+`internal/ladder` — the state machine that decides what work a detection gets and is the only
+component allowed to declare a problem fixed (SPEC-05): the 19 pinned states, the 48-edge transition
+table plus 13 refused edges as data, the dedup/merge upsert keyed by `sig` and `inKey` (AC-22),
+verification as an `Evidence` tuple where a canary that did not land can never produce `passed`,
+budgets, storm breakers and suppression windows, the host agent lease, and park/re-adopt for daemon
+restarts. It owns the `incident`, `verify` and `breaker` record kinds.
+
+
+## The scrubbing contract
+
+The pipeline is **ingest → scrub → ledger**, and it is a safety invariant: no subsystem writes to
+disk, to the ledger, to the spool, to the skills-local directory, to an issue driver or to a board
+row before its content has passed through `internal/scrub`. Every signature, fingerprint and dedup
+key is computed over the *scrubbed* bytes, so two hosts and three arrival paths that describe the
+same bug produce the same digest.
+
+Two properties carry the design:
+
+* **Idempotence.** `Scrub(Scrub(x)) == Scrub(x)` byte-for-byte, and the second call reports zero
+  redactions. That is what lets a satellite scrub locally and the hub re-scrub the same record on
+  receipt without changing the signature.
+* **Fail closed.** Rule failure, a rule that exceeds `scrub.rule_timeout`, invalid UTF-8 on a text
+  target or a persistence-boundary hit means the payload is **not persisted** — in whole or in part
+  — and the caller emits a `gap`. Availability loses to leakage, deliberately: the ledger is
+  append-only, git-distributed and auto-filed, so a secret that reaches it cannot be removed.
+
+The `trouble` rule table is the authority for what a "secret" is, and its redaction tests are
+conformance tests: `internal/scrub/vectors_test.go` (14 positive and 12 negative vectors, exact
+bytes and exact `by_rule`), `fixedpoint_test.go`, `shield_test.go`, `config_test.go`,
+`conformance_test.go`, `limits_test.go`, `dsn_test.go`, `e2e_ledger_test.go`, `corpus_test.go`,
+`bench_test.go` and `bench_ingest_test.go`.
 
 `internal/sensors` — the detection plane (SPEC-03): six sensors (PSI, journald, D-Bus, disk, timers,
 inotify), the shared condition language, the rule TOML schema and its atomic hot reload, storm

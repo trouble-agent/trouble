@@ -89,7 +89,58 @@ decision flips only when one of the four measured triggers in SPEC-01 §3.8 fire
 thresholds are code constants in `internal/ledger/tier.go` printed beside their live values by
 `trouble ledger status --json`.
 
-## 5. The sensors: what to look at, and what "wrong" looks like
+## 8. Scrubbing (SPEC-02)
+
+`internal/scrub` is the only path bytes take on their way to persistence. Operationally it shows up
+in four places.
+
+**Refused records.** A record that trips the persistence-boundary re-scan is refused with
+`TROUBLE-SCRUB-008`; the caller writes a `gap` and a `lifecycle` note instead of the payload, and the
+ledger's `scrub_refusal_total` counter moves (surfaced by `trouble ledger status --json`). A refusal
+is either (a) a producer that forgot to scrub — fix the caller, do not weaken the rule table — or
+(b) a payload whose content legitimately looks like a credential (see the false-positive notes
+below). The offending bytes are never stored, so a refusal is not diagnosable from the ledger: read
+the caller's log line for the record's `sig` and `kind`.
+
+**Counts, never values.** Every scrubbed record carries `redactions` and, in
+`payload["scrub"]`, the `by_rule` map, `bytes_in/bytes_out`, `truncated`, `rules_version` and the
+engine (`re2`). `Engine.Stats()` (process-cumulative) adds `calls`, `refused_bytes`, `invalid_utf8`,
+`timeouts`, `fail_closed` and `boundary_refusals`. A rising `timeouts`/`fail_closed` rate means
+payloads are being dropped, not redacted: check host load against `scrub.rule_timeout` (250 ms
+default) before anything else.
+
+**Knobs that are safe to use.** `scrub.pii_mode = "keep"` and per-project `pii_mode` are the
+documented escape hatches for PII rules (`pii_email_ip`, `pii_identity_kv`); `scrub.path_mode` /
+`path_allowlist` / `home_roots` tune the path rules; `max_bytes` and `on_over` are per-target
+(only `event_msg`, `stack` and `journal_tail` truncate — everything else refuses, because a
+truncated issue body or board row corrupts a durable artifact a human reads). Knobs that are **not**
+available: the 13 mandatory rules, `boundary_verify`, and any attempt to configure a rule named
+after a built-in. All of those are `TROUBLE-SCRUB-002` at boot, before the ingestion port binds.
+
+**Cost.** The prefilter is what keeps the ingress path cheap: a clean payload costs single-digit
+microseconds because no RE2 program runs. A payload that *does* carry a secret runs a full rule pass,
+which is dominated by the optional PII rules (`pii_identity_kv` is case-insensitive with an eleven-way
+name alternation). MEASURED, on the reference host at load ~2-9: prefilter 3.8 µs/KiB, boundary
+re-scan 4.0-5.0 µs/KiB, mandatory pass 4.3 µs/KiB (clean), full set 89 µs/KiB (clean, PII enabled),
+26 ms per 256 KiB (clean), ~640 µs for a 1.5 KiB payload carrying four secrets, and 7,500 req/s
+through the ingestion harness with the scrubber in the path (12,700 req/s without it). SPEC-02 §3.9
+budgets 3 µs/KiB for the prefilter, 25 µs/KiB for a mandatory pass and 60 µs/KiB for the full set:
+the first three are met, the PII-bearing numbers are 1.5x the budget and are a documented deviation —
+Go's RE2 is linear but its NFA simulation costs 30-90 ns/byte on these patterns. `TestScrubBudget`
+asserts within 4x of the spec number and logs the measured value on every run.
+
+### False positives worth knowing
+
+* `cloud_key_shape` matches any `sk-`, `ghp_`, `hf_`, `SG.` … prefix followed by 20+ token
+  characters, so prose like `risk-management-framework-2026` is redacted. It is a mandatory rule;
+  the fix is the wording, not the table.
+* `pii_email_ip`/`pii_identity_kv` leave loopback and RFC1918 addresses alone on purpose
+  (`127.0.0.0/8`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`, `0.0.0.0`) — they identify
+  nobody outside the host.
+* The reserved `payload["scrub"]` note is exempt from the boundary re-scan: its keys are rule names
+  (`"dsn_secret":1`), which a name-driven pattern would otherwise read as an assignment and refuse.
+  Everything outside the note is still checked.
+## 9. The sensors: what to look at, and what "wrong" looks like
 
 `internal/sensors` (SPEC-03) is the detection plane. It owns observation, rule evaluation, storm
 control and liveness, and nothing else: it never calls the registry, never holds a tool handle, and
@@ -109,7 +160,7 @@ record and repeats the verdict in `/health.json` as a machine-parseable reason
 | `dbus_managers[]` | every manager the daemon intended to watch, with connect/subscribe outcomes | a configured manager with `subscribe=false` is `TROUBLE-SENSORS-013` and its identity is in the reason — never a silent skip |
 | `oomd_available` | systemd-oomd present | `false` is a documented no-op (`TROUBLE-SENSORS-016`), re-probed every 10 m; the memory-pressure rules cover the gap |
 
-### 5.1 Daily checks
+### 9.1 Daily checks
 
 | Check | Command | What "wrong" looks like |
 |---|---|---|
@@ -131,7 +182,7 @@ Sensor expectations (`LastSuccessTS` decides health, `LastEventAgeS` is informat
 | `timers` | `ListTimers` + unit-state sweep every 60 s | 180 s |
 | `inotify` | a watch-set recheck every 900 s | 900 s |
 
-### 5.2 The measured traps
+### 9.2 The measured traps
 
 Three of these are the difference between a working daemon and a plausible-looking one, and each is
 regression-tested against the measurement rather than against a description:
@@ -150,7 +201,7 @@ regression-tested against the measurement rather than against a description:
    fallback timestamp is outside the journal's retention the entries are gone: `est_lost` stays `-1`
    and `cause_detail` says `retention_window_exceeded`.
 
-### 5.3 Where the state lives
+### 9.3 Where the state lives
 
 ```
 <state-root>/spool/journald/<scope>.cursor    0600, one per follow scope, written every 25
@@ -164,3 +215,84 @@ inotify watches → disk/timers sweeps → D-Bus connections → `journalctl` (S
 process group, join with a 5 s bound, then SIGKILL) → PSI triggers → a final gap for any scope still
 degraded. It returns only after every goroutine has joined; the process never exits with an armed
 trigger or a live child. Measured on this host: **36 ms**.
+
+## 10. The ladder (SPEC-05)
+
+`internal/ladder` is the only component that decides what work a detection gets. Operationally it
+shows up in five places.
+
+**One incident per signature.** Admission is an idempotent upsert: an open incident for the same
+`sig` collects arrivals (a fold, never a second incident), two signatures that share an `inKey`
+share one incident across planes, and a recurrence after `resolved` reopens the *same* incident id
+up to `ladder.reopen_max` times. `trouble incidents` (SPEC-12's CLI) therefore shows one row per
+problem, not one per arrival path.
+
+**Verification is evidence, not absence.** A window is only `passed` when a canary landed, every
+expected source was alive inside the window, no gap record overlaps it and zero events were
+observed. A canary that did not land is `invalid` (`TROUBLE-LADDER-006`) — a flat graph because
+nothing is arriving must never read as fixed. This is the single most important operational rule in
+the daemon: if you see `invalid` with an empty `sources_missing`, check the canary cadence and the
+source liveness table before believing any resolution.
+
+**Budgets escalate instead of running.** Per host, per UTC day: `agent_runs` 20, `play_runs` 50,
+`research_requests` 30, `spawns` 5. Exhaustion escalates the incident with
+`TROUBLE-LADDER-013` and still fires the outlets, so a human always sees it. A rollover at midnight
+never aborts a run: the run is charged to the day it started.
+
+**Storm breakers and suppression windows.** Breakers are per `rule:`, `sig:`, `source:` and
+`global`, with half-open probes: after the window elapses exactly one incident is admitted as a
+probe; its window passing closes the breaker, its failure re-opens it with the doubled duration
+capped at 4h. A suppression window *is* an open `sig:` breaker with `reason=suppression_window`;
+arrivals inside it fold and never advance a rung. Quiet-close (`quiet_close` default true) resolves
+a suppressed incident only when the whole window was observed quiet **and** a canary landed.
+
+**Restarts.** `Park` writes one park record per in-flight play or agent run before exit (it never
+changes the incident's state), and `ReAdopt` resumes them oldest-first with at most one run in
+flight. An already-applied mutating call is never re-applied: the re-adopter re-runs the *check*,
+which is what makes resume safe. A lost agent run (dead pid, no completion record) becomes
+`agent:failed` with `failure_class=daemon_restart_lost` and does **not** consume a strike — a restart
+storm must not starve the agent rung.
+
+**The kill-switch** stops every stage entry and records each refusal as pending work; detection,
+scrubbing, ledger writes, canaries, liveness and verification keep running, so an outage is never
+blind. Clearing it resumes from the persisted state — no command or tool call is ever replayed.
+
+## 11. The registry (SPEC-06)
+
+`internal/registry` is the daemon's entire action surface: every state-changing act trouble performs
+is one typed tool call. Three operational facts matter.
+
+**Nothing shells out.** `internal/registry/**` contains zero `os/exec` references, enforced by
+`TestNoExecInRegistry` (a `go/parser` import scan, not a text grep), and no registered module may
+declare a `command`, `cmd`, `argv`, `shell` or `script` args key
+(`TestNoArbitraryCommandModule`). The registry reaches the outside world through exactly four typed
+channels: file IO inside an allow root, `/proc` reads, the systemd D-Bus API (mediated by polkit)
+and the in-process flow/issue subsystem.
+
+**Scripts-as-data are plays.** A play is TOML in `<state_root>/plays` (or a skill's
+`plays/`), resolved skill-local → local → embedded, with `retries` (0–3, transient only,
+1s/2s/4s backoff), `register` (forward-only), `on_fail` (`abort`/`continue`/`rollback`) and a
+`when:` expression evaluated by the **same** condition language the sensors use — there is no second
+dialect. A protected play never loads: a task whose literal args name a do-not-touch path or unit is
+refused at load time with `TROUBLE-REGISTRY-007`.
+
+**Do-not-touch cannot be weakened.** The compiled-in floor (`/etc/shadow`, `/etc/sudoers`,
+`/etc/ssh/**`, `/etc/polkit-1/**`, `/boot/**`, `/usr/**`, the state root, the daemon's own unit, …)
+is always applied; a file that sets `mandatory = false` or carries `remove = [...]` is refused with
+`TROUBLE-REGISTRY-006` (`reason=do_not_touch_weaken_refused`) and the daemon continues with maximum
+enforcement. Configuration can widen the deny set, never narrow it.
+
+**The polkit artifact is an install-time contract.** `contrib/polkit/49-trouble.rules` grants
+`org.freedesktop.systemd1.manage-units` for the `reload` and `restart` verbs, for the daemon user,
+on the configured unit allowlist (`registry.service_units`), from a local session. Without it the
+probe reports `capability=policy_refused` and `service.reload`/`service.restart` refuse at authorize
+with `TROUBLE-REGISTRY-006` (`reason=polkit_missing_policy`) — never a retry, always an escalation
+carrying the install command. `trouble registry policy` prints the probe's verdict and
+`contrib/polkit`'s install state.
+
+**Conformance gates every module.** `make conformance` runs the §2.4 commands: the whole package
+with `-race`, plus the three named tests that prove the harness *rejects* a deliberately
+non-idempotent module and a mutating module without a real dry run, and that every generated schema
+stays inside the closed draft 2020-12 keyword subset. A descriptor edit without a regenerated
+`internal/registry/schema/*.json` (`make schema`) fails the boot check with
+`TROUBLE-REGISTRY-014`.

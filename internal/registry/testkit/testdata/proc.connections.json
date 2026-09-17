@@ -1,0 +1,14 @@
+[
+  {
+    "name": "proc.connections/tcp-table",
+    "args": { "proto": "tcp", "limit": 25 },
+    "mutates": false,
+    "second_apply": "pure"
+  },
+  {
+    "name": "proc.connections/states-filter",
+    "args": { "proto": "all", "states": ["established", "listen"], "limit": 25 },
+    "mutates": false,
+    "second_apply": "pure"
+  }
+]

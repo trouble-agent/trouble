@@ -23,14 +23,54 @@ type trigWords struct {
 	prefix []uint64         // 65536-bit map: "these two bytes start some keyword"
 	pairs  map[uint16][]int // lower-cased 2-byte prefix → word indexes
 	nbits  int
+
+	// Byte-class dispatch tables, built once at construction so fire() never
+	// re-derives a byte's role per input byte (§3.6 rule 10 fast path).
+	setent  [256]bool // the entropy-run alphabet
+	setpath [256]bool // the path-segment alphabet
+	cls     [256]uint8
 }
+
+// Byte classes of the scan loop.
+const (
+	clsPlain uint8 = iota // no effect on any signal
+	clsAt                 // '@': email signal
+	clsDigit              // digit: entropy-run character + IPv4 octet
+	clsDot                // '.': IPv4 separator, not an entropy character
+	clsSlash              // '/': entropy character + potential path token
+	clsEnt                // other entropy-run characters ('_', '-', '+')
+)
 
 func newTrigWords() *trigWords {
 	t := &trigWords{bit: map[string]int{}, prefix: make([]uint64, 1024), pairs: map[uint16][]int{}}
 	for i := range builtinTable {
 		t.add(builtinTable[i].anchors)
 	}
+	t.buildClasses()
 	return t
+}
+
+// buildClasses fills the byte-class tables once, at construction.
+func (t *trigWords) buildClasses() {
+	for c := 0; c < 256; c++ {
+		b := byte(c)
+		t.setent[b] = isEntropyByte(b)
+		t.setpath[b] = isPathByte(b)
+		var cls uint8
+		switch {
+		case b == '@':
+			cls = clsAt
+		case isDigitByte(b):
+			cls = clsDigit
+		case b == '.':
+			cls = clsDot
+		case b == '/':
+			cls = clsSlash
+		case t.setent[b]:
+			cls = clsEnt
+		}
+		t.cls[b] = cls
+	}
 }
 
 func (t *trigWords) add(words []string) {
@@ -75,9 +115,13 @@ func maskEmpty(m []uint64) bool {
 	return true
 }
 
-func intersects(m []uint64, other []uint64) bool {
-	for i := range m {
-		if i < len(other) && m[i]&other[i] != 0 {
+func intersects(m, other []uint64) bool {
+	n := len(m)
+	if len(other) < n {
+		n = len(other)
+	}
+	for i := 0; i < n; i++ {
+		if m[i]&other[i] != 0 {
 			return true
 		}
 	}
@@ -87,6 +131,10 @@ func intersects(m []uint64, other []uint64) bool {
 // fire scans b once and reports which trigger keywords and signals fired. It is
 // the whole prefilter: one linear pass, no RE2 program, no allocation beyond
 // the caller's mask slice.
+//
+// The loop is table-driven: one lookup of cls[b] names the byte's role, and the
+// keyword compare runs only when the 2-byte prefix map says some keyword starts
+// here.
 func (t *trigWords) fire(b []byte, matched []uint64) signalMask {
 	var sigs signalMask
 	if len(b) == 0 {
@@ -95,25 +143,39 @@ func (t *trigWords) fire(b []byte, matched []uint64) signalMask {
 	run := 0
 	for i := 0; i < len(b); i++ {
 		c := b[i]
-		// signals
-		if c == '@' {
+		switch t.cls[c] {
+		case clsAt:
 			sigs |= sigEmailAt
-		} else if c == '.' && i > 0 && i+1 < len(b) && isDigitByte(b[i-1]) && isDigitByte(b[i+1]) {
-			sigs |= sigIPv4
-		} else if c == '/' && (i == 0 || isPathContext(b[i-1])) && pathSegmentsFrom(b, i) >= 3 {
-			sigs |= sigPathSegments
-		}
-		if isEntropyByte(c) {
+			run = 0
+		case clsDigit:
 			run++
 			if run == 40 {
 				sigs |= sigEntropyRun
 			}
-		} else {
+		case clsDot:
+			if i > 0 && i+1 < len(b) && isDigitByte(b[i-1]) && isDigitByte(b[i+1]) {
+				sigs |= sigIPv4
+			}
+			run = 0
+		case clsSlash:
+			run++
+			if run == 40 {
+				sigs |= sigEntropyRun
+			}
+			if (i == 0 || isPathContext(b[i-1])) && pathSegmentsFrom(b, i, t) >= 3 {
+				sigs |= sigPathSegments
+			}
+		case clsEnt:
+			run++
+			if run == 40 {
+				sigs |= sigEntropyRun
+			}
+		default:
 			run = 0
 		}
 		// keywords: a 2-byte prefix map gates the expensive compare
 		if i+1 < len(b) {
-			k := pairKey(c, b[i+1])
+			k := uint16(lowerASCII(c))<<8 | uint16(lowerASCII(b[i+1]))
 			if t.prefix[k>>6]&(1<<(k&63)) != 0 {
 				for _, idx := range t.pairs[k] {
 					if hasFoldAt(b, i, t.words[idx]) {
@@ -148,6 +210,7 @@ func lowerASCII(c byte) byte {
 	return c
 }
 
+// pairKey remains for callers outside fire() (tests).
 func pairKey(c1, c2 byte) uint16 {
 	return uint16(lowerASCII(c1))<<8 | uint16(lowerASCII(c2))
 }
@@ -165,12 +228,12 @@ func isEntropyByte(c byte) bool {
 }
 
 // pathSegmentsFrom counts the path segments starting at an absolute path token
-// at b[i].
-func pathSegmentsFrom(b []byte, i int) int {
+// at b[i]. The path alphabet comes from the receiver's table.
+func pathSegmentsFrom(b []byte, i int, t *trigWords) int {
 	segs, j := 0, i
 	for j < len(b) && b[j] == '/' {
 		k := j + 1
-		for k < len(b) && isPathByte(b[k]) {
+		for k < len(b) && t.setpath[b[k]] {
 			k++
 		}
 		if k == j+1 {

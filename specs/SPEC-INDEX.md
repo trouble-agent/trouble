@@ -5,7 +5,7 @@ Area prefix: (none — this file allocates error-code AREAS, it does not define 
 Package: (none — repository meta-document)
 Consumed types: ErrorCode, Record, RecordKind, Prefix, Sig (ownership map only)
 Local types: — 
-ACs: AC-1..AC-27 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
+ACs: AC-1..AC-30 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
 PRD: §10, §11, §12
 
 ## 1. Purpose
@@ -16,12 +16,12 @@ This file is the binding index for the trouble spec suite. It answers three ques
    that changes AC coverage must change this file in the same commit.
 2. **What is in v0.1 and what is not** (§3.3) — the cut line is frozen from the quorum verdict and is
    normative, not advisory.
-3. **Which area owns which error range, record kinds, packages and shared types** (§3.4–§3.6) — so twelve
+3. **Which area owns which error range, record kinds, packages and shared types** (§3.4–§3.6) — so thirteen
    specs written in parallel cannot collide.
 
 ## 2. Interface
 
-Every spec file (SPEC-01…SPEC-12, SPEC-TYPES) MUST open with this metadata block immediately after the H1,
+Every spec file (SPEC-01…SPEC-13, SPEC-TYPES) MUST open with this metadata block immediately after the H1,
 verbatim in shape, so the consistency loop (§7) can parse it mechanically:
 
 ```
@@ -54,18 +54,19 @@ deferred table), `deferred` (specified at interface level only; see §3.3).
 |---|---|---|---|---|
 | SPEC-INDEX | suite map, AC matrix, cut line | §10, §11, §12 | all (index) | frozen |
 | SPEC-TYPES | shared types + error catalog | §03, §06, §06b, §06c, §07, §08, §11 | all (type substrate) | frozen |
-| SPEC-01 | ledger: record schema, sig format, ids, durability | §03, §04a, §06b, §11 | AC-6, AC-22, AC-26 | frozen |
+| SPEC-01 | ledger: record schema, sig format, ids, durability | §03, §04a, §06b, §11 | AC-6, AC-22, AC-26, AC-30 | frozen |
 | SPEC-02 | scrubbing subsystem (safety, pre-persistence) | §11 (guardrails), §04b | AC-18, AC-22 | frozen |
 | SPEC-03 | sensors: PSI, journald, D-Bus, disk, timers, inotify, rules | §04a, §11 | AC-1, AC-2, AC-4, AC-19 | frozen |
-| SPEC-04 | sentinel: ingestion contract, grouping, releases, collectors | §04b, §10, §11 | AC-10..AC-15, AC-18, AC-19, AC-22 | frozen |
+| SPEC-04 | sentinel: ingestion contract, grouping, releases, collectors, sensor routes | §04b, §10, §11 | AC-10..AC-15, AC-18, AC-19, AC-22, AC-28 | frozen |
 | SPEC-05 | ladder: state machine, verification, autonomy gates | §05, §06b, §11, §12 | AC-3, AC-4, AC-5, AC-20, AC-21, AC-22, AC-26 | frozen |
 | SPEC-06 | registry: module SDK v1, plays, do-not-touch, polkit | §06, §11 | AC-7, AC-23 | frozen |
 | SPEC-07 | research: Off-by-One contract, class-slug derivation | §05, §12 | AC-17, AC-20 | frozen |
 | SPEC-08 | flow: board-jsonl row, task-router, hot-fix spawn | §08, §11, §12 | AC-9, AC-19, AC-21, AC-26 | frozen |
 | SPEC-09 | issues: driver contract, github + duckbrain | §07, §11 | AC-8, AC-22 | frozen |
-| SPEC-10 | dashboard: routes, auth, scopes, CSRF, live updates | §04c, §11 | AC-16, AC-19 | frozen |
+| SPEC-10 | dashboard: routes, auth, scopes, CSRF, live updates, paging | §04c, §11 | AC-16, AC-19, AC-30 | frozen |
 | SPEC-11 | skills: artifact schema, local promote loop, pull distribution | §06c, §12 | AC-24 (partial), AC-26 | partial |
-| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26 | partial |
+| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology, server profiles | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26, AC-28, AC-29 | partial |
+| SPEC-13 | server profiles: standalone | light-hub (Redis buffer/dedup + DuckBrain archival) | §03, §11, §12 | AC-29 | frozen |
 
 ### 3.2 AC matrix (binding)
 
@@ -101,6 +102,9 @@ item ships — see §6.1) · **D** = deferred to v1.0 (AC text retained; v0.1 cl
 | AC-25 | AC-25 Light-mode offload: N100-class host runs light agent → incident forwarded up to hub → hub researches/fixes → updated skill pulls down → next local occurrence handled locally, offline-tolerant (queued forward). | SPEC-12 (forward + spool + pull-down), SPEC-11 | P |
 | AC-26 | AC-26 Zero-human loop: autonomy=full host + scripted service bug: detection → research → play → hot-fix foreman → PR merged by policy → verify window → promote → skill candidate auto-accepted (threshold met) — ledger + dashboard show every step, zero human actions; kill-switch stops the loop within one stage. | SPEC-01 (ledger shows every step), SPEC-05 (gates), SPEC-08 (merge/promote), SPEC-10 (visibility), SPEC-11 (auto-accept), SPEC-12 (kill-switch persistence) | B |
 | AC-27 | AC-27 Proxy relay: app → proxy (customer edge) → hub: grouping, quotas, and DSN auth intact through the relay; proxy offline → local spool → flush on reconnect, no loss. | SPEC-12 (forward/spool mechanism only) | D |
+| AC-28 | AC-28 Sensor route matrix: with a hub endpoint configured, an event class routes to B (proxied) by default and to A (direct) when `routes.per_class` overrides it; with no hub endpoint every class takes A; a hub outage mid-run sends Route B traffic to the bounded spool and every spooled event replays exactly once after the hub returns; each landed record's `origin.route` equals the route that carried it and the dashboard shows the local-vs-relayed split. | SPEC-04 (route decision, config, spool replay), SPEC-12 (forward path, ack, zone) | B |
+| AC-29 | AC-29 Light-hub degradation: `[server] profile="light-hub"` with Redis + a DuckBrain namespace — duplicate `ForwardEnvelope` idempotency keys replayed across a Redis failover land exactly one ledger record; stopping Redis mid-burst makes senders see 429 + `Retry-After` while the local spool holds and the daemon keeps serving (no event loss, hub degrades to standalone ingestion); a closed ledger generation is exported to DuckBrain and only then dropped from the hot host, and with DuckBrain unreachable archival pauses with a gap record while ingestion continues; the ladder produces identical incident/verify sequences in both profiles for the same event stream. | SPEC-13 (profile, queue, dedup gate, archival), SPEC-12 (config, health, topology) | B |
+| AC-30 | AC-30 Ledger pagination: a 10M-record corpus is walked with `page_token` + `page_size` — page-size stability holds (no record repeated, none skipped across the walk, `next_page_token` empty exactly at the end), the retention sweep deletes whole generation files (+ `.idx` + archive marker) while a walk is in flight, and a token pointing at a dropped generation returns a `reset` hint + newest-first restart instead of an error loop; a missing or mismatched `{file}.idx` is rebuilt from the generation file. | SPEC-01 (tokens, sidecar, drop-generation retention), SPEC-10 (`/incidents`, `/groups` paging) | B |
 
 `[carried]` ACs: see §6.2 — prd-v2.3.html references AC-1..AC-17 as "carry" but does not restate their
 text; the scope keys above are derived from PRD §02 (directive map) and §10 (MVP bullets) and MUST be
@@ -113,7 +117,10 @@ sentinel (envelope + store + generic JSON + collector parsers go-panic/py-traceb
 ledger + dedup core + registry (the modules in SPEC-06 §6) + ladder with the research rung (off-by-one
 driver per SPEC-07) + issue desk (github + duckbrain) + flow (board-jsonl direct + task-router; hot-fix
 per SPEC-08) + dashboard (SPEC-10) + skills local loop (candidate → review → promote; distribution =
-pull from a git repo) + shadow/assisted/full + kill-switch + lifecycle (SPEC-12).
+pull from a git repo) + shadow/assisted/full + kill-switch + lifecycle (SPEC-12) + dual sensor transport
+routes with `origin.route` (SPEC-04 §3.10a) + ledger page tokens and the per-generation `.idx` sidecar
+(SPEC-01 §2.3a/§3.7a) + server profiles, with `light-hub` (Redis ingestion buffer + dedup gate, DuckBrain
+archival tier) shipping alongside `standalone` (SPEC-13).
 
 **OUT of v0.1 (no spec section may describe these as in-scope):**
 
@@ -148,8 +155,8 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | flow, spawn | SPEC-08 |
 | issue | SPEC-09 |
 | skill | SPEC-11 |
-| gap | SPEC-03, SPEC-04, SPEC-07, SPEC-09, SPEC-12 |
-| config, lifecycle | SPEC-12 |
+| gap | SPEC-03, SPEC-04, SPEC-07, SPEC-09, SPEC-12, SPEC-13 |
+| config, lifecycle | SPEC-12, SPEC-13 (profile boot gate, degradation and archival operations) |
 | (all kinds) | SPEC-01 — the ledger is the only writer |
 
 ### 3.5 Error-area allocation (disjoint by construction)
@@ -159,7 +166,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | TROUBLE-LEDGER-0NN | SPEC-01 | 001–012 |
 | TROUBLE-SCRUB-0NN | SPEC-02 | 001–008 |
 | TROUBLE-SENSORS-0NN | SPEC-03 | 001–025 |
-| TROUBLE-SENTINEL-0NN | SPEC-04 | 001–022 |
+| TROUBLE-SENTINEL-0NN | SPEC-04 | 001–023 |
 | TROUBLE-LADDER-0NN | SPEC-05 | 001–020 |
 | TROUBLE-REGISTRY-0NN | SPEC-06 | 001–018 |
 | TROUBLE-RESEARCH-0NN | SPEC-07 | 001–010 |
@@ -168,6 +175,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | TROUBLE-DASHBOARD-0NN | SPEC-10 | 001–013 |
 | TROUBLE-SKILLS-0NN | SPEC-11 | 001–014 |
 | TROUBLE-LIFECYCLE-0NN | SPEC-12 | 001–017 |
+| TROUBLE-HUB-0NN | SPEC-13 | 001–014 |
 
 The authoritative catalog with meanings and classes is SPEC-TYPES §5. A spec MAY add a new code inside
 its own range only if the code is also added to SPEC-TYPES §5 in the same commit. Because the ranges are
@@ -189,6 +197,7 @@ disjoint, two specs can never mint the same code.
 | internal/dashboard | SPEC-10 | HealthResponse, SourceLiveness, RuntimeWatermarks, Token, Scope, AutonomyGates |
 | internal/skills | SPEC-11 | Skill, SkillGuards, Provenance, SkillStats, SkillCandidate, Play |
 | internal/lifecycle | SPEC-12 | ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration |
+| internal/hub | SPEC-13 | ProfileConfig, HubStatus, RedisStreamOffsets, LedgerArchiveMarker, ForwardEnvelope, SpoolEntry, Record, Origin, GapRecord, RouteDecision |
 | internal/types | SPEC-TYPES | (defines all of the above) |
 
 ## 4. Wiring
@@ -203,11 +212,13 @@ SPEC-TYPES ─┬─► SPEC-01 (ledger) ─┬─► SPEC-02 (scrub) ─► SPE
             │                     ├─► SPEC-07 (research) ─────────────────────┤
             │                     ├─► SPEC-08 (flow)   ◄── SPEC-06 ───────────┤
             │                     ├─► SPEC-09 (issues) ◄── SPEC-05 ───────────┘
-            │                     └─► SPEC-12 (lifecycle) ◄── SPEC-01..11 (config + version + state root)
+            │                     ├─► SPEC-12 (lifecycle) ◄── SPEC-01..11 (config + version + state root) ─► SPEC-13 (hub: profile, queue, archival)
             └─► SPEC-10 (dashboard) reads everything, writes only ack/close/autonomy
 ```
 Implementation order for v0.1: TYPES → LEDGER → SCRUB → SENSORS → SENTINEL → LADDER → REGISTRY →
-RESEARCH → FLOW → ISSUES → DASHBOARD → SKILLS → LIFECYCLE.
+RESEARCH → FLOW → ISSUES → DASHBOARD → SKILLS → LIFECYCLE. v0.1.1 adds one node after LIFECYCLE:
+**HUB** (SPEC-13) — the profile, the Redis queue/consumer and the archival tier — because it consumes the
+resolved config, the ledger writer and the spool, and nothing consumes it in reverse.
 
 ### 4.2 Cross-reference resolution rules
 
@@ -242,6 +253,7 @@ The scheme is `TROUBLE-<AREA>-<NNN>` with the AREA tokens allocated in §3.5 and
 | AC-25 | "light agent" binary is deferred | Status `P`: v0.1 ships the hub/satellite split in configuration (same code paths, T1 = hub with zero satellites), the forward path (SPEC-12 §3.7), the spool, and skill pull-down. The separate light binary is v1.0. |
 | AC-27 | "proxy" binary is deferred | Status `D`: v0.1 specifies the forward/spool/replay mechanism the proxy would use (SPEC-12 §3.7) but ships no proxy binary. No v0.1 spec section claims proxy coverage. |
 | AC-19 | "live incident appears within 2s" needs a live-update choice; SSE is deferred | Resolved in SPEC-10 §2: 2s polling of htmx partials is the v0.1 mechanism; SSE is named as the reserved v1.0 route but is not specified as in-scope. |
+| AC-28, AC-29, AC-30 (added in v0.1.1) | none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile and ledger page tokens are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are *different* artifacts from the `light-hub` server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes) | Status `B` for all three. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process. |
 
 ### 6.2 AC-1..AC-17 text absence
 
@@ -276,7 +288,7 @@ TROUBLE-LIFECYCLE-017 and marks verification `invalid` for the affected zone.
 
 Run BEFORE the commit; every step must pass with a recorded command and output.
 
-1. **Types resolve** — for every spec, parse the `Consumed types:` line; every name must appear as a Go
+1. **Types resolve** — for every spec (SPEC-01..SPEC-13), parse the `Consumed types:` line; every name must appear as a Go
    type definition in SPEC-TYPES.md §3. No orphans. No type defined twice with different shapes
    (enforced by "defined exactly once in SPEC-TYPES.md").
 2. **AC coverage both ways** — every AC in §3.2 maps to ≥1 spec section; every spec section is either
@@ -308,5 +320,6 @@ git grep -nE 'TBD|Phase 2|TODO|consider' -- specs/   # step 6 (manual review of 
   whenever a spec's AC coverage changes.
 - Every spec file is a new node under `~/trouble/specs/`; `specs/tools/selfcheck.py` is the
   only executable artifact in the suite (stdlib-only Python, no deps) and is the CI entry point for the
-  consistency loop.
+  consistency loop. Since v0.1.1 it also validates `SPEC-13` (file set 01..13) and the AC range
+  `AC-1..AC-30`, which is the mechanical half of keeping this index honest.
 - No fleet repository is modified: trouble is greenfield at `~/trouble`.

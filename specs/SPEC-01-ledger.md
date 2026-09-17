@@ -3,9 +3,9 @@
 Spec: SPEC-01
 Area prefix: TROUBLE-LEDGER
 Package: `internal/ledger`
-Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult
-Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort
-ACs: AC-6, AC-22, AC-26
+Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
+Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
+ACs: AC-6, AC-22, AC-26, AC-30
 PRD: §03, §04a, §06b, §11
 
 ## 1. Purpose
@@ -137,6 +137,45 @@ type Query interface {
 answer is outside the indexed window the **cold-read path** applies (§3.6) and `QueryInfo.Partial=true` with
 the scanned byte/line counts — an answer is never silently truncated and never an unbounded scan.
 
+### 2.3a Pagination contract — page tokens, `next_page_token`, and bounded walks
+
+Every ledger list query accepts `page_token` + `page_size` and returns `next_page_token` (SPEC-10's
+`/incidents` and `/groups` take the same two parameters — §2.3a is the one pagination dialect in the
+suite). A walk is bounded, resumable and O(page): never O(file), never O(corpus), and never an unbounded
+scan when a page is the wrong size.
+
+| Parameter | Default | Max | Rule |
+|---|---|---|---|
+| `page_size` | 500 | 5000 | records per page; absent or `0` means the default; above the max it is **clamped**, not refused — a page size is a display choice, not a policy |
+| `page_token` | `""` | — | `""` starts a newest-first walk; any other value must parse as the token grammar below |
+
+**Token grammar**: `{generation_file}::{byte_offset}::{seq}` — e.g.
+`2026-09-16.1.gen.jsonl::1835008::41207`. A token is **opaque** to clients (they never construct one),
+**stable within a generation's lifetime** (the same token returns the same page while that file exists),
+and **invalidated cleanly when a generation is dropped** (§3.7a): the answer is a `reset` hint plus a
+newest-first restart, never an error loop. `GenerationIndex` (§3.7a) is what makes a token cheap to honour
+— `byte_offset` is a real offset into a real file, and `seq` is the resume point if the file changed under
+the walk (a part rollover, a compaction).
+
+```go
+// Query additions; PageToken is defined in SPEC-TYPES §3.15.1 and QueryInfo carries the page outcome.
+Page(kind types.RecordKind, token types.PageToken, size int) ([]types.Record, types.QueryInfo, types.PageToken, error)
+PageIncidents(token types.PageToken, size int) ([]types.Incident, types.QueryInfo, types.PageToken, error)
+```
+
+| Situation | Answer | `QueryInfo` |
+|---|---|---|
+| normal page | `page_size` records (fewer only at the end of the walk) plus `next_page_token` | `Indexed=true`, `Reset=false` |
+| walk reached the oldest record | the final page with `next_page_token=""` — finished, not truncated | `Indexed=true` |
+| token names a dropped generation | newest-first first page + `reset` hint | `Reset=true`, `ResetReason="generation_dropped"` |
+| token is unparsable, or names another host's generation | newest-first first page + `reset` hint | `Reset=true`, `ResetReason="token_invalid"` / `"token_foreign"` |
+| the page comes from the cold-read path (§3.6) | the page is served from the sidecar + the file | `Partial=true` with scanned byte/line counts, still bounded by `page_size` |
+
+**What pagination is not.** It is not a cursor into a live mutation stream — `since=<seq>` on the dashboard
+partials keeps that job (SPEC-10 §2.6) — and it is not an ordering contract: a walk is newest-first, and a
+token continues that order even across a compaction. `/groups` ranked by rate reads only the in-memory
+index (SPEC-10 §2.9's no-scan rule) and uses a token to continue a long list, never to re-rank.
+
 ### 2.4 CLI seams (read-only by default; every mutating verb has `--dry-run`)
 
 | Command | Behaviour | Exit codes |
@@ -174,6 +213,9 @@ cold_read_max_lines  = 200000
 payload_ttl          = "720h"
 retention_raw        = "72h"
 retention_compacted  = "8760h"
+page_size_default    = 500             # §2.3a
+page_size_max        = 5000            # above this a page size is clamped, never refused
+offset_stride        = 256             # sidecar sample interval: a page reads ≤ stride + page_size lines
 compaction_interval  = "24h"
 compaction_min_age   = "24h"
 compaction_min_bytes = 8388608
@@ -486,7 +528,9 @@ previous generation after fsync. Content rules:
    `retention_compacted = 8760h` (generation files kept for a year), enforced at boot and on a
    `compaction_interval = 24h` timer. Expiry of a compacted day happens only after its group/incident
    aggregates have been rolled into the incident's own records — an incident's `Evidence` never loses its
-   spine.
+   spine. Deletion is **always whole-generation** (file + `.idx` + archive marker state, §3.7a): a day is
+   dropped, never edited, and under the `light-hub` profile the drop waits for a verified DuckBrain export
+   (SPEC-13 §3.5, TROUBLE-HUB-014).
 
 **Disk budget.** `disk_budget_bytes = 2147483648` (2 GiB) for `ledger/`, warn at `disk_warn_pct = 80`.
 Escalation order when exceeded: (1) compact the oldest uncompacted eligible day; (2) force
@@ -498,6 +542,52 @@ gauges preserved — records are still written, so AC-6 holds and the Rung-1 aud
 boundary via the backpressure path. Arithmetic for the defaults: 1 M events/month ≈ 33 MB/day raw → 72 h of
 raw ≈ 100 MB, plus ≤ 50 MB of compacted aggregates for a year; a 10× chatty host reaches ~1 GB, still inside
 the 2 GiB budget.
+
+### 3.7a Generation sidecar index (`.idx`), pagination, and drop-generation retention
+
+**Per-file footer index.** Every closed generation file gets a sidecar `{file}.idx`, written at rotation
+(and for the new generation at compaction) by the writer that owns the file, fsynced **before** the file is
+announced as authoritative:
+
+```go
+type GenerationIndex struct {          // SPEC-TYPES §3.15.1 — one JSON object per sidecar, mode 0600
+    File         string   // "2026-09-16.1.gen.jsonl"
+    Records      int64
+    Bytes        int64
+    FirstSeq     uint64
+    LastSeq      uint64
+    MinTS        string
+    MaxTS        string
+    Offsets      []int64  // byte offset every OffsetStride records
+    OffsetStride int      // default 256 (ledger.offset_stride)
+    TornLines    int
+    Sha256       string   // hex of the file's bytes at close; the archive marker id derives from it
+}
+```
+
+- `Offsets` + `FirstSeq/LastSeq` are what make a `{file}::{byte_offset}::{seq}` token resolvable in
+  O(log n): a page seeks to the nearest recorded offset ≤ the token, then reads at most
+  `offset_stride + page_size` lines. That bound is the pagination performance contract (SPEC-01 §7).
+- A missing or unparsable `.idx` is **rebuilt from the generation file** at boot or on first touch (count,
+  offsets, seq range, min/max ts, sha256). The sidecar is an accelerator: losing it costs a scan, never an
+  answer. A sidecar whose `Bytes`/`Sha256` disagree with the file it names is discarded, rebuilt, and the
+  file is flagged in `IndexStats` — an `.idx` never gets to describe a file it does not match.
+- **Time-window scans** consult the sidecar first: a window entirely outside `[MinTS, MaxTS]` is answered
+  with zero pages and zero reads, which is what makes "nothing happened overnight" a free question.
+
+**Retention = drop whole generations.** The sweep of §3.7 deletes at generation granularity and nothing
+finer: the generation file, its `.idx`, and — under the `light-hub` profile (SPEC-13 §3.5) — only after its
+DuckBrain archive marker is `exported` and verified (TROUBLE-HUB-014 refuses the drop otherwise; the
+generation stays on the hot host until the archive is real). In-place record deletion stays forbidden: it
+would invalidate offsets, break the monotonic-seq promise of AC-6, and turn every outstanding page token
+into a landmine. A dropped generation leaves three cheap traces — the sweep's own
+`lifecycle{op:"retention_drop"}` record, the `dropped` archive marker when archival is on, and the
+`TruncatedBeforeTS` watermark every cold-read answer carries — so a `reset` hint is an explained boundary,
+never a silent hole.
+
+**The dashboard is unaffected by drops**: `/groups` ranked by rate reads the in-memory index built at boot
+(§3.6), and dropping files never changes that answer — which is exactly why retention can be O(1) in file
+operations while the dashboard stays O(1) in reads.
 
 ### 3.8 Storage tier: JSONL + in-memory index by default, and the exact thresholds that flip it (mandate a)
 
@@ -828,6 +918,14 @@ The ledger also propagates SPEC-02 codes unchanged (§4.2) and references SPEC-1
 No new codes are required by this spec: all twelve slots are used, `policy_refused` does not apply to storage
 (SPEC-INDEX §5.2 reserves it for the polkit and do-not-touch surfaces).
 
+**Pagination and the sidecar mint no code of their own, deliberately.** A stale `page_token` is not an
+error: it is a `reset` hint in `QueryInfo` (`Reset=true` plus `ResetReason`, §2.3a) followed by a
+newest-first restart, because a client whose page fell off the retention cliff has done nothing wrong, and
+an error loop would make "drop old files" expensive in exactly the way this design exists to avoid. A
+missing, torn or mismatched `.idx` is a rebuild (§3.7a), counted in `IndexStats`, not a failure code — the
+sidecar is an accelerator, and the only durable artifact stays the generation file itself. A rebuild that
+cannot complete (an unreadable file) surfaces as 011 corruption, which is the honest existing code for it.
+
 ## 6. Edge cases
 
 1. **Midnight inside a batch.** Rotation happens between batches only; a batch's records all land in the
@@ -873,6 +971,24 @@ No new codes are required by this spec: all twelve slots are used, `policy_refus
 14. **Two records with the same `rec_id`** (a minted-id replay or a copied file). The second is reported as
     011 corruption and excluded from the index; `seq` (not `rec_id`) remains the locator, so the ledger stays
     queryable.
+15. **A page token whose generation was dropped mid-walk.** The sweep deletes whole files (§3.7a), so the
+    token's file is gone but the walk is not broken: the answer is a newest-first first page with
+    `Reset=true`, `ResetReason="generation_dropped"` and `TruncatedBeforeTS` set to the boundary — the client
+    resumes at the top and sees its own position in `QueryInfo`, never a 500 and never an empty page that
+    looks like "no records".
+16. **A token from another host, or a token that does not parse.** Same treatment as 15 with
+    `ResetReason="token_invalid"` / `"token_foreign"`: the token grammar is namespaced by the generation file
+    name, so a token minted on a satellite cannot silently address the hub's file of the same day.
+17. **Rotation and compaction inside a walk.** A part rollover (`2026-09-16.jsonl` → `.p02`) is transparent
+    because the token names its file and the offset is per-file; a compaction of the walk's day serves the
+    remainder from the generation file's sidecar with `Partial=true` and the scanned counts, and the walk
+    still terminates with `next_page_token=""`.
+18. **A `.idx` written by a crash-truncated rotation** (sidecar shorter than a full JSON object). The file is
+    discarded and rebuilt from the generation file (§3.7a), counted, and the answers are unchanged — the
+    sidecar is derived state, so its corruption is a latency event, not a correctness event.
+19. **`page_size` above the maximum, or negative.** Above the maximum it is clamped to `page_size_max`;
+    negative and non-numeric values are a 400 at the API boundary. Neither case can produce an unbounded
+    read, which is the property the clamp exists to guarantee.
 
 ## 7. Testing
 
@@ -890,6 +1006,8 @@ Test files under `internal/ledger/`, all with the measured numbers as regression
 | `scrub_boundary_test.go` | `TestMandatoryRescanRefuses` — a payload containing a mandatory-rule match is refused, **no** record is written, the propagated code is TROUBLE-SCRUB-006, `scrub_refusal_total==1`, and the value appears nowhere in the ledger bytes; `TestScanBudget` — ≤ 50 µs per 4 KiB payload; `TestRedactionCountOnly` — `Record.Redactions` equals the scrubber count and no `ByRule` value ever reaches the ledger | refusal count exact; ledger bytes contain no match |
 | `docs_test.go` | `TestLossWindowStatement` — the §2.1 sentence appears verbatim in `README.md`, `docs/operations.md`, `trouble --help` text and `GET /health.json` (`ledger_loss_window_ms`); `TestSqliteNotLinked` — `go list -deps ./internal/ledger` contains no `modernc.org/sqlite` while §3.8's triggers are un-tripped | 4/4 copies exact; 0 sqlite deps |
 | `ac_test.go` | **AC-6**: 1 M synthetic appends → seq has no holes, every line parses, every record has non-empty `origin.host_id`/`origin.source` and a `rec_id`, and no byte of a written file changes; **AC-22**: three records (journald, sentinel, collector) sharing one `merge_key` and three different sigs → `IncidentBySig`/merge-key index resolve to one incident and one group, while two distinct merge keys stay two; **AC-26**: a 20-step scripted ladder fixture (SPEC-05's harness) + a kill-switch flip inside it → `Evidence(inc)` returns ≥ 1 record per ladder state in seq order with no gap between the incident's first and last seq, and the kill-switch checkpoint is present | AC-6: 0 holes, 0 header violations; AC-22: 1 group / 1 incident, 0 duplicates; AC-26: 20/20 steps present, 0 missing seq |
+| `internal/ledger/page_test.go` | **AC-30**: token grammar round-trip (opaque, stable within a generation); a 10 M-record corpus walked at `page_size` 500 and 5000: no record repeated, no record skipped, `next_page_token=""` exactly at the end; drop-oldest-generation mid-walk → `Reset=true` + newest-first restart with **0 HTTP 500s**; tokens that are dropped/foreign/unparsable → the matching `ResetReason`; `page_size` clamp and the negative-value 400; a cold-read page stays `Partial=true` and bounded | every record exactly once per walk; p99 page latency ≤ 25 ms on the sidecar path with 10 M records; `ScannedLines ≤ offset_stride + page_size` for every page (0 unbounded scans) |
+| `internal/ledger/sidecar_test.go` | `.idx` written at rotation and at compaction with exact count/offsets/seq range/min-max ts; rebuild with the `.idx` deleted; rebuild from a torn `.idx`; a sidecar whose `Bytes`/`Sha256` mismatch the file → discard + rebuild + `IndexStats` flag; a time window outside `[MinTS, MaxTS]` → 0 bytes read; a window inside it reads only the straddling pages | rebuilt sidecar equals the original field-for-field; 0 bytes read for an out-of-range window; a mismatched sidecar never answers a page |
 
 Every threshold above is also printed by `trouble ledger status --json` as a live value beside its limit, so
 a regression is visible in production and not only in CI.
@@ -907,6 +1025,8 @@ internal/ledger/index.go       the bounded index, boot rebuild, degradation ladd
 internal/ledger/query.go       the Query interface implementation, QueryInfo
 internal/ledger/sig.go         normalization, framing, message_norm, MergeKey, the vector table
 internal/ledger/rotate.go      daily rotation, part rollover, Resolve(seq), ScanFrom
+internal/ledger/sidecar.go     the .idx writer/reader: offsets, seq range, min/max ts, rebuild-on-mismatch
+internal/ledger/page.go        the §2.3a page-token walk: parse/format, page_size clamp, reset hints
 internal/ledger/compact.go     generation rewrite, payload TTL, tombstone totals, disk escalation
 internal/ledger/tier.go        the §3.8 trigger constants + live trigger evaluation
 internal/ledger/*_test.go      §7

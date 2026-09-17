@@ -5,7 +5,7 @@ Area prefix: (none — this file defines the error-CODE catalog for every area)
 Package: `internal/types`
 Consumed types: — (this file defines them)
 Local types: —
-ACs: AC-1..AC-27 (all — every AC depends on the shared record/identity model)
+ACs: AC-1..AC-30 (all — every AC depends on the shared record/identity model)
 PRD: §03, §06, §06b, §06c, §07, §08, §11
 
 ## 1. Purpose
@@ -13,7 +13,7 @@ PRD: §03, §06, §06b, §06c, §07, §08, §11
 Every Go type that crosses a package boundary in trouble is defined here, once, with a complete JSON
 example. A spec may define package-private types, but only inside its own package and only when the type
 never appears in an exported signature, an HTTP body, a TOML schema, a ledger payload, or another spec.
-`internal/types` imports nothing from `internal/{ledger,scrub,sensors,sentinel,ladder,registry,research,flow,issues,dashboard,skills,lifecycle}`
+`internal/types` imports nothing from `internal/{ledger,scrub,sensors,sentinel,ladder,registry,research,flow,issues,dashboard,skills,lifecycle,hub}`
 (dependency direction is one-way: subsystems import types, never the reverse).
 
 This file is also the canonical error-code catalog (§5) and the canonical constants/enums (§6).
@@ -27,6 +27,9 @@ func ParseID(prefix Prefix, s string) (string, error)
 func NewSig(source SigSource, algo SigAlgo, normVersion int, digest []byte) Sig
 func (s Sig) String() string              // canonical sig string (see §6.3)
 func ParseSig(s string) (Sig, error)
+func (t PageToken) String() string        // "{generation_file}::{byte_offset}::{seq}" (§3.15.1)
+func ParsePageToken(s string) (PageToken, error) // "" parses to the start token; malformed → error
+func (d RouteDecision) Valid() bool       // "A" | "B" (§3.15.3)
 func NowUTC() string                      // RFC3339 UTC, millisecond precision, always "Z"
 func (t SigSource) Valid() bool
 func (e ErrorCode) Is(class ErrorClass) bool
@@ -51,6 +54,7 @@ type Origin struct {
     HostID string `json:"host_id"`   // stable machine id, NOT hostname: sha256(hardware+install-salt)[:16] or configured
     HubID  string `json:"hub_id"`    // "" for root hub; else the hub this record was received from
     Source string `json:"source"`    // free-form producer: "psi", "journald:payment-worker", "sentinel:myapp", "collector:legacy"
+    Route  RouteDecision `json:"route"` // how the event reached the system: "A" direct (loopback) | "B" proxied (hub); "" for non-sensor paths (SPEC-04 §3.10a)
 }
 
 type Actor struct {
@@ -75,7 +79,7 @@ const (
 ```
 
 ```json
-{"host_id":"7f3a91c2d4e5b607","hub_id":"","source":"sentinel:payment-worker"}
+{"host_id":"7f3a91c2d4e5b607","hub_id":"","source":"sentinel:payment-worker","route":"A"}
 {"kind":"daemon","id":"troubled","version":"0.1.0","git_sha":"9c1f0ab","build_time":"2026-09-16T09:00:00.000Z"}
 ```
 
@@ -122,7 +126,7 @@ type Record struct {
 ```
 
 ```json
-{"seq":41207,"rec_id":"ev_01J9Z6Q0M2X4T8V1K7B3N5R8WD","ts":"2026-09-16T09:14:03.221Z","kind":"incident","schema_version":1,"sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","inc":"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE","origin":{"host_id":"7f3a91c2d4e5b607","hub_id":"","source":"sentinel:payment-worker"},"actor":{"kind":"daemon","id":"troubled","version":"0.1.0","git_sha":"9c1f0ab","build_time":"2026-09-16T09:00:00.000Z"},"redactions":3,"payload":{"transition":"detected→recorded","entry_rung":"play"}}
+{"seq":41207,"rec_id":"ev_01J9Z6Q0M2X4T8V1K7B3N5R8WD","ts":"2026-09-16T09:14:03.221Z","kind":"incident","schema_version":1,"sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","inc":"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE","origin":{"host_id":"7f3a91c2d4e5b607","hub_id":"","source":"sentinel:payment-worker","route":"A"},"actor":{"kind":"daemon","id":"troubled","version":"0.1.0","git_sha":"9c1f0ab","build_time":"2026-09-16T09:00:00.000Z"},"redactions":3,"payload":{"transition":"detected→recorded","entry_rung":"play"}}
 ```
 
 ### 3.3 Scrubbing
@@ -798,6 +802,7 @@ type HealthResponse struct {                 // GET /health.json — also consum
     Autonomy       AutonomyGates     `json:"autonomy"`
     Breakers       []Breaker         `json:"breakers"`
     RW             RuntimeWatermarks `json:"runtime_watermarks"`
+    Hub            *HubStatus        `json:"hub,omitempty"` // server-profile stanza (SPEC-13); absent in `standalone`
 }
 
 type SourceLiveness struct {                 // per-source liveness expectation (verification input)
@@ -840,7 +845,7 @@ const (ScopeRead Scope = "read"; ScopeWrite Scope = "write"; ScopeAutonomy Scope
 ```
 
 ```json
-{"status":"ok","version":"0.1.0","git_sha":"9c1f0ab","build_time":"2026-09-16T09:00:00.000Z","uptime_s":3881.4,"ledger_last_seq":41207,"ledger_last_ts":"2026-09-16T09:14:03.221Z","ledger_stall_s":1.2,"sensors":[{"sensor":"psi","enabled":true,"degraded":false,"reason":"","last_success_ts":"2026-09-16T09:14:03.000Z","last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"events_total":912,"gaps":0,"dropped":0}],"sources":[{"host_id":"7f3a91c2d4e5b607","source":"sentinel:payment-worker","zone":"loopback","expected":true,"alive":true,"last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"max_age_s":300}],"autonomy":{"mode":"shadow","kill_switch":false,"allow_detect":true,"allow_research":true,"allow_play_mutate":false,"allow_agent":true,"allow_spawn":true,"allow_merge":false,"allow_promote":false,"allow_skill_accept":false,"grants":[],"changed_by":"troubled","changed_ts":"2026-09-16T09:00:00.000Z"},"breakers":[],"runtime_watermarks":{"binary_bytes":10485760,"rss_bytes":41943040,"rss_peak_bytes":52428800,"mem_high_bytes":201326592,"mem_max_bytes":268435456,"ledger_bytes":30408704,"spool_bytes":0,"spool_budget_bytes":268435456,"events_per_min":18.4,"groups_open":7,"incidents_open":2,"worktrees":1}}
+{"status":"ok","version":"0.1.0","git_sha":"9c1f0ab","build_time":"2026-09-16T09:00:00.000Z","uptime_s":3881.4,"ledger_last_seq":41207,"ledger_last_ts":"2026-09-16T09:14:03.221Z","ledger_stall_s":1.2,"sensors":[{"sensor":"psi","enabled":true,"degraded":false,"reason":"","last_success_ts":"2026-09-16T09:14:03.000Z","last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"events_total":912,"gaps":0,"dropped":0}],"sources":[{"host_id":"7f3a91c2d4e5b607","source":"sentinel:payment-worker","zone":"loopback","expected":true,"alive":true,"last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"max_age_s":300}],"autonomy":{"mode":"shadow","kill_switch":false,"allow_detect":true,"allow_research":true,"allow_play_mutate":false,"allow_agent":true,"allow_spawn":true,"allow_merge":false,"allow_promote":false,"allow_skill_accept":false,"grants":[],"changed_by":"troubled","changed_ts":"2026-09-16T09:00:00.000Z"},"breakers":[],"runtime_watermarks":{"binary_bytes":10485760,"rss_bytes":41943040,"rss_peak_bytes":52428800,"mem_high_bytes":201326592,"mem_max_bytes":268435456,"ledger_bytes":30408704,"spool_bytes":0,"spool_budget_bytes":268435456,"events_per_min":18.4,"groups_open":7,"incidents_open":2,"worktrees":1},"hub":{"enabled":true,"profile":"light-hub","since":"2026-09-16T09:00:00.000Z","redis":{"stream":"trouble:ingest","group":"ledger-writers","consumer":"7f3a91c2d4e5b607","stream_len":18422,"pending":12,"lag":181,"last_delivered_id":"1758012841221-318","last_acked_id":"1758012841221-306","reclaims":2,"dedup_hits":37,"dedup_misses":18422,"dedup_conflicts":1,"dedup_window":"redis","backpressure_total":0,"degraded":false,"degraded_reason":"","since":"2026-09-16T09:00:00.000Z"},"archive_queue":3,"archive_last_ts":"2026-09-16T08:20:00.000Z","archived_files":41,"droppable_generations":2,"marker_pending":3,"route_counters":{"A":9021,"B":9401},"degraded":false,"degraded_reason":""}}
 ```
 
 ### 3.13 Skills (SPEC-11)
@@ -1145,6 +1150,35 @@ type CompactionResult struct {
 {"group_id":"grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH","sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","digest":"9f2c1d3e4b5a6c7d0123456789abcdef0123456789abcdef0123456789abcdef","merge_key":"bcc48494f2190f4f","source":"sentinel","title":"queue wedge: pool exhausted","count":6401,"rate_1m":18.4,"rate_5m":12.1,"rate_60m":6.7,"trend":0.52,"first_seen_ts":"2026-09-16T06:00:00.000Z","last_seen_ts":"2026-09-16T09:14:03.221Z","incident_id":"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE","counters":{"events":6401,"suppressed":0,"redacted_values":3,"dropped_events":0,"sample_rate":1},"cold":false}
 ```
 
+**Page and sidecar types (SPEC-01 §2.3a, §3.7a):**
+
+```go
+type PageToken struct {                 // ledger page cursor; opaque to clients, stable within a generation
+    Generation string `json:"generation"`  // "2026-09-16.1.gen.jsonl" — the file the cursor points into
+    ByteOffset int64  `json:"byte_offset"` // offset into Generation, ≤ the file's size when the token was minted
+    Seq        uint64 `json:"seq"`         // resume point if the file changed under the walk (part rollover, compaction)
+}
+
+type GenerationIndex struct {           // the {file}.idx sidecar: written at close, rebuilt if missing/mismatched
+    File         string   `json:"file"`          // generation file name
+    Records      int64    `json:"records"`
+    Bytes        int64    `json:"bytes"`
+    FirstSeq     uint64   `json:"first_seq"`
+    LastSeq      uint64   `json:"last_seq"`
+    MinTS        string   `json:"min_ts"`
+    MaxTS        string   `json:"max_ts"`
+    Offsets      []int64  `json:"offsets"`       // byte offset every OffsetStride records
+    OffsetStride int      `json:"offset_stride"` // default 256
+    TornLines    int      `json:"torn_lines"`
+    Sha256       string   `json:"sha256"`        // hex of the file's bytes at close; the archive marker id derives from it
+}
+```
+
+```json
+{"generation":"2026-09-16.1.gen.jsonl","byte_offset":1835008,"seq":41207}
+{"file":"2026-09-16.1.gen.jsonl","records":41207,"bytes":30408704,"first_seq":1,"last_seq":41207,"min_ts":"2026-09-16T00:00:00.104Z","max_ts":"2026-09-16T23:59:59.887Z","offsets":[0,262144,524288,786432,1048576,1310720,1572864,1835008],"offset_stride":256,"torn_lines":0,"sha256":"3f9a1c0d5b7e2416a8c93d0e1f4b6275c8d9e0f1a2b3c4d5e6f708192a3b4c5d"}
+```
+
 #### 3.15.2 Contributed by SPEC-02
 
 _SPEC-02 — scrubbing subsystem (trouble v0.1)_
@@ -1234,6 +1268,32 @@ type CollectorParser struct {         // config + health surface for the log col
 ```json
 {"project":"7","quota_epm":600,"window_s":60,"events_window":41,"remaining":559,"rejected_total":3,"dropped_total":3,"spooled_total":0,"sampled_total":0,"legacy_store_total":1,"unknown_items_total":12,"client_report_discards":{"queue_overflow":2,"network_error":5},"auth_forms":["x_sentry_auth","query_sentry_key"],"last_event_ts":"2026-09-16T09:14:03.221Z","canary_last_ts":"2026-09-16T09:10:00.004Z","canary_last_ok":true,"disk_bytes":1048576,"disk_budget_bytes":2147483648}
 {"name":"py-traceback","enabled":true,"kind":"multiline","start_pattern":"^Traceback \\(most recent call last\\):","continuation":["^  ","^File \"","^\\s+\\^","^raise ","^During handling","^The above exception"],"flush_timeout":"200ms","max_event_bytes":1048576,"level":"error","sig_fields":["exception_class","frame_last.function","frame_last.file"],"sources":["journal:legacy-daemon","file:/var/log/legacy/err.log"]}
+```
+
+**Sensor transport route types (SPEC-04 §3.10a):**
+
+```go
+type RouteMode string
+const (
+    RouteAuto   RouteMode = "auto"    // resolve per event: B when a hub endpoint is configured, else A
+    RouteDirect RouteMode = "direct"  // force the local hop (A)
+    RouteProxy  RouteMode = "proxy"   // force the hub hop (B); refused at boot when no hub endpoint is configured
+)
+
+type RouteDecision string
+const (
+    RouteA RouteDecision = "A"        // direct: sensor → local daemon over loopback
+    RouteB RouteDecision = "B"        // proxied: sensor → local daemon → hub daemon (satellite forward path, SPEC-12 §3.7)
+)
+
+type RouteConfig struct {              // [sentinel.routes]
+    Default  RouteMode            `json:"default"`    // auto | direct | proxy
+    PerClass map[string]RouteMode `json:"per_class"`  // sig-prefix → route; longest prefix wins
+}
+```
+
+```json
+{"default":"auto","per_class":{"psi:io_pressure":"direct","sentinel:sha256v1":"proxy"}}
 ```
 
 #### 3.15.4 Contributed by SPEC-05
@@ -1744,6 +1804,91 @@ type ForemanBrief struct {
 ```
 
 
+#### 3.15.11 Contributed by SPEC-13
+
+_SPEC-13 — server profiles: standalone and light-hub (Redis ingestion buffer + DuckBrain archival) (trouble v0.1.1)_
+
+```go
+type ProfileConfig struct {             // the resolved [server] profile and the keys it requires (SPEC-13 §2.1)
+    Profile          string   `json:"profile"`              // "standalone" | "light-hub"
+    HubID            string   `json:"hub_id"`               // "" → origin.host_id
+    RedisURL         string   `json:"redis_url"`            // required when profile=light-hub; password redacted in explain dumps
+    RedisStream      string   `json:"redis_stream"`         // "trouble:ingest"
+    ConsumerGroup    string   `json:"consumer_group"`       // "ledger-writers"
+    Consumer         string   `json:"consumer"`             // "" → origin.host_id (one consumer per state root)
+    MaxLen           int64    `json:"maxlen"`               // 1000000, approximate trim; un-acked entries are never trimmed
+    DedupTTL         Duration `json:"dedup_ttl"`            // "24h"
+    RequireRedis     bool     `json:"require_redis"`        // false → degrade to the standalone path instead of refusing
+    DBNamespace      string   `json:"duckbrain_namespace"`  // required when profile=light-hub
+    DBEndpoint       string   `json:"duckbrain_endpoint"`
+    ArchiveInterval  Duration `json:"archive_interval"`     // "1h"
+    KeepLocalGens    int      `json:"keep_local_generations"` // 2
+    Valid            bool     `json:"valid"`                // false → TROUBLE-HUB-001 at boot, exit 13
+    InvalidReason    string   `json:"invalid_reason"`       // "" | missing_redis_url | missing_namespace | satellite_profile | unknown_profile
+}
+
+type RedisStreamOffsets struct {        // live queue state; the zero value when profile=standalone
+    Stream          string `json:"stream"`
+    Group           string `json:"group"`
+    Consumer        string `json:"consumer"`
+    StreamLen       int64  `json:"stream_len"`
+    Pending         int64  `json:"pending"`          // delivered, not yet acked
+    Lag             int64  `json:"lag"`              // stream_len − acked position
+    LastDeliveredID string `json:"last_delivered_id"`
+    LastAckedID     string `json:"last_acked_id"`
+    Reclaims        int64  `json:"reclaims"`         // XAUTOCLAIM rounds that took back stranded entries
+    DedupHits       int64  `json:"dedup_hits"`
+    DedupMisses     int64  `json:"dedup_misses"`
+    DedupConflicts  int64  `json:"dedup_conflicts"`
+    DedupWindow     string `json:"dedup_window"`     // "redis" (24h TTL) | "lru" (degraded, hub.dedup_lru)
+    Backpressure    int64  `json:"backpressure_total"`
+    Degraded        bool   `json:"degraded"`
+    DegradedReason  string `json:"degraded_reason"`  // "" | redis_unavailable | redis_refusing | redis_auth | archive_paused
+    Since           string `json:"since"`
+}
+
+type HubStatus struct {                 // HealthResponse.Hub — the profile's stanza in the one health surface
+    Enabled          bool               `json:"enabled"`              // false in standalone
+    Profile          string             `json:"profile"`
+    Since            string             `json:"since"`
+    Redis            RedisStreamOffsets `json:"redis"`
+    ArchiveQueue     int64              `json:"archive_queue"`        // closed generations waiting to be exported
+    ArchiveLastTS    string             `json:"archive_last_ts"`
+    ArchivedFiles    int64              `json:"archived_files"`
+    DroppableGens    int                `json:"droppable_generations"` // verified exports the sweep may now delete
+    MarkerPending    int64              `json:"marker_pending"`
+    RouteCounters    map[string]int64   `json:"route_counters"`       // {"A":n,"B":n} — local vs relayed (SPEC-04 §3.10a)
+    Degraded         bool               `json:"degraded"`
+    DegradedReason   string             `json:"degraded_reason"`
+}
+
+type LedgerArchiveMarker struct {       // one append-only object per generation transition (SPEC-13 §3.5)
+    MarkerID   string `json:"marker_id"`   // hex(sha256(file bytes))[:16] — content-derived, so a re-export is the same marker
+    File       string `json:"file"`
+    Namespace  string `json:"namespace"`
+    ObjectKey  string `json:"object_key"`  // <namespace>/ledger/<file>.jsonl.gz
+    Bytes      int64  `json:"bytes"`
+    GzipBytes  int64  `json:"gzip_bytes"`
+    Sha256     string `json:"sha256"`
+    Records    int64  `json:"records"`
+    FirstSeq   uint64 `json:"first_seq"`
+    LastSeq    uint64 `json:"last_seq"`
+    MinTS      string `json:"min_ts"`
+    MaxTS      string `json:"max_ts"`
+    State      string `json:"state"`       // pending | exported | verified | dropped | failed
+    VerifiedTS string `json:"verified_ts"`
+    ErrorCode  string `json:"error_code"`  // mirrored into the accompanying lifecycle record (SPEC-INDEX §5.3)
+    TS         string `json:"ts"`
+}
+```
+
+```json
+{"profile":"light-hub","hub_id":"","redis_url":"redis://127.0.0.1:6379/0","redis_stream":"trouble:ingest","consumer_group":"ledger-writers","consumer":"","maxlen":1000000,"dedup_ttl":"24h","require_redis":false,"duckbrain_namespace":"trouble/7f3a91c2d4e5b607","duckbrain_endpoint":"http://127.0.0.1:3000","archive_interval":"1h","keep_local_generations":2,"valid":true,"invalid_reason":""}
+{"stream":"trouble:ingest","group":"ledger-writers","consumer":"7f3a91c2d4e5b607","stream_len":18422,"pending":12,"lag":181,"last_delivered_id":"1758012841221-318","last_acked_id":"1758012841221-306","reclaims":2,"dedup_hits":37,"dedup_misses":18422,"dedup_conflicts":1,"dedup_window":"redis","backpressure_total":0,"degraded":false,"degraded_reason":"","since":"2026-09-16T09:00:00.000Z"}
+{"enabled":true,"profile":"light-hub","since":"2026-09-16T09:00:00.000Z","redis":{"stream":"trouble:ingest","group":"ledger-writers","consumer":"7f3a91c2d4e5b607","stream_len":18422,"pending":12,"lag":181,"last_delivered_id":"1758012841221-318","last_acked_id":"1758012841221-306","reclaims":2,"dedup_hits":37,"dedup_misses":18422,"dedup_conflicts":1,"dedup_window":"redis","backpressure_total":0,"degraded":false,"degraded_reason":"","since":"2026-09-16T09:00:00.000Z"},"archive_queue":3,"archive_last_ts":"2026-09-16T08:20:00.000Z","archived_files":41,"droppable_generations":2,"marker_pending":3,"route_counters":{"A":9021,"B":9401},"degraded":false,"degraded_reason":""}
+{"marker_id":"3f9a1c0d5b7e2416","file":"2026-09-16.1.gen.jsonl","namespace":"trouble/7f3a91c2d4e5b607","object_key":"trouble/7f3a91c2d4e5b607/ledger/2026-09-16.1.gen.jsonl.gz","bytes":30408704,"gzip_bytes":10643046,"sha256":"3f9a1c0d5b7e2416a8c93d0e1f4b6275c8d9e0f1a2b3c4d5e6f708192a3b4c5d","records":41207,"first_seq":1,"last_seq":41207,"min_ts":"2026-09-16T00:00:00.104Z","max_ts":"2026-09-16T23:59:59.887Z","state":"verified","verified_ts":"2026-09-16T09:20:41.004Z","error_code":"","ts":"2026-09-16T09:20:41.004Z"}
+```
+
 ## 4. Wiring
 
 | Producer | Consumes | Emits kinds |
@@ -1760,11 +1905,13 @@ type ForemanBrief struct {
 | internal/dashboard | HealthResponse (read-only consumer) | (none; reads ledger + index) |
 | internal/skills | Skill, SkillCandidate, SkillStats | skill |
 | internal/lifecycle | ConfigValue, Heartbeat, ForwardEnvelope | config, lifecycle |
+| internal/hub | ProfileConfig, HubStatus, RedisStreamOffsets, LedgerArchiveMarker, ForwardEnvelope, Record, GapRecord | lifecycle (config), gap (archive loss) |
 
 ## 5. Errors — the canonical catalog
 
 Every error code in every spec MUST be one of the codes below (specs may not invent new codes; if a spec
-needs one, it is added here first). Format: `TROUBLE-<AREA>-<NNN>`. Areas are exactly the 12 package names.
+needs one, it is added here first). Format: `TROUBLE-<AREA>-<NNN>`. Areas are exactly the package names
+allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.1).
 
 | Code | Class | Meaning | Owning spec |
 |---|---|---|---|
@@ -1835,6 +1982,7 @@ needs one, it is added here first). Format: `TROUBLE-<AREA>-<NNN>`. Areas are ex
 | TROUBLE-SENTINEL-020 | transient | spool write failed | SPEC-04 |
 | TROUBLE-SENTINEL-021 | permanent | request method not allowed on an ingestion route | SPEC-04 |
 | TROUBLE-SENTINEL-022 | permanent | unsupported Content-Type on an ingestion route | SPEC-04 |
+| TROUBLE-SENTINEL-023 | permanent | invalid `[sentinel.routes]` table at boot: unknown route, empty sig-prefix key, one prefix mapped to two routes, or `proxy` without a configured hub endpoint | SPEC-04 |
 | TROUBLE-LADDER-001 | permanent | illegal ladder transition attempted for the current state | SPEC-05 |
 | TROUBLE-LADDER-002 | permanent | play configured max_runs exhausted → escalate to the next rung | SPEC-05 |
 | TROUBLE-LADDER-003 | transient | agent lease held by another incident on this host | SPEC-05 |
@@ -1956,6 +2104,20 @@ needs one, it is added here first). Format: `TROUBLE-<AREA>-<NNN>`. Areas are ex
 | TROUBLE-LIFECYCLE-015 | transient | spool budget exceeded → drop-oldest + ledger note | SPEC-12 |
 | TROUBLE-LIFECYCLE-016 | permanent | unit is missing OnFailure/escalation wiring | SPEC-12 |
 | TROUBLE-LIFECYCLE-017 | transient | clock skew beyond tolerance across hosts | SPEC-12 |
+| TROUBLE-HUB-001 | permanent | invalid/incomplete server profile (unknown profile, light-hub without a Redis URL or a DuckBrain namespace, light-hub on a satellite) | SPEC-13 |
+| TROUBLE-HUB-002 | permanent | Redis connection or credentials rejected (bad URL scheme, NOAUTH/WRONGPASS, unusable DB) | SPEC-13 |
+| TROUBLE-HUB-003 | transient | Redis unreachable at boot (degraded start, or exit 13 when `require_redis=true`) | SPEC-13 |
+| TROUBLE-HUB-004 | transient | stream write failed: senders get 429/503 + `Retry-After`, local spools hold | SPEC-13 |
+| TROUBLE-HUB-005 | permanent | consumer-group operation failed in a way BUSYGROUP does not explain (mistyped group, non-stream key) | SPEC-13 |
+| TROUBLE-HUB-006 | transient | dedup gate unavailable → bounded LRU fallback for the window, counted once | SPEC-13 |
+| TROUBLE-HUB-007 | permanent | stream entry does not decode as a `ForwardEnvelope` → dead-lettered with a gap record | SPEC-13 |
+| TROUBLE-HUB-008 | transient | entries stranded past `claim_min_idle` × 3 with no active consumer → reclaimed | SPEC-13 |
+| TROUBLE-HUB-009 | permanent | archival target unusable (empty/unresolvable namespace, invalid driver config) | SPEC-13 |
+| TROUBLE-HUB-010 | transient | DuckBrain unreachable during export → job stays pending, queue depth visible, ingestion unaffected | SPEC-13 |
+| TROUBLE-HUB-011 | permanent | export refused: generation not closed (no `.idx`) or its bytes changed between plan and export | SPEC-13 |
+| TROUBLE-HUB-012 | transient | export verification failed (read-back sha256/byte mismatch) → marker pending, retried by key | SPEC-13 |
+| TROUBLE-HUB-013 | permanent | live profile switch requested via reload → refused until restart | SPEC-13 |
+| TROUBLE-HUB-014 | permanent | retention tried to drop a generation whose archive marker is not `exported` and verified | SPEC-13 |
 
 ## 6. Constants, enums and pinned formats
 
@@ -1980,6 +2142,9 @@ needs one, it is added here first). Format: `TROUBLE-<AREA>-<NNN>`. Areas are ex
 | DSN | `{scheme}://{pubkey}[:{secret}]@{host}[:{port}]/{project_id}` |
 | Autonomy default | `shadow` |
 | Hot-fix default | `enabled=false`, `allowed_repos=[]`, `promote=human` |
+| Server profile | `standalone` (zero external deps); `light-hub` = Redis queue + dedup gate and DuckBrain archival (SPEC-13) |
+| Ledger pagination | `page_size` default 500 / max 5000; token `{generation_file}::{byte_offset}::{seq}`; `.idx` sidecar `offset_stride` 256 |
+| Sensor route default | `[sentinel.routes] default="auto"` → B when a hub endpoint is configured on a satellite, else A; `origin.route` on every sensor-written record |
 
 ### 6.2 ID prefixes
 
@@ -2003,6 +2168,12 @@ different signature spaces and are never merged (they are linked as "related" on
 4. Error-catalog lint: every `TROUBLE-<AREA>-<NNN>` in every spec exists in §5, is unique, and its class
    matches; a CI grep enforces it (SPEC-INDEX §7 step 4).
 5. `NowUTC()` format test: regex `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$`.
+6. v0.1.1 type round-trips: `PageToken.String()`/`ParsePageToken()` over the §3.15.1 vectors (including the
+   `""` start token and three malformed forms), `RouteDecision.Valid()` over `A`/`B`/`""`/`"a"`,
+   `RouteConfig` prefix-table round-trip, and JSON round-trips for `GenerationIndex`, `ProfileConfig`,
+   `RedisStreamOffsets`, `HubStatus` and `LedgerArchiveMarker` using the §3.15 examples verbatim; plus a
+   decode test asserting `Origin.Route` and `HealthResponse.Hub` are absent from the JSON of a record and a
+   health body that never had them (no schema change for existing producers).
 
 ## 8. hilo impact
 

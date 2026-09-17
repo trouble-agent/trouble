@@ -3,9 +3,9 @@
 Spec: SPEC-12
 Area prefix: TROUBLE-LIFECYCLE
 Package: internal/lifecycle
-Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity
+Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity, ProfileConfig, HubStatus
 Local types: explainRow, unitTemplate, bindProbe, stallVerdict, spoolSegment, spoolState, upgradePlan, secretFileCheck, zoneWindow
-ACs: AC-14, AC-18, AC-25, AC-26
+ACs: AC-14, AC-18, AC-25, AC-26, AC-28, AC-29
 PRD: §09, §11, §12
 
 ## 1. Purpose
@@ -47,7 +47,10 @@ AC coverage: **AC-14/AC-18** are exercised by the bind matrix, the forward path 
 | `trouble --version` + `troubled --version` | `version git_sha build_time` triple from §3.4. |
 
 `trouble init` (DSN generation) is SPEC-04's command; this spec constrains it exactly once: the DSN host it
-generates is `ingest.advertised_host`, never the bind address (§3.2 bind preflight).
+generates is `ingest.advertised_host`, never the bind address (§3.2 bind preflight). `trouble hub …`
+(profile status, archival, dedup probe, drain) is SPEC-13's command group; this spec constrains it once
+too: `trouble hub status` reports through the `HealthResponse` contract of §3.3 and the one health surface
+of §2.2, never through an endpoint of its own.
 
 ### 2.2 HTTP surface
 
@@ -156,7 +159,8 @@ real, has a default, and appears in the explain dump.
 | `hub.protocol_version` | `1` | forward envelope header |
 | `hub.forward_batch_records` / `hub.forward_batch_bytes` | `200` / `524288` | below the 1MB decompressed cap with headroom (SPEC-04 §2) |
 | `hub.retry_base` / `hub.retry_max` | `2s` / `5m` | exponential backoff with ±20% jitter |
-| `hub.dedup_lru` | `65536` | bounded in-memory idempotency-key LRU at the hub |
+| `hub.dedup_lru` | `65536` | bounded in-memory idempotency-key LRU at the hub; also the degraded fallback for the light-hub Redis gate (SPEC-13 §3.4) |
+| `server.profile` | `standalone` (`standalone`\|`light-hub`) | the server profile (§3.7a); `light-hub` requires `server.redis.url` + `server.duckbrain.namespace` and is refused on a satellite |
 | `spool.budget_bytes` | `268435456` (256MB) | brief §1.P |
 | `spool.gap_reserve_bytes` | `2097152` (2MB) | drop-oldest never touches this: loss notices must survive |
 | `spool.fsync` / `spool.fsync_window_ms` | `group` / `200` | same group-commit window as the ledger |
@@ -603,6 +607,47 @@ ledger writer — one durable queue, one eviction policy, one ack.
   here because the v0.1 full daemon uses every one of them satellite-side. No numbered section of this suite
   defines a separate light or proxy process, and the proxy's per-tenant spool isolation is not specified.
 
+### 3.7a Server profiles in the topology table: standalone | light-hub (SPEC-13)
+
+The forward path above is profile-independent — a satellite spools and relays identically in both profiles.
+What a profile decides is how a **hub** absorbs load and where its closed generations live. The keys and
+semantics belong to SPEC-13; this section fixes their place inside the lifecycle model so config
+resolution, provenance, `/health.json` and the topology table stay one system rather than two.
+
+| Aspect | `standalone` (default) | `light-hub` |
+|---|---|---|
+| `[server] profile` | `"standalone"` | `"light-hub"` |
+| Ingestion plumbing | in-process path: scrub → sig → ledger `Append` | Redis stream + consumer group → ledger `Append` (SPEC-13 §3.3) |
+| Dedup gate | bounded in-memory LRU (`hub.dedup_lru` 65536) + record-scoped idempotency | Redis `SET NX` on the same idempotency key, 24h TTL, with that LRU as the degraded fallback (SPEC-13 §3.4) |
+| Archival tier | none — local generations until retention | closed generations exported to the DuckBrain namespace, then droppable (SPEC-13 §3.5) |
+| External dependencies | zero | Redis (queue + dedup gate), DuckBrain (archival) |
+| `/health.json` | no `hub` stanza (`HubStatus.Enabled=false`) | `hub` stanza present; `status=degraded` + `detail.reason` when the queue or the archive tier is down |
+| Config keys | `server.profile` | `server.profile` + `server.redis.*` (url, stream, group, maxlen, dedup_ttl, require_redis) + `server.duckbrain.*` (namespace, endpoint, archive_interval, keep_local_generations) |
+
+Five rules keep the two profiles one system:
+
+1. **The profile resolves like any other key** (`flag > env > file > default`, §3.1) and appears in the boot
+   `config` record with its provenance. There is no profile-specific config file and no second resolution
+   path.
+2. **Validation is a boot gate, not a runtime discovery**: `light-hub` without `server.redis.url` or
+   `server.duckbrain.namespace` refuses to start (TROUBLE-HUB-001, exit 13), and `hub.mode=satellite`
+   refuses `light-hub` outright — a satellite's durable queue is its spool, and a second queue would be a
+   second truth.
+3. **A live profile switch is refused** (TROUBLE-HUB-013): SIGHUP reloads other keys and the pending switch
+   is reported in `/health.json` until a restart. Transport plumbing is not hot-swappable, and stating that
+   is cheaper than pretending otherwise.
+4. **Nothing else in the topology table moves.** The T1..T5 row decisions (bind-scoped auth, one forwarding
+   protocol, bounded queues and token sessions, origin fields + proxy key class) are unchanged: a
+   `light-hub` hub is still the T3/T4/T5 hub, with a faster intake and an archival tier.
+5. **The watchdog chain is untouched** (§3.3, §3.5): readiness, heartbeat and the stall alarm never depend
+   on Redis or DuckBrain, because a hub whose liveness signal lives in an external service cannot report
+   that service's outage.
+
+`trouble topology` gains one row for the profile — a `TopologyDecision` naming `server.profile` and its
+required keys — so the decision is printed beside the T-level decisions instead of being discovered in a
+config file. The profile keys are also the reason `/health.json` carries one optional `hub` stanza: the
+one-health-surface rule of §2.2 forbids a second endpoint, so the profile reports through the existing one.
+
 ## 4. Wiring
 
 ### 4.1 Boot sequence (each step gated on the previous)
@@ -742,6 +787,18 @@ minted and the range is unchanged.
 18. **Dashboard token in a URL.** Refused on the dashboard listener (SPEC-10 §2) and impossible to
     enable by configuration; the ingestion listener keeps the documented `?sentry_key=` form for SDK parity.
     The two dialects are deliberate and tested separately.
+19. **An upgrade that flips `server.profile`** (§3.6 rename-over + restart): the boot gate of §3.7a re-runs
+    before the listener binds, so the upgraded daemon either comes up clean or comes up refused-with-a-code
+    (TROUBLE-HUB-001/003) — the upgrade path never serves a profile it did not validate. Parked plays resume
+    identically in both profiles, because the profile changes transport plumbing and nothing else
+    (SPEC-13 §1.2).
+20. **A satellite whose hub is upgraded into `light-hub`.** The satellite is untouched: it keeps spooling and
+    relaying against the same route and the same protocol version, and the hub's Redis hop is invisible to
+    it. This is the profile's whole point — a hub-side plumbing change is not a fleet-wide upgrade.
+21. **A `light-hub` hub restored from a host backup** (SPEC-12 §3.6): `hub/archive/markers.jsonl` travels
+    with the state root, so a restored host knows what was exported and never drops a generation whose
+    archive it cannot prove (TROUBLE-HUB-014). Redis is not backed up and does not need to be: an empty
+    stream plus the satellite's un-acked spool is the correct post-restore state.
 
 ## 7. Testing
 
@@ -765,10 +822,15 @@ Files and pass thresholds (all numbers normative regressions):
 | `tests/e2e/ac26_lifecycle_visibility.sh` | autonomy=full scripted run; kill-switch flip mid-stage; `systemctl --user restart` of an unrelated gateway unit | every step has a `lifecycle`/`config` record with the acting `Actor` triple; 0 records with `actor.kind=="human"`; the gateway restart does not interrupt trouble (uptime monotonic, ledger seq continuous) |
 | `tests/e2e/escalation.sh` | `kill -9` the daemon; swap in a binary that exits 1; `systemctl show trouble.service -p OnFailure` | escalation line in `escalate.log` ≤420s in both failure modes; the checker path fires without the daemon alive |
 | `tests/e2e/unit_sandbox.sh` | under `strict`: write inside `ReadWritePaths` succeeds, outside fails `EROFS`; `PrivateTmp`: a file written to `/tmp` inside the unit is absent on the host; cgroup v2: `memory.max` == 268435456 | 1 assertion per flag; cgroup-v1 host reports `degraded` with `detail.reason="cgroup_v1"` |
+| `internal/lifecycle/profile_test.go` | `server.profile` precedence (flag/env/file/default) with provenance; `light-hub` missing `server.redis.url` or `server.duckbrain.namespace` → TROUBLE-HUB-001 + exit 13 + **0 HTTP responses**; `hub.mode=satellite` + `light-hub` → 001; SIGHUP flip of `server.profile` → 013 with the running profile intact; the `trouble topology` profile row | every refusal happens before the first bind; a refused reload leaves the running profile unchanged |
+| `tests/e2e/ac28_route_spool.sh` | hub + satellite over the namespace link with `[sentinel.routes]` configured: a `direct` class stays local (route A, satellite ledger only), a `proxy` class relays (route B, hub canonical ledger); hub killed mid-batch → spool grows, replay after restart → exactly one hub record per event; `origin.route` asserted on both sides | 0 events lost, 0 duplicates; 100 % of records carry the resolved route; the spool never exceeds its budget |
 
 Regression numbers pinned: heartbeat drift <100ms/2h · stall detection ≤420s · spool budget accuracy ±1% ·
 batch ≤200 records and ≤512KB decompressed · upgrade READY ≤30s · steady RSS ≤80MB after an upgrade ·
-zero duplicate forwarded records · zero secret occurrences in any explain dump or rendered dashboard route.
+zero duplicate forwarded records · zero secret occurrences in any explain dump or rendered dashboard route ·
+AC-28: 100 % of records carry `origin.route`, 0 lost, 0 duplicated across a hub outage · AC-29: identical
+incident/verify sequences in `standalone` and `light-hub` for the same stream, 0 lost records across a Redis
+outage.
 
 ## 8. hilo impact
 
@@ -783,6 +845,7 @@ zero duplicate forwarded records · zero secret occurrences in any explain dump 
 | `internal/lifecycle/units/*.tmpl` + `units.go` (`//go:embed`) | stdlib `text/template`, `embed` | `cmd/trouble install/upgrade` |
 | `internal/lifecycle/upgrade.go`, `schema.go` | `internal/types`, `internal/ledger` | `cmd/trouble upgrade`, app wiring |
 | `internal/lifecycle/forward.go`, `spool.go`, `topology.go` | `internal/types`, `internal/scrub` | app wiring (satellite mode), `cmd/trouble topology` |
+| (no file here) — `internal/hub` consumes this package | `Resolve`/`Explain` for the `server.profile`, `server.redis.*` and `server.duckbrain.*` keys; `Actor` for its records; `ZoneOf` for the hub-side reserved forward project (SPEC-13 §2.3 mounts no separate config path) | app wiring only — nothing in `internal/lifecycle` imports `internal/hub`, so the profile cannot change config resolution |
 | `deploy/README.md`, `examples/config.toml`, `examples/trouble.env` | — | operator docs (fleet values live only here) |
 
 **Dependency direction:** `internal/lifecycle` → `internal/types` + `internal/ledger` + `internal/scrub`.

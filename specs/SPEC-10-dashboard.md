@@ -5,7 +5,7 @@ Area prefix: TROUBLE-DASHBOARD
 Package: internal/dashboard
 Consumed types: HealthResponse, SourceLiveness, RuntimeWatermarks, Token, Scope, AutonomyGates, Incident, Group, IssueRef, Breaker, Evidence, Record, Actor, RecordKind, SensorHealth, Rule, GapRecord, Promotion, SpawnRequest, ResearchOutcome, SkillCandidate
 Local types: identityProvider, principal, scopeSet, route, dashError, csrfValue, tokenFile, pageData, incidentRow, groupRow, ruleRow, breakerRow, timelineEntry, budgetPanel, healthStrip, stallState
-ACs: AC-16, AC-19
+ACs: AC-16, AC-19, AC-30
 PRD: §04c, §11
 
 ## 1. Purpose
@@ -42,9 +42,9 @@ no regex routes, no third-party mux. `{id}` is an exact `<prefix>_<ULID>` match.
 | # | Method | Path | Auth scope | Response type | Data source |
 |---|---|---|---|---|---|
 | 1 | GET | `/` | read | HTML page | index counters (`IncidentsOpen`, `GroupsOpen`, `EventsPerMin`) + `HealthResponse` (§2.9/§3.3) |
-| 2 | GET | `/incidents` | read | HTML page | `Index.OpenIncidents(limit,cursor)` (kind `incident`) + `Index.LastEventAge(sig)` |
+| 2 | GET | `/incidents?page_token=&page_size=` | read | HTML page | `Index.OpenIncidents(page_token,page_size)` (kind `incident`, page-token grammar owned by SPEC-01 §2.3a) + `Index.LastEventAge(sig)`; the page footer carries `next_page_token`, and a token naming a dropped generation renders the reset banner instead of an error |
 | 3 | GET | `/incidents/{id}` | read | HTML page | `Index.IncidentStory(inc)` — incident, group, `Evidence`, ledger records, `IssueRef`, `tsk_` board row, `ResearchOutcome`, `SpawnRequest`, `Promotion`, `SkillCandidate` |
-| 4 | GET | `/groups` | read | HTML page | `Index.Groups(rank,limit)` (kind `group`) |
+| 4 | GET | `/groups?page_token=&page_size=&rank=` | read | HTML page | `Index.Groups(rank,page_token,page_size)` (kind `group`); ranked-by-rate stays index-only per §2.9 — the token continues a long list, it never re-ranks — and the page footer carries `next_page_token` |
 | 5 | GET | `/groups/{id}` | read | HTML page | `Index.Group(grp)` + `Index.EventsBySig(sig,window)` counters (never payload scans) |
 | 6 | GET | `/rules` | read | HTML page | SPEC-03 rule-set snapshot + `Index.RuleStats(name)` (last fire, fire count, suppressed count) + `SensorHealth` |
 | 7 | GET | `/breakers` | read | HTML page | `Index.Breakers()` (kind `breaker`, SPEC-05 registry) |
@@ -357,6 +357,13 @@ the budget depends on: (a) the index is published as an immutable snapshot via `
 never takes the writer's lock (the writer publishes at most every 100 ms, or on group-commit completion);
 (b) render cost is O(rows on the page), capped by `dashboard.page_limit` (default 100 rows, max 500).
 
+**Pagination follows the same rule.** `/incidents` and `/groups` carry SPEC-01 §2.3a page tokens straight
+into the index: a page renders at most `page_size` rows (default 500, max 5000) with no file access, and a
+token whose generation the retention sweep has dropped renders the reset banner with a **200**, because the
+dashboard must never turn "the file aged out" into a visible error. The optional `hub` stanza of
+`HealthResponse` (SPEC-13 §3.1) is rendered in the same health strip as the ledger watermarks — one surface,
+one strip, no second endpoint.
+
 **Worst-case self-pressure.** RSS `≥ dashboard.mem_pressure_pct` (default 80%) of `MemoryHigh` for 60 s
 stops accepting *new* partial polls with **503** + `Retry-After: 5` while still serving pages,
 `/health.json` and POSTs. The daemon's own memory pressure is itself a recordable event (SPEC-12 owns the
@@ -620,6 +627,7 @@ All tests are `internal/dashboard` package tests plus one end-to-end test that s
 | `live_test.go` | **AC-19 timing**: trigger a fixture incident, poll `/partials/incidents?since=` at the real intervals, record `ts_response − ts_trigger` of the first fragment containing the ID; 20 iterations; assert p100 ≤2000 ms and p50 ≤1100 ms; assert the strip-accelerator-off variant still passes p95 ≤2000 ms; assert the stall banner appears when the writer is paused ≥`stall_alert_s` | p100 ≤2000 ms (**AC-19**), p95 ≤2000 ms without the accelerator |
 | `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; RSS delta sampled every 250 ms; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB), p99 render ≤20 ms, 0 ledger file opens |
 | `integration/e2e_dashboard_test.go` | start the daemon, ack/close/autonomy against the mock ladder + lifecycle, assert the recorded `Actor{kind:human, id:<token label>}` and the ledger record kind; `read`-scope token can hit every GET and partial and gets 003 on all three POSTs; `/health.json` parsed into `HealthResponse` with `ledger_last_seq` advancing | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |
+| `pagination_test.go` | **AC-30** (dashboard half): `/incidents` and `/groups` walked with `page_token` + `page_size` over a 10,000-incident fixture index — page-size stability, no row repeated, no row skipped, `next_page_token` empty exactly at the end; a token minted before a simulated generation drop renders the reset banner with **200**; every render opens 0 ledger files (§2.9) | every row exactly once per walk; the drop case is 200 + banner, never 500; 0 file opens |
 
 ## 8. hilo impact
 

@@ -3,9 +3,9 @@
 Spec: SPEC-04
 Area prefix: TROUBLE-SENTINEL
 Package: internal/sentinel
-Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser
-Local types: dsn, envelopeHeader, envelopeItem, itemPolicy, authMaterial, quotaWindow, ledgerSink, scrubber, lineSource, logLine, assembleState, tailState, releaseOrder
-ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22
+Consumed types: Project, SentryEvent, ClientReport, DiscardCount, RateLimitDecision, Group, GroupCounters, LossPolicy, Record, RecordKind, Origin, Actor, Sig, SigSource, GapRecord, Evidence, SourceLiveness, ScrubResult, ProjectRuntime, CollectorParser, RouteMode, RouteDecision, RouteConfig
+Local types: dsn, envelopeHeader, envelopeItem, itemPolicy, authMaterial, quotaWindow, ledgerSink, scrubber, lineSource, logLine, assembleState, tailState, releaseOrder, routeTable, routeMatch
+ACs: AC-10, AC-11, AC-12, AC-13, AC-14, AC-15, AC-18, AC-19, AC-22, AC-28
 PRD: §04b, §10, §11
 
 ## 1. Purpose
@@ -176,6 +176,11 @@ id = "7"; slug = "payment-api"
 public_key = "<32 hex>"; secret_key = ""     # secret only when require_secret = true
 quota_epm = 600; disk_budget_bytes = 2147483648
 loss_policy = "spool-if-light"; enabled = true
+
+[sentinel.routes]
+default = "auto"                             # auto | direct | proxy — the sensor transport routes (§3.10a)
+per_class = { "psi:io_pressure" = "direct",  # sig-prefix → route; longest prefix wins
+              "sentinel:sha256v1" = "proxy" }
 
 [sentinel.collector]
 journal_units = ["legacy-daemon"]
@@ -476,6 +481,74 @@ with the same `retry_after` value, which is what turns a flood into an orderly s
 429 cliff. `RateLimitDecision.Header` carries the exact string emitted, so the ledger and the
 dashboard can show what the server told the SDK.
 
+### 3.10a Sensor transport routes — Route A (direct) and Route B (proxied)
+
+The in-code sensor (the trouble-sensor SDK shim, or the agent's own sensor library) writes to *its*
+trouble agent, and that agent decides how the event reaches the system. Two routes exist, both
+first-class, both configured, neither a fallback of the other:
+
+| Route | Path | Auth | What it is for |
+|---|---|---|---|
+| **A — direct** | sensor → local daemon over loopback: the envelope endpoint on `ingest.bind` (default `127.0.0.1:7643`) | the loopback bind matrix (§2.4, §3.7): pubkey-DSN alone accepted on loopback | zero network hops, zero new auth: the local reflex path |
+| **B — proxied** | sensor → local daemon → **hub** daemon: the satellite forward path (`ForwardEnvelope`, `protocol_version=1`, idempotency key, bounded spool — SPEC-12 §3.7) | local DSN on the first hop; `hub.token` + the reserved forward project on the second | evidence that must reach the canonical ledger (fleet history, hub-owned research, multi-host grouping) |
+
+**The auto rule (one rule, two inputs).** `routes.default = "auto"` resolves to **B when this daemon has
+a configured hub endpoint** (`hub.url`, the `[hub] endpoint` key of SPEC-12 §3.7) **and `hub.mode =
+satellite`**, else **A**. A hub has no upstream, so hub-side sensors always take A; a satellite relays by
+default and pays one hop for the canonical ledger. Resolution happens **once per event**, at the transport
+seam of this package — the sensor never selects a route itself, so sensor SDKs stay thin and the decision
+lives in exactly one auditable place.
+
+| `routes.default` | `hub.url` | `hub.mode` | `per_class` entry for the class | Resolved | Note |
+|---|---|---|---|---|---|
+| `auto` | `""` | `hub` | — | **A** | no upstream exists |
+| `auto` | set | `satellite` | — | **B** | relay by default |
+| `auto` | set | `satellite` | `"direct"` | **A** | the per-class override wins over auto |
+| `auto` | `""` | `hub` | `"proxy"` | **refused at boot** | a `proxy` route with no hub endpoint is an unachievable claim → TROUBLE-SENTINEL-023 |
+| `direct` | set | `satellite` | — | **A** | whole-daemon direct |
+| `proxy` | set | `satellite` | `"direct"` | **A** for that class, **B** for the rest | longest sig-prefix match decides per event class |
+
+```toml
+[sentinel.routes]
+default = "auto"                              # auto | direct | proxy
+per_class = { "psi:io_pressure" = "direct",   # sig-prefix → route
+              "collector:go-panic" = "proxy" }
+```
+
+Matching is **longest sig-prefix wins** over the canonical sig string (`<source>:<algo>v<n>:<hex16>`,
+SPEC-TYPES §6.3): `psi:io_pressure` matches every `psi:io_pressure*` sig, `sentinel:sha256v1` matches every
+sentinel sig, and a class with no matching prefix takes `default`. The table is validated at boot
+(non-empty prefixes, no prefix mapped to two routes, no `proxy` entry without a hub endpoint) →
+TROUBLE-SENTINEL-023 with exit 13 **before the listener binds**: a routing policy that cannot be honoured
+is found at boot, not under load. Class examples that drive this table: crash-loop and PSI pressure
+signatures demand **A** (a local reflex must not queue behind a network hop), while bulk debug/collector
+evidence demands **B** (it is archival-grade and belongs in the canonical ledger).
+
+**The decision is recorded, not inferred.** Every record written by the sensor/sentinel path carries
+`Origin.Route` (`"A"` | `"B"`, SPEC-TYPES §3.1) — including the A case, where *no relay* is as much a
+fact as a relay. The ledger therefore answers "local or relayed?" without a join:
+`jq 'select(.origin.route=="B")' ledger/YYYY-MM-DD.jsonl` is the relay feed, and SPEC-10's group and
+incident views render the local-vs-relayed split per group. The auto rule, the per-class table and the
+two counters (`route_a_total`, `route_b_total`) are printed by `trouble hub status` and in
+`/health.json`, so the decision is visible without reading config.
+
+**Route B failure = the existing bounded spool, never event loss.** A satellite that cannot reach its hub
+writes the batch to the SPEC-12 §3.7 spool (`spool/forward/NNNNNNNNNN.fwd`, `spool.budget_bytes` 256MB,
+drop-oldest with a `gap` note, `spool.gap_reserve_bytes` reserved so the loss notices themselves survive),
+retries with exponential backoff, and replays on reconnect. Replay is idempotent by the
+`ForwardEnvelope` idempotency key (`sig | norm_version | host_id`), so a batch that was delivered but never
+acked lands exactly once. Route B mints no code of its own: spool exhaustion and eviction are
+TROUBLE-LIFECYCLE-015/014 (SPEC-12 §5) and satellite-side backpressure is §3.9's 429 shape unchanged.
+
+**Route A failure** is the local listener being down or refusing (§3.9, TROUBLE-SENTINEL-010/011). A sensor
+on the same host has no spool of its own: it retries in-process with the same bounded backoff and reports
+its drops through `client_report` (§3.3), because a local sensor that quietly buffers would be a second
+queue — the one structure this suite refuses to have.
+
+**Sensor SDK surface (three facts, nothing else).** The SDK documents the endpoint (`ingest.bind`), the
+DSN form for its bind zone (§2.3), and that **the daemon chooses the route**; a client that picked its own
+route would reintroduce the drift this section exists to remove.
+
 ### 3.10 Types added to SPEC-TYPES by this spec
 
 ```go
@@ -565,6 +638,32 @@ sentry-go produce the same digest and therefore one `Group` (a group keyed by di
 Merging with sensor and issue paths is the dedup core's job (SPEC-01 §3.3, SPEC-05 §3.2): sentinel
 never mints an incident, issue or board row.
 
+### 4.5 Sensor transport wiring and the route decision point (AC-28)
+
+```
+in-code sensor / SDK-less collector
+        │  (1) event → sig → scrub
+        ▼
+route resolution   ── routes.default + per_class + hub.url + hub.mode ──► A | B   [Origin.Route stamped]
+        │
+   A ───┴──► local listener (loopback, DSN auth) ─► group ─► ledger
+   B ──────► satellite forward path (SPEC-12 §3.7) ─► hub listener ─► group ─► ledger
+                  └── hub unreachable ─► spool (256MB, drop-oldest, gap note) ─► replay on reconnect
+```
+
+Three properties of this wiring are normative:
+
+1. **The decision point is inside `internal/sentinel`**, at the transport seam, never in the sensor. One
+   decision point makes the matrix testable without an SDK (§7 `routes_test.go`) and makes it impossible
+   for two clients to disagree about where a class belongs.
+2. **Both routes converge on the same downstream code**: scrub → sig → group → ledger. Routes differ in
+   hops, never in what a record *is*, which is why a relayed event and a local event of one class produce
+   one group (AC-22) and the ladder cannot tell them apart.
+3. **The resolved route is stamped before the transport is attempted**, so a record that ends up in the
+   spool still carries `origin.route="B"`: the record states the decision, the spool and its ack/gap
+   records state the outcome, and the two reconcile — a relayed batch that never landed is visible as a
+   gap with a route, not as silence.
+
 ## 5. Errors
 
 Status policy: the default failure status is **400 + `X-Sentry-Error` + `{"detail","causes"}`** on
@@ -598,11 +697,14 @@ class).
 | TROUBLE-SENTINEL-020 | transient | 200 | spool write failed (disk full, permission, torn write) | `gap` cause `spool_write_failed` + loud log; the event is counted `dropped` |
 | TROUBLE-SENTINEL-021 | permanent | 405 | wrong method on an ingestion route | `reject_total{reason=method}` |
 | TROUBLE-SENTINEL-022 | permanent | 415 | unsupported `Content-Type`/`Content-Encoding` | `reject_total{reason=media_type}` |
+| TROUBLE-SENTINEL-023 | permanent | boot-time refusal (exit 13) | `[sentinel.routes]` invalid: unknown route name, empty sig-prefix key, one prefix mapped to two routes, or `proxy` for a class while no hub endpoint is configured (§3.10a) | `config` record (SPEC-12) naming the offending entry; **0 HTTP responses served** |
 
 Every code a subsystem returns to the ladder also appears in the ledger record describing the failure
 (`payload.error_code`, SPEC-INDEX §5.3). `RateLimitDecision.Reason` uses the four catalogued values
 plus `overloaded` for the per-IP/concurrency paths — a comment update for SPEC-TYPES §3.6, not a new
-type.
+type. 023 is the one code this round adds to the SENTINEL range (001–023, SPEC-INDEX §3.5): the routes
+block is validated before the listener binds, so an unhonourable routing policy is a boot refusal, never a
+runtime surprise on one class of traffic.
 
 ## 6. Edge cases
 
@@ -646,6 +748,16 @@ type.
     receive-time, skew > 5m is recorded in the payload (SPEC-12 tracks cross-host skew as TROUBLE-LIFECYCLE-017).
 18. **Kill switch active**: ingestion is NEVER gated by autonomy mode — detection must keep working
     while the ladder is stopped, otherwise a kill-switch looks like a healthy quiet system (brief §1.K).
+19. **Hub endpoint configured after the daemon is running** (config reload, SPEC-03 hot-reload discipline):
+    `routes.default="auto"` re-resolves on the next event and the class table is swapped atomically.
+    Records already stamped keep their stamp, so a group spanning the switch shows both routes — which is
+    the honest view of a transport change.
+20. **A `per_class` prefix no event ever matches**: legal and inert. The table is routing policy, not a
+    registry; `trouble hub status` reports each prefix's match count, so dead policy is visible instead of
+    accumulating.
+21. **A class that demands `proxy` on a daemon with no hub** (a laptop, or a hub whose sensors were copied
+    from a satellite): refused at boot (§3.10a, TROUBLE-SENTINEL-023). Overrides are validated against the
+    configured topology, so a copied config cannot silently route evidence into nowhere.
 
 ## 7. Testing
 
@@ -663,6 +775,8 @@ type.
 | `internal/sentinel/spool_test.go` | spool write/read, torn entry, drop-oldest, replay under quota, budget accounting | 0 undetected torn entries; `spool_bytes ≤ budget` |
 | `internal/sentinel/e2e_test.go` | `httptest` server: envelope + store + generic JSON + collector line → one group → one `event`/`group` record set; two projects on two listeners with different zones (AC-18 lab shape) | one digest per bug class across all three paths (AC-22) |
 | `internal/sentinel/load_test.go` | 8 workers, gzip'd 4KB envelopes, one project, 60s | **target 2,000 req/s sustained, p99 ≤ 25ms, p999 ≤ 100ms, 5xx = 0, RSS growth ≤ 8MB**; measured reference: 6,199 req/s with 100-line group-commit and 1,972 req/s with fsync-per-line — the target proves group-commit is actually in use and leaves 3.1× headroom |
+| `internal/sentinel/routes_test.go` | the route matrix of §3.10a (6 rows): auto under `hub.url` set/empty × `hub.mode` hub/satellite; per-class override via longest sig-prefix; unmatched class → `default`; boot refusal on `proxy` with no hub endpoint (023) and on a prefix mapped twice; `origin.route` stamped on A and on B | every matrix row resolves to its pinned route; 100% of written records carry a non-empty `origin.route`; the refusal case is exit 13 with **0 HTTP responses served** |
+| `internal/sentinel/routespool_test.go` | Route B with the hub killed mid-batch: spool segment written, backoff retries, replay after the hub returns; torn spool segment; drop-oldest with exact footer-derived `EstLost`; duplicate replay of one idempotency key | 0 events lost while `spool_bytes ≤ budget`; every spooled event lands **exactly once**; `origin.route="B"` survives the spool round-trip |
 
 AC-derived tests: AC-10 `e2e_test.go` (real SDK envelope shapes + legacy store + DSN auth forms);
 AC-11 `group_test.go` (counters and rate); AC-12 `release_test.go`; AC-13 `quota_test.go` (official
@@ -670,7 +784,8 @@ header format); AC-14 `limits_test.go` + `e2e_test.go` (non-loopback bind, token
 AC-15 `collector_*_test.go` + `genericjson_test.go`; AC-18 `e2e_test.go` two-project lab procedure
 (Go SDK on host A, `curl` on host B, both landing in the same digest, quota held while one floods);
 AC-19 `release_test.go` release-diff inputs; AC-22 `e2e_test.go` (sensor/collector/sentinel → one
-digest → one group).
+digest → one group); AC-28 `routes_test.go` (route matrix + override + refusal) + `routespool_test.go`
+(B-failure spool replay, exactly-once) + the `origin.route` assertion in `group_test.go`.
 
 Memory: `TestMain` asserts steady RSS ≤ 80MB after 1,000,000 events (measured trivial path
 7.0 → 15.6MB) and ≤ 192MB under the load test; the binary stays inside the 8–15MB budget because
@@ -686,7 +801,7 @@ divergences" list required by the judge review, regenerated from the same tables
 New package `internal/sentinel` with these files:
 
 ```
-server.go routes.go envelope.go auth.go dsn.go project.go fingerprint.go group.go release.go
+server.go routes.go routetransport.go envelope.go auth.go dsn.go project.go fingerprint.go group.go release.go
 quota.go loss.go spool.go canary.go genericjson.go collectors.go parser_go_panic.go
 parser_py_traceback.go parser_node_reject.go tail.go journal.go limits.go errors.go
 + *_test.go and testdata/{envelopes,logs,sig_golden.json}

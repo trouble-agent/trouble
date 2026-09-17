@@ -24,7 +24,7 @@ from collections import defaultdict
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPECS = os.path.dirname(HERE)
 
-SPEC_IDS = [f"SPEC-{n:02d}" for n in range(1, 13)]
+SPEC_IDS = [f"SPEC-{n:02d}" for n in range(1, 14)]
 META = ["Spec", "Area prefix", "Package", "Consumed types", "Local types", "ACs", "PRD"]
 SECTION_TITLES = ["Purpose", "Interface", "Data model", "Wiring", "Errors", "Edge cases", "Testing", "hilo impact"]
 PRD_SECTIONS = {"§03", "§04a", "§04b", "§04c", "§05", "§06", "§06b", "§06c", "§07", "§08", "§09", "§10", "§11", "§12"}
@@ -72,7 +72,7 @@ def read(name: str) -> str:
 def main() -> int:
     names = sorted(n for n in os.listdir(SPECS) if n.endswith(".md"))
     expected = {"SPEC-INDEX.md", "SPEC-TYPES.md"} | {f"{s}-{t}.md" for s, t in
-                [(f"SPEC-{i:02d}", "") for i in range(1, 13)]}
+                [(f"SPEC-{i:02d}", "") for i in range(1, 14)]}
     docs = {n: read(n) for n in names}
     types_doc = docs["SPEC-TYPES.md"]
     index_doc = docs["SPEC-INDEX.md"]
@@ -197,7 +197,7 @@ def main() -> int:
                 fail(f"{sid}: claims {ac} but the matrix assigns it to {sorted(ac_matrix_specs[ac]) or 'nobody'}")
 
     # step 2 — AC coverage both ways
-    for i in range(1, 28):
+    for i in range(1, 31):
         ac = f"AC-{i}"
         if ac not in ac_matrix_specs:
             fail(f"{ac}: missing from the SPEC-INDEX AC matrix")
@@ -223,7 +223,7 @@ def main() -> int:
     print(f"files: {len(names)}   bytes: {total}   shared types: {len(types)}   error codes: {len(catalog)}   areas: {len(ranges)}")
     print()
     print("AC coverage (AC -> specs):")
-    for i in range(1, 28):
+    for i in range(1, 31):
         ac = f"AC-{i}"
         print(f"  {ac:<6} {'B' if ac_rows.get(ac) == 'B' else ac_rows.get(ac, '?')}  {', '.join(sorted(ac_matrix_specs.get(ac, []))) or 'UNMAPPED'}")
     print()

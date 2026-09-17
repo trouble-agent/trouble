@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/totalwindupflightsystems/trouble/internal/scrub"
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -83,17 +83,32 @@ func RenderUnits(cfg Config) ([]unitTemplate, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%w: cannot read unit template %s: %v", types.CodeLifecycle006, name, err)
 		}
-		tmpl, err := template.New(name).Parse(string(b))
-		if err != nil {
-			return nil, fmt.Errorf("%w: cannot parse unit template %s: %v", types.CodeLifecycle006, name, err)
+		// SPEC-12 §2.3's placeholder convention: templates carry literal
+		// __KEY__ tokens (no {{...}} actions), so rendering is a direct
+		// substitution — the previous text/template pass was a no-op that
+		// left every placeholder in the installed unit.
+		content := strings.NewReplacer(pairs(vars)...).Replace(string(b))
+		if leftover := placeholderRe.FindString(content); leftover != "" {
+			return nil, fmt.Errorf("%w: unit template %s has an unsubstituted placeholder %s", types.CodeLifecycle006, name, leftover)
 		}
-		var sb strings.Builder
-		if err := tmpl.Execute(&sb, vars); err != nil {
-			return nil, fmt.Errorf("%w: cannot render unit template %s: %v", types.CodeLifecycle006, name, err)
-		}
-		out = append(out, unitTemplate{Name: name, Content: sb.String()})
+		out = append(out, unitTemplate{Name: name, Content: content})
 	}
 	return out, nil
+}
+
+// placeholderRe matches __KEY__ tokens left after substitution: uppercase
+// with underscores/digits only, so user-supplied values (paths and such)
+// never trip the guard.
+var placeholderRe = regexp.MustCompile(`__[A-Z0-9_]+__`)
+
+// pairs flattens the placeholder map into strings.NewReplacer's
+// alternating old/new argument form.
+func pairs(vars map[string]string) []string {
+	out := make([]string, 0, len(vars)*2)
+	for k, v := range vars {
+		out = append(out, k, v)
+	}
+	return out
 }
 
 // AuditUnits checks rendered units for missing escalation wiring (SPEC-12 §3.5).

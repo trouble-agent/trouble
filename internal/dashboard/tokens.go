@@ -145,7 +145,24 @@ var errTokenStoreInvalid = errors.New("token store invalid")
 // store invalid (fail-closed 503 at first use, §3.2) rather than failing the
 // boot. A stored hash equal to any forbidden project key is a boot error
 // (TROUBLE-DASHBOARD-002 detail equals_ingestion_key, §4.3.3).
+//
+// The path is expanded once, here, before any stat/read/reload (§3.4's default
+// is "~/.config/trouble/dashboard-tokens.json"): the resolved absolute path is
+// what the store keeps, so loading, the per-request refresh and the mint/rotate
+// writes all address the same file (TROUBLE-DASHBOARD-002 — the CLI expands
+// before it mints, the daemon did not, so a minted token never authenticated).
+// An unexpandable tilde path is a boot error rather than a silent empty store.
 func LoadTokenStore(path string, forbidKeys []string) (*TokenStore, error) {
+	expanded, err := ExpandTokenPath(path)
+	if err != nil {
+		return nil, &dashError{
+			Code:    types.CodeLifecycle013,
+			HTTP:    500,
+			Message: fmt.Sprintf("token file path unresolvable: %v", err),
+			Detail:  "token_file_path",
+		}
+	}
+	path = expanded
 	ts := &TokenStore{
 		path:          path,
 		forbidden:     forbidKeys,

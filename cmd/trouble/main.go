@@ -365,9 +365,14 @@ func cmdDashboard(args []string) int {
 	if path == "" {
 		path = defaultTokenPath()
 	}
-	if strings.HasPrefix(path, "~") {
-		home, _ := os.UserHomeDir()
-		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	// SPEC-10 §3.2: the shipped default is a ~/ path. Resolve it with the same
+	// helper the daemon's store uses, so the file this CLI mints into is the
+	// file the daemon reads (a CLI-only expansion is how a minted token ended
+	// up 401ing as TROUBLE-DASHBOARD-002).
+	path, err := dashboard.ExpandTokenPath(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+		return 13
 	}
 
 	if verb == "list" {

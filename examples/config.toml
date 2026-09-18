@@ -62,7 +62,7 @@ fsync = "group"
 fsync_window_ms = 200
 
 [verify]
-zone_windows = { loopback = "10m", lan = "15m", tailnet = "20m", public = "30m" }
+zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"
 
 [escalate]
 channels = []

@@ -282,9 +282,10 @@ func strOf(v any) string {
 
 // SubsystemOptions carries the per-subsystem config the composition root
 // cannot derive from the lifecycle config alone. Every table is optional:
-// nil selects the package's own defaults (issues and skills enabled on
-// defaults; research on the off-by-one driver; flow on board-jsonl with no
-// projects; sentinel with the passed project set).
+// nil selects the package's own defaults (issues and skills OFF per SPEC-09
+// §3.4a / SPEC-11 §2a — nothing to file into, no channel to pull from, and no
+// credential shipped; research on the off-by-one driver; flow on board-jsonl
+// with no projects; sentinel with the passed project set).
 type SubsystemOptions struct {
 	ResearchCfg      map[string]any
 	FlowCfg          *types.FlowConfig

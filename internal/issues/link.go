@@ -14,6 +14,9 @@ func (d *Desk) Link(ctx context.Context, ref types.IssueRef, taskID, researchID 
 	if taskID == "" && researchID == "" {
 		return ref, nil
 	}
+	if err := d.requireEnabled("Link"); err != nil {
+		return ref, err
+	}
 	drv, ok := d.drivers[ref.Driver]
 	if !ok {
 		return ref, newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "driver %q is not enabled", ref.Driver)

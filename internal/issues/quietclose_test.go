@@ -26,7 +26,7 @@ func quietDesk(t *testing.T, fx *quietFixture) (*Desk, *fakeLedger, *fakeClock, 
 	api := newFakeGitHub()
 	srv := ghServer(t, api)
 	t.Setenv(testTokenEnv, "ghp_test_token_value")
-	cfg := DefaultConfig()
+	cfg := enabledDefaults()
 	cfg.Drivers = []types.IssueDriverConfig{githubTestConfig(srv.URL)}
 	cfg.PrimaryDriver = "github"
 	cfg.OpDeadline = "2s"

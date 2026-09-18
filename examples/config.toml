@@ -101,3 +101,69 @@ slug = "trouble-dev"
 public_key = "0123456789abcdef0123456789abcdef"
 quota_epm = 600
 enabled = true
+
+# ---------------------------------------------------------------------------
+# OPTIONAL SUBSYSTEMS — the issue desk and the skill loop are OFF, deliberately.
+#
+# Off is the shipped compiled default of both (SPEC-09 §3.4a, SPEC-11 §2a), and
+# it is the only credential-free posture: nothing is compiled in — no owner/repo,
+# no token, no distribution channel — so an ENABLED subsystem has no usable
+# driver/source, is refused at boot (TROUBLE-ISSUES-003 / TROUBLE-SKILLS-001) and
+# leaves /health.json degraded on a fresh operator's very first boot. OFF keeps a
+# stock boot complete: both subsystems are built and idle, no outbound call is
+# made, and /health.json reads ok.
+#
+# Their tables are decoded by internal/issues and internal/skills and are not yet
+# read by this build's composition root, which builds both subsystems from the
+# compiled defaults (a recorded parent gap), so the declarations below are
+# commented out: they state the opt-out each subsystem ships with, and they are
+# the shape to uncomment once that wiring lands. The opt-in for each one is named
+# in its own block.
+# ---------------------------------------------------------------------------
+
+# --- [issues] --------------------------------------------------------------
+# The issue desk (SPEC-09 §3.4a) is OFF, built and idle: no driver is
+# constructed, no credential is read, no outbound call is made. ON, it files one
+# issue per sig, folds every recurrence into it, keeps its caps, and closes it on
+# quiet. To turn it ON, set both of these — a real GitHub repo plus a token in
+# TROUBLE_GITHUB_TOKEN or a 0600 ~/.config/trouble/github.token:
+#
+#   [issues]
+#   enabled = true
+#   [issues.drivers.github]
+#   enabled = true
+#   owner = "your-org"
+#   repo  = "your-repo"
+#
+# ...or use the local-first backend instead of GitHub:
+#
+#   [issues.drivers.github]
+#   enabled = false
+#   [issues.drivers.duckbrain]
+#   enabled = true
+#   base_url = "http://127.0.0.1:7645"
+#
+# Enabling the desk with neither is refused at boot with the key it is missing
+# ("driver github needs owner and repo"), never silently.
+# ---------------------------------------------------------------------------
+#
+# [issues]
+# enabled = false
+
+# --- [skills] --------------------------------------------------------------
+# The skill loop (SPEC-11 §2a) is OFF, built and idle: the daemon pulls nothing
+# and no skill is ever applied. ON, it reads the channel every pull_interval and
+# applies only signed artifacts that pass every gate (signature, version floor,
+# canary, approve policy, allowed modules). To turn it ON, set exactly ONE of the
+# two source keys:
+#
+#   [skills]
+#   enabled = true
+#   source_path = "/srv/skills/release.git"        # a local git dir or bare repo
+#   # source_url = "https://host/org/skills.git"   # ...or a remote channel
+#
+# Enabling it with neither, or with both, is refused at boot.
+# ---------------------------------------------------------------------------
+#
+# [skills]
+# enabled = false

@@ -106,7 +106,7 @@ func TestCapsSurviveRestart(t *testing.T) {
 	led := &fakeLedger{}
 	clk := newFakeClock()
 	mk := func() *Desk {
-		cfg := DefaultConfig()
+		cfg := enabledDefaults()
 		cfg.Drivers = []types.IssueDriverConfig{githubTestConfig(srv.URL)}
 		cfg.PrimaryDriver = "github"
 		cfg.OpDeadline = "2s"

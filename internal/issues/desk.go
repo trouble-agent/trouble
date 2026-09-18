@@ -103,6 +103,11 @@ type gapState struct {
 // boot rejection), constructs the enabled drivers, rebuilds the anchors and the
 // cap counters from the ledger, and starts degraded — never failed — when the
 // primary driver is not usable at boot (§3.4).
+//
+// A config with `enabled = false` (§3.4a) builds the desk and nothing else: no
+// driver is constructed, no boot probe leaves the process, and every operation
+// answers with the disabled reason (requireEnabled) instead of a driver-name
+// error that would send an operator looking at the wrong key.
 func New(cfg types.IssueDeskConfig, deps Deps) (*Desk, error) {
 	if err := ValidateConfig(cfg); err != nil {
 		return nil, err
@@ -133,6 +138,18 @@ func New(cfg types.IssueDeskConfig, deps Deps) (*Desk, error) {
 		d.spool = &spoolStore{root: "", cfg: cfg, now: now, memOnly: true}
 	}
 	d.caps = newCapCounters(cfg.Caps, now)
+
+	if !cfg.Enabled {
+		// SPEC-09 §3.4a: the desk is OFF. A disabled desk is BUILT and idle —
+		// the subsystem row reads built, not refused — and holds no driver:
+		// nothing is constructed, no credential is read and no boot probe leaves
+		// the process. The config's github block is left enabled (it is not
+		// silently switched off here) so that ENABLING the desk without
+		// owner/repo is still refused by ValidateConfig with the key it is
+		// missing ("driver github needs owner and repo (SPEC-09 §3.9.1)")
+		// instead of building a desk that cannot file.
+		return d, nil
+	}
 
 	for _, dc := range cfg.Drivers {
 		if !dc.Enabled {
@@ -183,6 +200,18 @@ func spoolRoot(stateRoot string) string {
 }
 
 func (d *Desk) now() time.Time { return d.clk.Now() }
+
+// requireEnabled is the answer of every desk operation while the desk is OFF
+// (SPEC-09 §3.4a). A disabled desk holds no driver, so the alternative would be
+// the driver-name error ("driver github is not enabled"), which names a key that
+// is not what keeps the desk off — this one names the opt-in instead.
+func (d *Desk) requireEnabled(op string) error {
+	if d.cfg.Enabled {
+		return nil
+	}
+	return newErr(types.CodeIssues003, ReasonConfig, 0, false,
+		"the issue desk is disabled (issues.enabled = false, SPEC-09 §3.4a): %s needs an enabled desk — set a driver with owner/repo, or enable the local duckbrain driver", op)
+}
 
 // origin is the desk's provenance on every record it writes.
 func (d *Desk) origin() types.Origin {
@@ -371,6 +400,14 @@ func (d *Desk) EnqueueSpool(ctx context.Context, e types.SpoolEntry) error {
 	if d == nil || d.spool == nil {
 		return newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "spool not built")
 	}
+	if err := d.requireEnabled("EnqueueSpool"); err != nil {
+		// A disabled desk runs no replay loop (Run returns early before any
+		// driver timer), so an entry accepted here would be "spooled" forever.
+		// The SPEC-08 flow's durable dispatch queue IS this spool (the
+		// composition root passes deskSpool), and a caller that gets nil records
+		// the dispatch as durably queued — refusing keeps that record honest.
+		return err
+	}
 	drops, err := d.spool.Put("issue", e)
 	for range drops {
 		_, _ = d.record(ctx, types.KGap, "", "", map[string]any{
@@ -391,6 +428,9 @@ func (d *Desk) EntryFor(driver, sig, project string) (*anchorEntry, bool) {
 // EnsureBySig is the ladder entry point (AC-8): the primary driver files or
 // folds, then every mirror=true driver files or folds the same sig.
 func (d *Desk) EnsureBySig(ctx context.Context, inc types.Incident, ev Evidence) (types.IssueRef, error) {
+	if err := d.requireEnabled("EnsureBySig"); err != nil {
+		return types.IssueRef{}, err
+	}
 	project := d.projectOf(inc)
 	opID := types.NewID(types.PEv)
 	ref, err := d.ensureAt(ctx, d.cfg.PrimaryDriver, inc, ev, project, opID, false)
@@ -687,6 +727,9 @@ func (d *Desk) invalidateAnchor(a *anchorEntry) {
 // ledger rec_id, so a repeat of the same record is a no-op at the driver and at
 // the desk.
 func (d *Desk) Comment(ctx context.Context, ref types.IssueRef, trigger, body string) (types.IssueRef, error) {
+	if err := d.requireEnabled("Comment"); err != nil {
+		return ref, err
+	}
 	drv, ok := d.drivers[ref.Driver]
 	if !ok {
 		return ref, newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "driver %q is not enabled", ref.Driver)
@@ -731,6 +774,9 @@ func (d *Desk) Comment(ctx context.Context, ref types.IssueRef, trigger, body st
 
 // Close closes the sig's issue (idempotent per §3.1).
 func (d *Desk) Close(ctx context.Context, ref types.IssueRef, reason string) (types.IssueRef, error) {
+	if err := d.requireEnabled("Close"); err != nil {
+		return ref, err
+	}
 	drv, ok := d.drivers[ref.Driver]
 	if !ok {
 		return ref, newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "driver %q is not enabled", ref.Driver)

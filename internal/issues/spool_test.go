@@ -11,7 +11,7 @@ import (
 
 func spoolCfg(t *testing.T) (types.IssueDeskConfig, *fakeClock) {
 	t.Helper()
-	cfg := DefaultConfig()
+	cfg := enabledDefaults()
 	cfg.SpoolMaxEntries = 100
 	cfg.SpoolBudgetBytes = 1 << 20
 	cfg.SpoolMinRetention = "0"

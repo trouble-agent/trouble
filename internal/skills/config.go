@@ -12,9 +12,18 @@ import (
 
 // DefaultConfig is the §2 default column: every default is safe, and
 // `enabled=false` means the daemon pulls nothing and no skill is ever applied.
+//
+// The shipped compiled default is `enabled=false` (SPEC-11 §2a), deliberately:
+// this build compiles no distribution channel in, so an enabled loop has neither
+// `source_path` nor `source_url` and is refused at boot —
+// `TROUBLE-SKILLS-001: exactly one of source_path or source_url must be set` —
+// on every stock boot. Off is the posture that needs no credential and no
+// operator, and the opt-in names the key that turns it on: set `enabled = true`
+// and exactly one of `source_path` (a local git dir) or `source_url` (an https
+// channel) in the `[skills]` table.
 func DefaultConfig() types.SkillsConfig {
 	return types.SkillsConfig{
-		Enabled:             true,
+		Enabled:             false,
 		SourceRef:           "v*",
 		RefMode:             "tag",
 		PullInterval:        "15m",
@@ -50,11 +59,12 @@ func durationOrDays(d types.Duration) time.Duration {
 	return d.Std()
 }
 
-// DisabledConfig is the boot state when no [skills] table exists.
+// DisabledConfig is the explicit "no [skills] table" posture. It is now the
+// same value as DefaultConfig (SPEC-11 §2a: the shipped compiled default is
+// `enabled=false`), and it stays as the named way to SAY that, so the two can
+// never drift into contradictory "off" constructors — a test pins them together.
 func DisabledConfig() types.SkillsConfig {
-	c := DefaultConfig()
-	c.Enabled = false
-	return c
+	return DefaultConfig()
 }
 
 // wireDoc is the TOML document shape: the [skills] table plus the signer list.

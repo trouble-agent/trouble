@@ -12,6 +12,9 @@ import (
 // IdemKey so replay cannot create a duplicate issue or comment. A rate-limit
 // signal stops the batch immediately and shifts the rest to the next tick.
 func (d *Desk) Replay(ctx context.Context, budget int) (int, error) {
+	if err := d.requireEnabled("Replay"); err != nil {
+		return 0, err
+	}
 	if budget <= 0 {
 		budget = d.cfg.ReplayBatch
 		if budget <= 0 {

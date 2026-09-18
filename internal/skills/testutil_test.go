@@ -382,9 +382,12 @@ func seedChannel(t *testing.T, kp keyPair) (string, string) {
 	return f.bare(), f.dir
 }
 
-// pullerCfg is a cfg pointing at a local channel with a review policy.
+// pullerCfg is a cfg pointing at a local channel with a review policy. The loop
+// is enabled EXPLICITLY: SPEC-11 §2a ships the compiled default OFF, and a pull
+// test wants a live loop.
 func pullerCfg(source string, kp keyPair) types.SkillsConfig {
 	cfg := DefaultConfig()
+	cfg.Enabled = true
 	cfg.SourcePath = source
 	cfg.Approve = "auto"
 	cfg.RequireSignature = true

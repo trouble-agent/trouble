@@ -747,12 +747,23 @@ func duckbrainTestConfig(base string) types.IssueDriverConfig {
 	return c
 }
 
+// enabledDefaults is the config the desk unit tests exercise: the package
+// defaults with the desk turned ON. SPEC-09 §3.4a ships the compiled default OFF
+// (no deployment value is compiled in), so a test that wants a filing desk has
+// to say so — and the shipped-default posture has its own test in
+// config_default_test.go, which is where "OFF" is pinned.
+func enabledDefaults() types.IssueDeskConfig {
+	c := DefaultConfig()
+	c.Enabled = true
+	return c
+}
+
 // deskWith builds a desk over one driver and returns it with its doubles.
 func deskWith(t testingT, cfgs ...types.IssueDriverConfig) (*Desk, *fakeLedger, *fakeClock, *fakeScrubber) {
 	clk := newFakeClock()
 	led := &fakeLedger{now: clk.Now}
 	sc := &fakeScrubber{}
-	cfg := DefaultConfig()
+	cfg := enabledDefaults()
 	cfg.Drivers = cfgs
 	if len(cfgs) > 0 {
 		cfg.PrimaryDriver = cfgs[0].Name

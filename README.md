@@ -251,19 +251,22 @@ jq -r 'select(.kind=="event" or .kind=="group") | "\(.kind) \(.sig) \(.payload.o
 
 ```
 curl -sS localhost:7644/health.json | jq '.status, .subsystems'
-"degraded"
+"ok"
 [{"name":"sentinel","built":true,"refused":false},                # ← the ingest plane is up
- {"name":"issues","built":false,"refused":true,"code":"TROUBLE-ISSUES-003","reason":"…"},
+ {"name":"issues","built":true,"refused":false},                  # ← OFF, built and idle (SPEC-09 §3.4a)
  {"name":"research","built":true,"refused":false},
  {"name":"flow","built":true,"refused":false},
- {"name":"skills","built":false,"refused":true,"code":"TROUBLE-SKILLS-001","reason":"…"}]
+ {"name":"skills","built":true,"refused":false}]                  # ← OFF, built and idle (SPEC-11 §2a)
 ```
 
-`status` is `degraded`, never `ok`, while any subsystem is refused: the block names which one, its code and
-its reason, and `detail.subsystem_refused` carries the code for an alarm line. A stock boot refuses the issue
-desk (no driver credentials) and the skill loop (no distribution source) until you point them at one — the
-ingest plane above is the part this quickstart turns on. Declaring no project at all is also a valid config:
-the ingest port stays closed, the refusal is recorded, and `/health.json` says so instead of pretending.
+`status` is `degraded`, never `ok`, while any subsystem is refused: the block names which one, its code
+and its reason, and `detail.subsystem_refused` carries the code for an alarm line. The two optional
+subsystems ship **OFF** — the issue desk because nothing is compiled in for it to file into (no
+`owner`/`repo`, no token) and the skill loop because no distribution channel is compiled in — so a stock
+boot BUILDS both and reads `ok`, instead of refusing two subsystems the operator never configured
+(`SPEC-09 §3.4a`, `SPEC-11 §2a`). `examples/config.toml` states both opt-outs and names the keys that turn
+each one on. Declaring no project at all is also a valid config: the ingest port stays closed, the
+refusal is recorded, and `/health.json` says so instead of pretending.
 
 ## Read the specs
 

@@ -10,6 +10,12 @@ import (
 // timers) plus one quiet-close sweep goroutine. Total goroutines for the package
 // is ≤ 3 in v0.1 (2 drivers maximum), inside the ≤ 8 budget of §2.2.
 func (d *Desk) Run(ctx context.Context) {
+	if !d.cfg.Enabled {
+		// SPEC-09 §3.4a: a disabled desk starts no loop — no driver
+		// healthcheck, no spool replay and no quiet-close sweep. It holds no
+		// driver and no anchor, so there is nothing for a loop to serve.
+		return
+	}
 	var wg sync.WaitGroup
 	for _, name := range d.order {
 		wg.Add(1)

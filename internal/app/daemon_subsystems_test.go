@@ -303,9 +303,12 @@ func TestE2EUnknownClassThroughTheWiredChain(t *testing.T) {
 
 // fakeIssuesCfg builds the desk config on the package defaults with the test
 // driver as the primary (the defaults' github/duckbrain blocks are removed:
-// they carry no credentials here and would refuse the boot).
+// they carry no credentials here and would refuse the boot). The desk is enabled
+// EXPLICITLY: SPEC-09 §3.4a ships the compiled default OFF, and this e2e wants a
+// filing desk.
 func fakeIssuesCfg() *types.IssueDeskConfig {
 	c := issues.DefaultConfig()
+	c.Enabled = true
 	c.PrimaryDriver = "fake"
 	c.Drivers = []types.IssueDriverConfig{{Name: "fake", Enabled: true, MaxAttempts: 2, Timeout: "5s"}}
 	return &c

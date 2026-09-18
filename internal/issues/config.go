@@ -17,9 +17,31 @@ import (
 
 // DefaultConfig is the SPEC-09 §3.4 default column. Every key has a default and
 // no deployment value is compiled in.
+//
+// `Enabled` is FALSE in the shipped default (SPEC-09 §3.4a): no deployment value
+// is compiled in, so no driver this build can construct is usable out of the box
+// — the github block has no owner/repo and no token, and the local duckbrain
+// driver is off. An enabled desk over those blocks is refused at boot
+// (`TROUBLE-ISSUES-003: driver github needs owner and repo (SPEC-09 §3.9.1)`),
+// which is the right answer for a desk that was ASKED for and cannot be built,
+// and the wrong one for every stock boot that never asked. So the desk is off,
+// deliberately and visibly.
+//
+// The opt-in is one of these two, in the `[issues]` table:
+//
+//	[issues]
+//	enabled = true
+//	[issues.drivers.github]
+//	owner = "<org>"        # both required, plus a token (env or 0600 file)
+//	repo  = "<repo>"
+//
+// or, local-first, `enabled = true` with `[issues.drivers.duckbrain] enabled =
+// true` and a reachable base_url. The driver blocks below are left exactly as
+// §3.4 ships them, so ENABLING the desk without the owner/repo pair still fails
+// with that named message instead of building a desk that cannot file.
 func DefaultConfig() types.IssueDeskConfig {
 	return types.IssueDeskConfig{
-		Enabled:           true,
+		Enabled:           false,
 		PrimaryDriver:     "github",
 		DedupWindow:       "30m",
 		QuietClose:        "24h",

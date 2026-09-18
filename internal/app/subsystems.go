@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +42,58 @@ type Subsystems struct {
 	Flow     *flow.Flow
 	Issues   *issues.Desk
 	Skills   *skills.Skills
+
+	// refusals holds one row per subsystem the boot refused, in build order.
+	// It is the SAME truth the lifecycle record carries, held in memory so the
+	// health surface and the dashboard can report it (SPEC-12 §3.3a): the
+	// record is the audit trail, the row is the live answer.
+	refusals map[string]types.SubsystemHealth
+}
+
+// subsystemNames is the five late-landing subsystems, in the order
+// buildSubsystems constructs them — the order Report returns and the dashboard
+// renders, so two surfaces can never disagree about what "all five" means.
+var subsystemNames = []string{"sentinel", "issues", "research", "flow", "skills"}
+
+// Report is the built/refused block of the health surface (SPEC-12 §3.3a): one
+// row per subsystem, never omitted, never re-derived from anything but this
+// struct. A nil receiver reports every subsystem as not built — the honest
+// answer for a health surface served before the subsystems land, and never a
+// claim that they are up.
+func (s *Subsystems) Report() []types.SubsystemHealth {
+	out := make([]types.SubsystemHealth, 0, len(subsystemNames))
+	for _, name := range subsystemNames {
+		if s == nil {
+			out = append(out, types.SubsystemHealth{Name: name, Reason: "subsystems not assembled yet"})
+			continue
+		}
+		if row, ok := s.refusals[name]; ok {
+			out = append(out, row)
+			continue
+		}
+		out = append(out, types.SubsystemHealth{Name: name, Built: s.built(name)})
+	}
+	return out
+}
+
+// built reports whether the named subsystem is live in this set.
+func (s *Subsystems) built(name string) bool {
+	if s == nil {
+		return false
+	}
+	switch name {
+	case "sentinel":
+		return s.Sentinel != nil
+	case "research":
+		return s.Research != nil
+	case "flow":
+		return s.Flow != nil
+	case "issues":
+		return s.Issues != nil
+	case "skills":
+		return s.Skills != nil
+	}
+	return false
 }
 
 // research/flow/issues accessors keep daemon.go's wiring lines short.
@@ -254,7 +307,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	if srv, reason := buildSentinel(d, hostID, opts.SentinelProjects); srv != nil {
 		subs.Sentinel = srv
 	} else if opts.SentinelProjects != nil || d.Scrubber != nil {
-		recordSubsystemRefusal(d, ctx, "sentinel", errors.New(reason))
+		recordSubsystemRefusal(d, subs, ctx, "sentinel", errors.New(reason))
 	}
 
 	// --- SPEC-09 first: both the ladder's outlet and the flow's desk want it.
@@ -274,7 +327,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 		LastSeq:   func() uint64 { return d.Store.Seq() },
 	}
 	if desk, err := issues.New(issCfg, issDeps); err != nil {
-		recordSubsystemRefusal(d, ctx, "issues", err)
+		recordSubsystemRefusal(d, subs, ctx, "issues", err)
 	} else {
 		subs.Issues = desk
 	}
@@ -285,7 +338,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 		resCfg[k] = v
 	}
 	if svc, err := research.New(resCfg, research.NewDeps(DraftWriter{d.Store}, d.Scrubber, clock)); err != nil {
-		recordSubsystemRefusal(d, ctx, "research", err)
+		recordSubsystemRefusal(d, subs, ctx, "research", err)
 	} else {
 		subs.Research = svc
 	}
@@ -296,7 +349,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 		flowCfg = *opts.FlowCfg
 	}
 	if fl, err := flow.NewFlow(flowCfg, ladderCfgGates(d)); err != nil {
-		recordSubsystemRefusal(d, ctx, "flow", err)
+		recordSubsystemRefusal(d, subs, ctx, "flow", err)
 	} else {
 		fl.SetDeps(flowDeps(d, subs, hostID, actor, clock))
 		subs.Flow = fl
@@ -327,7 +380,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 		},
 	}
 	if sk, err := skills.New(skCfg, skDeps); err != nil {
-		recordSubsystemRefusal(d, ctx, "skills", err)
+		recordSubsystemRefusal(d, subs, ctx, "skills", err)
 	} else {
 		subs.Skills = sk
 	}
@@ -384,7 +437,10 @@ func flowDeps(d *Daemon, subs *Subsystems, hostID string, actor types.Actor, clk
 // detect locally).
 func buildSentinel(d *Daemon, hostID string, projects []types.Project) (*sentinel.Server, string) {
 	if len(projects) == 0 {
-		return nil, "no sentinel projects configured"
+		// The code is part of the reason, not decoration: the health row and
+		// the lifecycle record both carry it, and the `projects` key of
+		// SPEC-12 §3.1 is what fixes it.
+		return nil, string(types.CodeLifecycle001) + ": no sentinel projects configured (SPEC-12 §3.1)"
 	}
 	if d.Scrubber == nil {
 		return nil, "the scrub engine is unavailable"
@@ -432,8 +488,22 @@ func (s sentinelSink) ScanFrom(seq uint64, yield func(types.Record) bool) error 
 }
 
 // recordSubsystemRefusal writes the one lifecycle record that says a subsystem
-// was not built and why (the dashboard's "absent means no such record" rule).
-func recordSubsystemRefusal(d *Daemon, ctx context.Context, name string, err error) {
+// was not built and why (the dashboard's "absent means no such record" rule),
+// AND keeps the same refusal on the in-memory set the health surface reads
+// (SPEC-12 §3.3a). Both halves come from one call site so the record and the
+// health row can never disagree about what the boot refused.
+func recordSubsystemRefusal(d *Daemon, subs *Subsystems, ctx context.Context, name string, err error) {
+	if subs != nil {
+		if subs.refusals == nil {
+			subs.refusals = map[string]types.SubsystemHealth{}
+		}
+		subs.refusals[name] = types.SubsystemHealth{
+			Name:    name,
+			Refused: true,
+			Code:    errorCodeOf(err),
+			Reason:  err.Error(),
+		}
+	}
 	if d == nil || d.Store == nil {
 		return
 	}
@@ -442,6 +512,38 @@ func recordSubsystemRefusal(d *Daemon, ctx context.Context, name string, err err
 		"name":   name,
 		"detail": err.Error(),
 	})
+}
+
+// errorCodeOf extracts the TROUBLE-AREA-NNN code an error carries. Every
+// trouble error is code-prefixed, so the health surface can name the code a
+// refusal belongs to instead of only its prose; an error with no code (a
+// plain reason string, e.g. the sentinel's missing project table) yields "".
+func errorCodeOf(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	i := strings.Index(msg, "TROUBLE-")
+	if i < 0 {
+		return ""
+	}
+	rest := msg[i:]
+	end := 0
+	for end < len(rest) {
+		c := rest[end]
+		if c == '-' || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			end++
+			continue
+		}
+		break
+	}
+	code := rest[:end]
+	// TROUBLE-x-000 is the shortest legal code; anything shorter is prose that
+	// happens to start with the prefix.
+	if len(code) < len("TROUBLE-A-000") {
+		return ""
+	}
+	return code
 }
 
 // ---------------------------------------------------------------------------

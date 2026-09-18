@@ -24,7 +24,26 @@ type HealthResponse struct {
 	Autonomy      AutonomyGates     `json:"autonomy"`
 	Breakers      []Breaker         `json:"breakers"`
 	RW            RuntimeWatermarks `json:"runtime_watermarks"`
-	Detail        map[string]any    `json:"detail,omitempty"` // e.g. {"reason":"unstamped_build"}
+	// Subsystems is the per-subsystem built/refused block (SPEC-12 §3.3a). The
+	// key is always present: a health surface that cannot say whether its
+	// subsystems were built is how an instance whose ingest plane is absent
+	// reports a green light.
+	Subsystems []SubsystemHealth `json:"subsystems"`
+	Detail     map[string]any    `json:"detail,omitempty"` // e.g. {"reason":"unstamped_build"}
+}
+
+// SubsystemHealth is one row of the per-subsystem built/refused block on the
+// health surface (SPEC-TYPES §3.12, rule in SPEC-12 §3.3a). One row exists for
+// every late-landing subsystem, in build order, and it is the only shape in
+// which a boot reports that a subsystem did not build: `built=false` is never a
+// claim that the subsystem is healthy, and `refused=true` carries the code and
+// the reason the boot recorded.
+type SubsystemHealth struct {
+	Name    string `json:"name"`             // sentinel | research | flow | issues | skills
+	Built   bool   `json:"built"`            // true only while the composition root holds a live subsystem
+	Refused bool   `json:"refused"`          // true when the boot recorded a refusal for this subsystem
+	Code    string `json:"code,omitempty"`   // the refusal's TROUBLE-*-NNN code, when it carries one
+	Reason  string `json:"reason,omitempty"` // the refusal's own detail (a config key or an unwired driver, never a secret)
 }
 
 // RuntimeWatermarks are the resource counters on the health surface

@@ -243,6 +243,12 @@ func (d *Daemon) health() types.HealthResponse {
 		LedgerLastTS:  lastTS,
 		LedgerStallS:  stall,
 		UptimeS:       time.Since(d.started).Seconds(),
+		// The built/refused block comes from the live subsystem set — the same
+		// refusal rows the lifecycle records were written from (SPEC-12 §3.3a).
+		// A nil set reports every subsystem as not built rather than omitting
+		// the block: /health.json never reads "ok" for a subsystem it cannot
+		// prove is up.
+		Subsystems: d.Subsystems.Report(),
 	}
 	v, sha, bt, unstamped := lifecycle.VersionInfo()
 	in.Version, in.GitSHA, in.BuildTime = v, sha, bt

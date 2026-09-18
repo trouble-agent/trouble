@@ -22,6 +22,27 @@ func Health(cfg Config, in types.HealthInputs) types.HealthResponse {
 		}
 	}
 
+	// Subsystems (SPEC-12 §3.3a): a subsystem the boot did not build is never
+	// reported as healthy. The `subsystems` block is the per-row truth; `detail`
+	// names one cause for the alarm line, exactly as sensor_degraded does.
+	for _, s := range in.Subsystems {
+		if s.Built {
+			continue
+		}
+		if status != "stalled" {
+			status = "degraded"
+		}
+		if s.Refused {
+			detail["subsystem_refused"] = subsystemRefusalCode(s)
+			detail["subsystem"] = s.Name
+			continue
+		}
+		// Not built with no refusal recorded: the row still refuses to claim
+		// the subsystem is up (a health surface served before the subsystems
+		// land, or a build that left no reason).
+		detail["subsystem_unbuilt"] = s.Name
+	}
+
 	if in.RW.RSSBytes > in.RSSWarnBytes && in.RSSWarnBytes > 0 {
 		if status != "stalled" {
 			status = "degraded"
@@ -57,6 +78,17 @@ func Health(cfg Config, in types.HealthInputs) types.HealthResponse {
 		Autonomy:      in.Autonomy,
 		Breakers:      in.Breakers,
 		RW:            in.RW,
+		Subsystems:    in.Subsystems,
 		Detail:        detail,
 	}
+}
+
+// subsystemRefusalCode is the code the health surface reports for a refused
+// subsystem: its own error code when it carries one, else the reason text (a
+// refusal recorded before the code convention still names its cause).
+func subsystemRefusalCode(s types.SubsystemHealth) string {
+	if s.Code != "" {
+		return s.Code
+	}
+	return s.Reason
 }

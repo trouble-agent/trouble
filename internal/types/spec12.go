@@ -63,6 +63,9 @@ type HealthInputs struct {
 	Autonomy      AutonomyGates
 	Breakers      []Breaker
 	RW            RuntimeWatermarks
+	// Subsystems is the built/refused block of §3.3a, read from the composition
+	// root's live subsystem set (never re-derived here: one truth per question).
+	Subsystems []SubsystemHealth
 
 	// DegradedReasons is a list of machine-readable causes (e.g. "unstamped_build",
 	// "forward_refused", "cgroup_v1"); any entry makes the response "degraded".

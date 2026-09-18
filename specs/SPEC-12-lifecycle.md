@@ -3,7 +3,7 @@
 Spec: SPEC-12
 Area prefix: TROUBLE-LIFECYCLE
 Package: internal/lifecycle
-Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity, ProfileConfig, HubStatus
+Consumed types: ConfigValue, Heartbeat, ForwardEnvelope, SpoolEntry, Topology, TopologyDecision, Duration, HealthResponse, SubsystemHealth, SensorHealth, SourceLiveness, AutonomyGates, Breaker, RuntimeWatermarks, Record, RecordKind, Origin, Actor, GapRecord, Evidence, Sig, Severity, ProfileConfig, HubStatus
 Local types: explainRow, unitTemplate, bindProbe, stallVerdict, spoolSegment, spoolState, upgradePlan, secretFileCheck, zoneWindow
 ACs: AC-14, AC-18, AC-25, AC-26, AC-27, AC-28, AC-29
 PRD: §09, §11, §12
@@ -314,6 +314,7 @@ stall**, and the checker can be a simple threshold test with no heuristics.
 | `autonomy` | SPEC-05 gates | mode + kill-switch state are logged with every alarm (alarms during `full` with the kill-switch on are expected to be quiet) |
 | `breakers[]` | SPEC-03/05 | open breakers explain a legitimately quiet ledger, so the checker names them instead of guessing |
 | `runtime_watermarks` | lifecycle + ledger + flow | `spool_bytes` vs `spool_budget_bytes` (>90% ⇒ alarm `detail.spool_pressure`), `rss_bytes`, `binary_bytes`, `worktrees` |
+| `subsystems[]` | the composition root's live subsystem set (§3.3a) | a refused subsystem is the reason `degraded` is not an empty signal: it names the plane that is absent (ingest, issue desk, skill loop) instead of leaving an operator to infer it from a missing route |
 
 `GET /health.json` requires the read scope (Bearer or cookie) and is served on the dashboard listener. Its
 field names are frozen here; SPEC-10 owns the route row and the template that renders them.
@@ -348,6 +349,42 @@ is the whole point of the split.
 `trouble-stall.service` is a oneshot, so a non-zero exit always enters the failed state and always fires
 `OnFailure=trouble-escalate@%n.service`. That is the escalation trigger that does not depend on
 `StartLimitIntervalSec=0` semantics (§6, crash-loop case).
+
+### 3.3a Per-subsystem built/refused block (`subsystems[]`)
+
+`/health.json` carries one row per late-landing subsystem — `sentinel`, `issues`, `research`, `flow`,
+`skills`, in that order — so an instance whose ingest plane, issue desk or skill loop did not build can never
+present itself as healthy. The field is `HealthResponse.Subsystems`; the row type is `SubsystemHealth`
+(SPEC-TYPES §3.12):
+
+| Field | Meaning |
+|---|---|
+| `name` | the subsystem: `sentinel`, `issues`, `research`, `flow`, `skills`. A row exists for every one of the five, always |
+| `built` | true only while the composition root holds that subsystem's live member |
+| `refused` | true when the boot recorded a refusal for it: the same event that writes the `lifecycle` record with `payload.stage="subsystem_not_built"` |
+| `code` | the refusal's own `TROUBLE-*-NNN` code, when the error carries one (empty otherwise) |
+| `reason` | the refusal's own detail string — a config key or an unwired driver, never a secret |
+
+Rules, pinned:
+
+- **Status rule.** Any row with `built=false` makes the response `degraded`, and `stalled` keeps its
+  precedence over it. `status="ok"` is therefore reachable only when all five subsystems are live: an
+  instance that refused a subsystem never reports a green light, whatever its sensors say. This is the
+  §3.3 anti-pattern ("never observe itself into a green lie") enforced at the assembly, not left to a
+  reader of the route table.
+- **Never a claim it cannot prove.** `built=false` is the default and is emitted for every row the
+  composition root cannot vouch for, so a health surface served before the subsystems land reports five
+  unbuilt rows rather than omitting the block. An unknown subsystem state is never rendered as healthy.
+- **One truth per refusal.** The rows are recorded at the same call site that writes the
+  `subsystem_not_built` record, so the audit trail and the live surface cannot disagree about what the boot
+  refused. Reading the ledger for the refusal and the health surface for the status must never be able to
+  tell two different stories.
+- **`detail` keys.** `detail.subsystem_refused` carries the code of a refused row (its reason text when the
+  refusal has no code), `detail.subsystem` names that row, and `detail.subsystem_unbuilt` names a row that
+  is neither built nor refused. The block is the per-subsystem authority; these single-valued keys carry the
+  last refused row in block order, exactly as `detail.sensor_degraded` carries one sensor.
+- **Ordering.** Rows are ordered by the build order above, never by map iteration: two boots that refused the
+  same subsystems produce byte-identical blocks.
 
 ### 3.4 Version stamping
 

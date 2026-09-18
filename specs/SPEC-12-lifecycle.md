@@ -952,6 +952,7 @@ Files and pass thresholds (all numbers normative regressions):
 | `tests/e2e/unit_sandbox.sh` | under `strict`: write inside `ReadWritePaths` succeeds, outside fails `EROFS`; `PrivateTmp`: a file written to `/tmp` inside the unit is absent on the host; cgroup v2: `memory.max` == 268435456 | 1 assertion per flag; cgroup-v1 host reports `degraded` with `detail.reason="cgroup_v1"` |
 | `internal/lifecycle/profile_test.go` | `server.profile` precedence (flag/env/file/default) with provenance; `light-hub` missing `server.redis.url` or `server.duckbrain.namespace` → TROUBLE-HUB-001 + exit 13 + **0 HTTP responses**; `hub.mode=satellite` + `light-hub` → 001; SIGHUP flip of `server.profile` → 013 with the running profile intact; the `trouble topology` profile row | every refusal happens before the first bind; a refused reload leaves the running profile unchanged |
 | `tests/e2e/ac28_route_spool.sh` | hub + satellite over the namespace link with `[sentinel.routes]` configured: a `direct` class stays local (route A, satellite ledger only), a `proxy` class relays (route B, hub canonical ledger); hub killed mid-batch → spool grows, replay after restart → exactly one hub record per event; `origin.route` asserted on both sides | 0 events lost, 0 duplicates; 100 % of records carry the resolved route; the spool never exceeds its budget |
+| `internal/app/readybudget_test.go` | the boot-budget derivation over synthetic load values (monotone in load, never below the base, capped at 4x, exactly the base with no host signal, a core count below 1 coerced to one core), a load sweep asserting the monotonicity and the cap as properties, and the verdict composer: the failure text, the SKIP text, the threshold just below the fence, the drain wording, and the composed message for a forced low budget | every case asserted; both texts carry the observed `load_avg` and the elapsed seconds; 0 SKIPs below 4 runnable threads per core |
 
 Regression numbers pinned: heartbeat drift <100ms/2h · stall detection ≤420s · spool budget accuracy ±1% ·
 batch ≤200 records and ≤512KB decompressed · upgrade READY ≤30s · steady RSS ≤80MB after an upgrade ·
@@ -959,6 +960,18 @@ zero duplicate forwarded records · zero secret occurrences in any explain dump 
 AC-28: 100 % of records carry `origin.route`, 0 lost, 0 duplicated across a hub outage · AC-29: identical
 incident/verify sequences in `standalone` and `light-hub` for the same stream, 0 lost records across a Redis
 outage.
+
+### 7a Host-derived test-time budgets
+
+The boot tests in `internal/app` wait on a live boot (`daemon_test.go`, `subsystems_config_test.go`, `shipped_example_test.go`, `config_projects_test.go`). That boot measures ~22-25 s on a quiet 16-core host, so a bare wall-clock deadline turns host load into a verdict: the identical commit passes on an idle box and reds out while the same box carries fleet load. Every host-measured wait in that package is therefore derived from a measured host signal — the 1-minute load average — and a budget only ever bounds "still booting":
+
+- **Derivation.** `base × clamp(1 + loadPerCore / 2, 1, 4)`, with `loadPerCore = loadAvg1 / NumCPU()`. `loadAvg1` is field 0 of `/proc/loadavg`, and 0 on any read or parse error; 0 keeps the base budget and never selects the extreme-load verdict. The multiplier never drops below 1 (a quiet host never tightens a budget) and never exceeds 4: past that the host is no longer an explanation for a slow boot.
+- **Bases.** The two quiet-host deadlines the suite shipped with: 30 s for READY, 20 s for the SIGTERM drain. Both scale by the same rule.
+- **A settled boot is never bounded by the budget.** The waits poll at 250 ms and return as soon as the boot settles: READY, or `RunDaemon` returning (with an error, or without READY — the last case is reported as a failure, never as success). A refusal is reported within one poll tick, so a budget can neither mask a refusal nor hide a hang behind a longer deadline.
+- **An exhausted budget names its numbers.** The failure carries the observed `load_avg`, the elapsed seconds, the base and the derived budget in one message, so a reader can tell host load from a regression.
+- **The extreme-load fence.** At or above four runnable threads per core the same expiry is recorded as an explicit `t.Skipf` naming the same figures: such a host cannot separate a slow boot from a descheduled one, and a red test there would misreport the host as a defect. This is the only SKIP on the boot path.
+- **Falsification hook.** Two inert environment overrides exist so the fence itself can be driven: `TROUBLE_BOOT_BUDGET_MS` forces the quiet-host base (milliseconds) and `TROUBLE_BOOT_LOAD_OVERRIDE` forces the observed load. A forced 1 ms budget fails the shipped-example boot in 0.26 s carrying its load and elapsed figures; the same forced budget with a forced load of 1000 records the SKIP verdict instead.
+- **Scope.** Test-only: this section adds no production code and no error code of its own (every code the boot path reports is already catalogued). The one wait deliberately left alone is the 2 s fragment-poll window in `daemon_test.go` — a negative "must not happen" window, not a boot budget.
 
 ## 8. hilo impact
 

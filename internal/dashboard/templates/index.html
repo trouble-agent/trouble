@@ -29,6 +29,17 @@
 <p class="note">The kill switch is always allowed to turn <em>on</em>; clearing it needs allow_resume, and mode <em>full</em> needs allow_full — both are configuration decisions, not phone clicks.</p>
 </section>
 <section class="panel">
+<h2>subsystems</h2>
+<table class="rows">
+<thead><tr><th>subsystem</th><th>built</th><th>refused</th><th>code</th><th>reason</th></tr></thead>
+<tbody id="subsystem-rows">
+{{range .Subsystems}}<tr class="{{if .Refused}}refused{{else if .Built}}built{{end}}"><td>{{.Name}}</td><td>{{.Built}}</td><td>{{.Refused}}</td><td>{{.Code}}</td><td>{{.Reason}}</td></tr>
+{{end}}
+</tbody>
+</table>
+<p class="note">A subsystem listed as refused did not build at boot: its refusal is one <code>lifecycle</code> record (<code>stage=subsystem_not_built</code>) and <code>/health.json</code> cannot report <code>ok</code> while any row here is not built (SPEC-12 §3.3a).</p>
+</section>
+<section class="panel">
 <h2>open incidents</h2>
 <table class="rows">
 <thead><tr><th>title</th><th>severity</th><th>state</th><th>rung</th><th>age</th><th>last event</th></tr></thead>

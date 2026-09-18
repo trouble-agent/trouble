@@ -35,6 +35,10 @@ type HealthDeps struct {
 	Sources    func() []types.SourceLiveness
 	Breakers   func() []types.Breaker
 	Autonomy   func() types.AutonomyGates
+	// Subsystems is the built/refused block (SPEC-12 §3.3a). nil means the
+	// caller has no subsystem view at all: no rows are invented, and the status
+	// is left to the other producers rather than guessed.
+	Subsystems func() []types.SubsystemHealth
 
 	LedgerSeq    func() uint64
 	LedgerTS     func() string
@@ -100,6 +104,9 @@ func BuildHealth(ctx context.Context, deps HealthDeps) (types.HealthResponse, er
 	if deps.Watermarks != nil {
 		out.RW = deps.Watermarks()
 	}
+	if deps.Subsystems != nil {
+		out.Subsystems = deps.Subsystems()
+	}
 
 	reasons := append([]string(nil), deps.DegradedReasons...)
 	if deps.RSSWarnBytes > 0 && out.RW.RSSBytes > deps.RSSWarnBytes {
@@ -109,6 +116,17 @@ func BuildHealth(ctx context.Context, deps HealthDeps) (types.HealthResponse, er
 	if out.Version == "" && out.GitSHA == "" {
 		reasons = append(reasons, "unstamped_build")
 	}
+	// A subsystem that is not built is never healthy (§3.3a): the same rule the
+	// lifecycle assembly applies, so the two assemblers cannot disagree.
+	refused := ""
+	for _, s := range out.Subsystems {
+		if s.Built {
+			continue
+		}
+		if s.Refused && refused == "" {
+			refused = s.Name
+		}
+	}
 
 	// Status precedence: stalled beats degraded (a stalled writer is the more
 	// severe, more actionable state).
@@ -117,7 +135,7 @@ func BuildHealth(ctx context.Context, deps HealthDeps) (types.HealthResponse, er
 		stallMax = 30
 	}
 	stalled := deps.Stalled || out.LedgerStallS >= stallMax
-	degraded := len(reasons) > 0 || anySensorDegraded(out.Sensors) || anySourceDead(out.Sources)
+	degraded := len(reasons) > 0 || anySensorDegraded(out.Sensors) || anySourceDead(out.Sources) || anySubsystemUnbuilt(out.Subsystems)
 	switch {
 	case stalled:
 		out.Status = StatusStalled
@@ -126,11 +144,28 @@ func BuildHealth(ctx context.Context, deps HealthDeps) (types.HealthResponse, er
 	default:
 		out.Status = StatusOK
 	}
-	if len(reasons) > 0 {
-		detail := map[string]any{"reasons": reasons}
+	if len(reasons) > 0 || refused != "" {
+		detail := map[string]any{}
+		if len(reasons) > 0 {
+			detail["reasons"] = reasons
+		}
+		if refused != "" {
+			detail["subsystem"] = refused
+		}
 		out.Detail = detail
 	}
 	return out, nil
+}
+
+// anySubsystemUnbuilt reports whether any row of the §3.3a block fails to claim
+// a live subsystem: refused rows and rows whose build never happened both count.
+func anySubsystemUnbuilt(subs []types.SubsystemHealth) bool {
+	for _, s := range subs {
+		if !s.Built {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeSensors applies the §6.13 "no sample yet" rule and never omits an

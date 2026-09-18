@@ -367,7 +367,11 @@ func (s *server) pageIndex(w http.ResponseWriter, r *http.Request) {
 	d := s.newPage(r, "Overview", "index")
 	d.Seq = seq
 	d.Banner = s.bannerState()
-	d.Strip = s.stripData(ctx)
+	// One health assembly per render: the strip and the subsystem table read the
+	// same response, so a page can never show a status the table contradicts.
+	hr := s.deps.Health(ctx)
+	d.Strip = s.stripFrom(hr)
+	d.Subsystems = subsystemRows(hr.Subsystems)
 	d.Incidents = rows
 	d.Groups = groups
 	d.Counters = countersView{IncidentsOpen: open, GroupsOpen: groupsOpen, EventsPerMin: perMin}

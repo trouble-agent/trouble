@@ -119,11 +119,13 @@ type pageData struct {
 
 	Counters countersView
 
-	Incident      *types.Incident
-	Group         *types.Group
-	Evidence      *types.Evidence
-	Story         Story
-	Sensors       []types.SensorHealth
+	Incident *types.Incident
+	Group    *types.Group
+	Evidence *types.Evidence
+	Story    Story
+	Sensors  []types.SensorHealth
+	// Subsystems is the §3.3a built/refused table of the overview page.
+	Subsystems    []subsystemRow
 	GroupID       string
 	GroupLastAgeS float64
 

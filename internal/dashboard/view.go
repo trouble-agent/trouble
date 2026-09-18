@@ -110,8 +110,20 @@ type healthStrip struct {
 	Denied   uint64
 	CSRF     uint64
 	RL       uint64
+	Refused  int // subsystems the boot refused (SPEC-12 §3.3a)
 	RenderTS string
 	Banner   bool
+}
+
+// subsystemRow is one row of the §3.3a built/refused table on the overview
+// page (SPEC-12 §3.3a): the dashboard is where an operator sees WHICH plane is
+// absent instead of inferring it from a missing route.
+type subsystemRow struct {
+	Name    string
+	Built   bool
+	Refused bool
+	Code    string
+	Reason  string
 }
 
 // countersView is the §2.1 row 1 counter block.
@@ -595,6 +607,22 @@ func recordSummary(rec types.Record) string {
 	return string(rec.Kind)
 }
 
+// subsystemRows maps the §3.3a block into table rows, cleaning every string the
+// template renders (the reason text comes from an error message).
+func subsystemRows(subs []types.SubsystemHealth) []subsystemRow {
+	rows := make([]subsystemRow, 0, len(subs))
+	for _, s := range subs {
+		rows = append(rows, subsystemRow{
+			Name:    truncRunes(clean(s.Name)),
+			Built:   s.Built,
+			Refused: s.Refused,
+			Code:    truncRunes(clean(s.Code)),
+			Reason:  truncRunes(clean(s.Reason)),
+		})
+	}
+	return rows
+}
+
 // sensorList returns the SPEC-03 sensor snapshot for /rules, applying the
 // §6.13 "no sample yet" rule so an enabled sensor that has not produced a
 // sample is visible as degraded instead of absent.
@@ -675,6 +703,14 @@ func (s *server) stripFrom(hr types.HealthResponse) healthStrip {
 		RL:       s.counters.rl.Load(),
 		RenderTS: s.renderTS(),
 		Banner:   s.bannerState(),
+	}
+	// The strip carries the refused-subsystem count next to the status: a
+	// degraded status with no visible cause is the thing this surface exists to
+	// prevent (SPEC-12 §3.3a).
+	for _, sub := range hr.Subsystems {
+		if !sub.Built {
+			st.Refused++
+		}
 	}
 	if st.Status == "" {
 		st.Status = "unknown"

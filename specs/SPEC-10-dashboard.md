@@ -41,7 +41,7 @@ no regex routes, no third-party mux. `{id}` is an exact `<prefix>_<ULID>` match.
 
 | # | Method | Path | Auth scope | Response type | Data source |
 |---|---|---|---|---|---|
-| 1 | GET | `/` | read | HTML page | index counters (`IncidentsOpen`, `GroupsOpen`, `EventsPerMin`) + `HealthResponse` (§2.9/§3.3) |
+| 1 | GET | `/` | read | HTML page | index counters (`IncidentsOpen`, `GroupsOpen`, `EventsPerMin`) + `HealthResponse` (§2.9/§3.3), including its `subsystems` table: one row per late-landing subsystem with built/refused, the refusal code and its reason (SPEC-12 §3.3a), so a degraded status names its cause on the page instead of leaving it to be inferred from a missing route |
 | 2 | GET | `/incidents?page_token=&page_size=` | read | HTML page | `Index.OpenIncidents(page_token,page_size)` (kind `incident`, page-token grammar owned by SPEC-01 §2.3a) + `Index.LastEventAge(sig)`; the page footer carries `next_page_token`, and a token naming a dropped generation renders the reset banner instead of an error |
 | 3 | GET | `/incidents/{id}` | read | HTML page | `Index.IncidentStory(inc)` — incident, group, `Evidence`, ledger records, `IssueRef`, `tsk_` board row, `ResearchOutcome`, `SpawnRequest`, `Promotion`, `SkillCandidate` |
 | 4 | GET | `/groups?page_token=&page_size=&rank=` | read | HTML page | `Index.Groups(rank,page_token,page_size)` (kind `group`); ranked-by-rate stays index-only per §2.9 — the token continues a long list, it never re-ranks — and the page footer carries `next_page_token` |

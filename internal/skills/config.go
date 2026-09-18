@@ -3,9 +3,12 @@ package skills
 import (
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/BurntSushi/toml"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -104,15 +107,43 @@ type skillsWire struct {
 	Signers             []types.SkillSigner `toml:"signers"`
 }
 
+// undecodedKeys lists, sorted, the keys a decoded document carried that no field
+// of the wire shape claimed: exactly the unknown keys a strict config decode
+// refuses, refused by NAME so the operator is told which one is wrong.
+func undecodedKeys(md toml.MetaData) []string {
+	bad := md.Undecoded()
+	if len(bad) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(bad))
+	for _, k := range bad {
+		out = append(out, k.String())
+	}
+	sort.Strings(out)
+	return out
+}
+
 // LoadConfig decodes a `[skills]` document over the defaults and validates it.
+//
+// The decode is STRICT: a key this build does not know is refused by name, never
+// decoded past. The composition root hands the config file's `[skills]` bytes
+// straight to this loader (SPEC-12 §3.1b), so an unknown key has no other place
+// to be caught — and a typo that silently keeps a default is the exact failure
+// SPEC-12 §3.1 refuses for the file at large. `decodeTOML` has no key metadata,
+// which is why the config surface decodes with `toml.Decode` directly.
 func LoadConfig(doc []byte) (types.SkillsConfig, error) {
 	cfg := DefaultConfig()
 	if len(doc) == 0 {
 		return cfg, ValidateConfig(cfg)
 	}
 	var w wireDoc
-	if err := decodeTOML(doc, &w); err != nil {
+	md, err := toml.Decode(string(doc), &w)
+	if err != nil {
 		return cfg, newErr(types.CodeSkills001, ReasonConfig, "skills config: %v", err)
+	}
+	if bad := undecodedKeys(md); len(bad) > 0 {
+		return cfg, newErr(types.CodeSkills001, ReasonConfig,
+			"skills config: unknown key %q (known keys are SPEC-11 §2's)", bad[0])
 	}
 	if w.Skills == nil {
 		return cfg, ValidateConfig(cfg)

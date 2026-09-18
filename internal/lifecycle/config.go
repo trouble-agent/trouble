@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -69,6 +70,14 @@ type Config struct {
 	// operator declared none, which is a supported configuration — the sentinel
 	// refuses, records why and never opens the ingest port (§3.3a).
 	Projects []ProjectConfig `toml:"projects"`
+
+	// IssuesTable and SkillsTable are the two optional subsystem tables
+	// (SPEC-12 §3.1b): the `[issues]` desk and the `[skills]` loop as the
+	// operator declared them. A zero value means the file declared no such
+	// table, which is a supported configuration — the subsystem then keeps its
+	// compiled default (SPEC-09 §3.4a / SPEC-11 §2a).
+	IssuesTable SubsystemTable `toml:"-"`
+	SkillsTable SubsystemTable `toml:"-"`
 
 	Dashboard DashboardConfig `toml:"dashboard"`
 
@@ -192,6 +201,122 @@ const (
 	DefaultProjectQuotaEPM   = 600
 	DefaultProjectDiskBudget = 2147483648 // 2GiB
 )
+
+// SubsystemTable is one optional subsystem table — `[issues]` or `[skills]` —
+// exactly as the config file declared it (SPEC-12 §3.1b).
+//
+// It is carried as TEXT rather than as a resolved typed config on purpose: the
+// keys inside these tables belong to the subsystem that owns them (SPEC-09 §3.4
+// and §3.4a, SPEC-11 §2 and §2a), and this package imports no subsystem
+// (SPEC-12 §4.5/§8). The composition root hands the text to the subsystem's own
+// loader, which is also where a declaration that cannot be turned into a
+// subsystem is refused with that subsystem's own code.
+//
+// A zero value means the file declared no such table — a supported
+// configuration, not a hole: the subsystem keeps its compiled default, which
+// ships OFF (SPEC-09 §3.4a / SPEC-11 §2a).
+type SubsystemTable struct {
+	// Text is the verbatim TOML text of the table, its header lines included,
+	// so `[issues] ...` and `[issues.drivers.github] ...` arrive as ONE document
+	// the subsystem's own TOML decoder reads.
+	Text string
+	// Keys are the keys the declaration carried, relative to the table root and
+	// sorted (`enabled`, `drivers.github.owner`). They are what the explain row
+	// reports: the names, never a value.
+	Keys []string
+}
+
+// Declared reports whether the file carried the table at all.
+func (t SubsystemTable) Declared() bool { return strings.TrimSpace(t.Text) != "" }
+
+// Summary renders the table's `trouble config explain` row and its boot-record
+// entry. It names the keys the declaration carried and never a value: a value in
+// these tables can be a credential path, and the redaction list for those belongs
+// to the subsystem that owns the table (SPEC-09 §3.4 redacts `token_file` and
+// `api_key_file`; SPEC-12 §3.1 redacts by its own key rules, which do not reach
+// this table's key names).
+func (t SubsystemTable) Summary() string {
+	if !t.Declared() {
+		return "not declared"
+	}
+	if len(t.Keys) == 0 {
+		return "declared: no keys"
+	}
+	return "declared: " + strings.Join(t.Keys, ", ")
+}
+
+// setSubsystemTable is a registered table key's setter. The only accepted source
+// shape is the table document the file reader builds for `[issues]`/`[skills]`; a
+// scalar — an env var or a flag cannot express a table — is refused BY NAME
+// instead of silently leaving the compiled default in place, which is the §3.1
+// rule for a wrong value type applied to a table.
+func setSubsystemTable(dst *SubsystemTable, name string, v any) error {
+	switch x := v.(type) {
+	case nil:
+		*dst = SubsystemTable{}
+		return nil
+	case SubsystemTable:
+		*dst = x
+		return nil
+	case string:
+		if strings.TrimSpace(x) == "" {
+			*dst = SubsystemTable{}
+			return nil
+		}
+		return fmt.Errorf("%s is a table ([%s]); %q is not a declaration", name, name, x)
+	default:
+		return fmt.Errorf("%s is a table ([%s]), got %T", name, name, v)
+	}
+}
+
+// tableRoot reports the registered TABLE key that owns a flattened file key, if
+// any (SPEC-12 §3.1b). A table key is registered with a SubsystemTable default,
+// which is how it is told apart from a scalar key without a second list of names
+// to keep in sync with the registry.
+func tableRoot(known map[string]keyMeta, key string) (string, bool) {
+	root, rest, ok := strings.Cut(key, ".")
+	if !ok || root == "" || rest == "" {
+		return "", false
+	}
+	m, ok := known[root]
+	if !ok {
+		return "", false
+	}
+	if _, isTable := m.defaultVal.(SubsystemTable); !isTable {
+		return "", false
+	}
+	return root, true
+}
+
+// absorbTables folds every file key that lives under a registered subsystem
+// table into that table's one resolved value (SPEC-12 §3.1b): the keys of
+// `[issues]` and `[skills]` are the subsystems' own, so they are collected for
+// the owner instead of being checked against this package's flat allowlist. The
+// owner refuses an unknown one by name, with the code that names the failure.
+func absorbTables(fileVals map[string]any, docs map[string]string, known map[string]keyMeta) error {
+	declared := map[string][]string{}
+	for k := range fileVals {
+		root, ok := tableRoot(known, k)
+		if !ok {
+			continue
+		}
+		declared[root] = append(declared[root], strings.TrimPrefix(k, root+"."))
+		delete(fileVals, k)
+	}
+	for root, keys := range declared {
+		text := docs[root]
+		if strings.TrimSpace(text) == "" {
+			// Unreachable: a flattened key under a table root is written by a
+			// line the reader attributed to that root. It is a guard rather than
+			// a branch — dropping the declaration here would silently run the
+			// subsystem on its compiled default, the exact failure §3.1 refuses.
+			return fmt.Errorf("%w: key %q: the text of table [%s] was not captured", types.CodeLifecycle001, root, root)
+		}
+		sort.Strings(keys)
+		fileVals[root] = SubsystemTable{Text: text, Keys: keys}
+	}
+	return nil
+}
 
 // Resolved is the output of Resolve: the typed config, every ConfigValue with
 // provenance, plus the non-fatal records that must be mirrored into the ledger.
@@ -811,6 +936,8 @@ func registry(c *Config) []keyMeta {
 		}},
 		{"health_url", "", "health_url", c.HealthURL, func(cfg *Config, v any) error { s, err := asString(v); cfg.HealthURL = s; return err }},
 		{"projects", "", "projects", "", setProjects},
+		{"issues", "", "issues", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.IssuesTable, "issues", v) }},
+		{"skills", "", "skills", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.SkillsTable, "skills", v) }},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
 		{"dashboard.port", "dashboard", "port", c.Dashboard.Port, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Port = i; return err }},
 		{"dashboard.mandate", "dashboard", "mandate", c.Dashboard.Mandate, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Mandate = s; return err }},
@@ -945,9 +1072,16 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	if cfgPath == "" {
 		cfgPath = def.ConfigPath
 	}
-	fileVals, err := parseTOMLFile(cfgPath)
+	fileVals, tableDocs, err := parseTOMLFile(cfgPath)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return Resolved{}, fmt.Errorf("%w: %v", types.CodeLifecycle001, err)
+	}
+	// A registered subsystem table absorbs every file key under its name
+	// (SPEC-12 §3.1b) before the allowlist check below: `[issues]` and
+	// `[skills]` are one resolved value each, and their keys are the owning
+	// subsystem's, not this package's.
+	if err := absorbTables(fileVals, tableDocs, known); err != nil {
+		return Resolved{}, err
 	}
 	for k, fv := range fileVals {
 		if _, ok := known[k]; !ok {
@@ -1067,6 +1201,14 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			// of copied: what was declared, and whether a secret is set, never
 			// the secret itself (§3.1).
 			cv.Value = resolved.Config.projectsSummary()
+		case "issues":
+			// Same rule for the two subsystem tables (§3.1b): the row names the
+			// keys the declaration carried and never a value, because a value of
+			// these tables can be a credential path whose redaction list belongs
+			// to the subsystem that owns the table.
+			cv.Value = resolved.Config.IssuesTable.Summary()
+		case "skills":
+			cv.Value = resolved.Config.SkillsTable.Summary()
 		}
 	}
 
@@ -1277,13 +1419,27 @@ func parseArgs(args []string, known map[string]keyMeta) (map[string]any, error) 
 // An array of tables parses into []map[string]any: every `[[name]]` header
 // starts a NEW row which the keys after it fill. That is the shape the
 // `[[projects]]` declarations of SPEC-12 §3.1a arrive in.
-func parseTOMLFile(path string) (map[string]any, error) {
+//
+// The second return value holds, per ROOT table name, the verbatim text of every
+// line that declares that root, header lines included. A root table whose name is
+// a registered key (SPEC-12 §3.1b) is handed to its owner as exactly that text,
+// so the owner's own decoder reads the file's own bytes: no re-serialization, and
+// no key of a subsystem table is flattened into this package's allowlist.
+func parseTOMLFile(path string) (map[string]any, map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer f.Close()
 	vals := make(map[string]any)
+	docs := make(map[string]string)
+	// seen tracks the `[name]` headers, because TOML forbids declaring a table
+	// twice — and forbids reopening one after its sub-table was declared. The
+	// subset reader would otherwise fold both declarations into one document and
+	// let the SUBSYSTEM refuse the operator's file with a line number from a
+	// fragment; naming the repeated table here is the §3.1 answer (the file is
+	// not parseable, and the refusal names the key).
+	seen := make(map[string]bool)
 	section := ""
 	arraySection := ""
 	sc := bufio.NewScanner(f)
@@ -1297,11 +1453,18 @@ func parseTOMLFile(path string) (map[string]any, error) {
 			rows, _ := vals[name].([]map[string]any)
 			vals[name] = append(rows, map[string]any{})
 			section, arraySection = "", name
+			appendTableDoc(docs, sectionRoot(name), line)
 			continue
 		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			section = strings.Trim(line, "[]")
+			name := strings.Trim(line, "[]")
+			if prev, dup := repeatedTable(seen, name); dup {
+				return nil, nil, fmt.Errorf("%s: table [%s] is declared after [%s]: a table is declared once", path, name, prev)
+			}
+			seen[name] = true
+			section = name
 			arraySection = ""
+			appendTableDoc(docs, sectionRoot(section), line)
 			continue
 		}
 		if !strings.Contains(line, "=") {
@@ -1318,21 +1481,68 @@ func parseTOMLFile(path string) (map[string]any, error) {
 			row := rows[len(rows)-1]
 			v, err := parseTOMLValue(valStr)
 			if err != nil {
-				return nil, fmt.Errorf("%s: key %q: %w", path, arraySection+"."+key, err)
+				return nil, nil, fmt.Errorf("%s: key %q: %w", path, arraySection+"."+key, err)
 			}
 			row[key] = v
+			appendTableDoc(docs, sectionRoot(arraySection), line)
 			continue
 		}
+		root := ""
 		if section != "" {
 			key = section + "." + key
+			root = sectionRoot(section)
+		} else {
+			// A root-level dotted key (`issues.enabled = true`) declares the
+			// table `issues` exactly as the `[issues]` header does; a plain root
+			// key (`state_root = ...`) belongs to no table.
+			root = dottedRoot(key)
 		}
 		v, err := parseTOMLValue(valStr)
 		if err != nil {
-			return nil, fmt.Errorf("%s: key %q: %w", path, key, err)
+			return nil, nil, fmt.Errorf("%s: key %q: %w", path, key, err)
 		}
 		vals[key] = v
+		appendTableDoc(docs, root, line)
 	}
-	return vals, sc.Err()
+	return vals, docs, sc.Err()
+}
+
+// sectionRoot is the root table of a section header: the first component of its
+// name — `issues` for both `[issues]` and `[issues.drivers.github]`.
+func sectionRoot(name string) string {
+	root, _, _ := strings.Cut(name, ".")
+	return root
+}
+
+// repeatedTable reports whether a `[name]` header repeats one already declared,
+// directly or as a sub-table of it: TOML declares a table once, and a table may
+// not be (re)opened after one of its sub-tables exists. It returns the earlier
+// header to name in the refusal.
+func repeatedTable(seen map[string]bool, name string) (string, bool) {
+	for prev := range seen {
+		if prev == name || strings.HasPrefix(prev, name+".") {
+			return prev, true
+		}
+	}
+	return "", false
+}
+
+// dottedRoot is the root table a root-level key declares, when it declares one:
+// a dotted key names a table, a plain key does not.
+func dottedRoot(key string) string {
+	root, rest, ok := strings.Cut(key, ".")
+	if !ok || root == "" || rest == "" {
+		return ""
+	}
+	return root
+}
+
+// appendTableDoc accumulates one root table's verbatim text, in file order.
+func appendTableDoc(docs map[string]string, root, line string) {
+	if root == "" {
+		return
+	}
+	docs[root] += line + "\n"
 }
 
 func parseTOMLValue(s string) (any, error) {

@@ -264,9 +264,11 @@ and its reason, and `detail.subsystem_refused` carries the code for an alarm lin
 subsystems ship **OFF** — the issue desk because nothing is compiled in for it to file into (no
 `owner`/`repo`, no token) and the skill loop because no distribution channel is compiled in — so a stock
 boot BUILDS both and reads `ok`, instead of refusing two subsystems the operator never configured
-(`SPEC-09 §3.4a`, `SPEC-11 §2a`). `examples/config.toml` states both opt-outs and names the keys that turn
-each one on. Declaring no project at all is also a valid config: the ingest port stays closed, the
-refusal is recorded, and `/health.json` says so instead of pretending.
+(`SPEC-09 §3.4a`, `SPEC-11 §2a`). `examples/config.toml` states both opt-outs as live
+`[issues]`/`[skills]` keys — the tables are registered in the config schema, so the posture the file
+states is the posture the daemon reads (`SPEC-12 §3.1b`) — and names the keys that turn each one on.
+Declaring no project at all is also a valid config: the ingest port stays closed, the refusal is
+recorded, and `/health.json` says so instead of pretending.
 
 ## Read the specs
 

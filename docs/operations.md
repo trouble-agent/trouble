@@ -757,9 +757,12 @@ configuration alone.
 
 **The desk ships OFF.** `enabled = false` is the compiled default (SPEC-09 §3.4a): the desk is built and
 idle — no driver is constructed, no credential is read, no outbound call is made — because no deployment
-value is compiled in. Turning it on names a driver: `[issues] enabled = true` with
+value is compiled in. The `[issues]` table is a live config key: `examples/config.toml` ships it with
+`enabled = false` and the composition root hands it to the desk's own loader (SPEC-12 §3.1b), so editing
+that one line is the whole opt-in. Turning it on names a driver: `[issues] enabled = true` with
 `[issues.drivers.github] owner`/`repo` and a token, or the local-first duckbrain block. Enabling it
-without that pair is refused at boot with `TROUBLE-ISSUES-003: driver github needs owner and repo`.
+without that pair is refused at boot with `TROUBLE-ISSUES-003: driver github needs owner and repo`, and the
+`/health.json` issues row says `refused` — the declaration is never silently replaced by the default.
 
 **One issue per sig, forever.** Identity is `(driver, sig, project)`, held in the in-memory anchor
 index and rebuilt at boot from the `issue` records inside the retention window. The dedup window
@@ -798,10 +801,12 @@ env var), refused on argv, and it is never logged, never in a ledger payload, ne
 ## 13. The skill loop (SPEC-11)
 
 **The loop ships OFF.** `enabled = false` is the compiled default (SPEC-11 §2a): the daemon pulls nothing
-and no skill is ever applied, because no distribution channel is compiled in. Turning it on names exactly
-one source — `[skills] enabled = true` with `source_path` (a local git dir) or `source_url` (an https
-channel). Enabling it with neither, or with both, is refused at boot with `TROUBLE-SKILLS-001: exactly one
-of source_path or source_url must be set`.
+and no skill is ever applied, because no distribution channel is compiled in. The `[skills]` table is a live
+config key like the desk's (SPEC-12 §3.1b): `examples/config.toml` ships it OFF and editing it is the whole
+opt-in. Turning it on names exactly one source — `[skills] enabled = true` with `source_path` (a local git
+dir) or `source_url` (an https channel). Enabling it with neither, or with both, is refused at boot with
+`TROUBLE-SKILLS-001: exactly one of source_path or source_url must be set`, and the `/health.json` skills
+row says `refused`.
 
 **The artifact cannot express code.** `SKILL.toml` has a frozen key set; an unknown key, an unknown
 table, a `[stats]` table, a glob in `allowed_modules` or a free-text sig is a refusal

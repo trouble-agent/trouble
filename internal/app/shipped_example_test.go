@@ -61,13 +61,18 @@ func stampBuildForTest(t *testing.T) {
 		"0.1.0", "767e537", "2026-09-18T00:00:00.000Z"
 }
 
-// assertShippedOptOut requires the shipped example's own bytes to declare the
-// deliberate opt-out of one optional subsystem (TRBL-016 AC2's file half): the
-// named block, the commented `# [<name>]` table marker, the `# enabled = false`
-// line under it, and — in that same block — every key an operator must set to
-// turn the subsystem on. Deleting the opt-out from examples/config.toml fails
-// this test; the posture is never implied by an absent table.
-func assertShippedOptOut(t *testing.T, name string, wantKeys ...string) {
+// assertShippedSubsystemTable requires the shipped example's own bytes to carry
+// the LIVE declaration of one optional subsystem: the named block, the table
+// `[<name>]` as a real key (not a commented-out sketch), `enabled = false` as
+// its first setting, and — in that same block — every key an operator must set
+// to turn the subsystem on.
+//
+// The table being LIVE is the point (TRBL-020): SPEC-12 §3.1b registers these
+// two tables in the resolved config schema, so the posture the file states is the
+// posture the daemon reads. Deleting the table from examples/config.toml fails
+// this test; the posture is never implied by an absent table, and never left as
+// a comment that no boot can see.
+func assertShippedSubsystemTable(t *testing.T, name string, wantKeys ...string) {
 	t.Helper()
 	path := shippedExampleConfigPath(t)
 	raw, err := os.ReadFile(path)
@@ -77,22 +82,22 @@ func assertShippedOptOut(t *testing.T, name string, wantKeys ...string) {
 	text := string(raw)
 
 	anchor := "# --- [" + name + "] "
-	marker := "\n# [" + name + "]\n"
+	marker := "\n[" + name + "]\n"
 	ai, mi := strings.Index(text, anchor), strings.Index(text, marker)
 	if ai < 0 {
 		t.Fatalf("%s carries no `%s` block: the opt-out of SPEC-09 §3.4a / SPEC-11 §2a must be visible in the file operators copy", path, anchor)
 	}
 	if mi < 0 || mi < ai {
-		t.Fatalf("%s carries no commented `# [%s]` / `# enabled = false` declaration: the shipped default must be stated, not implied by an absent table", path, name)
+		t.Fatalf("%s carries no live `[%s]` table: the shipped default must be a key the daemon reads (SPEC-12 §3.1b), not a commented sketch or an absent table", path, name)
 	}
 	after := text[mi+len(marker):]
-	if !strings.HasPrefix(after, "# enabled = false") {
-		t.Fatalf("%s: `# [%s]` is not followed by the commented `# enabled = false` opt-out line (found %q)", path, name, firstLineOf(after))
+	if !strings.HasPrefix(after, "enabled = false") {
+		t.Fatalf("%s: `[%s]` is not followed by `enabled = false` (found %q): the shipped posture is OFF (SPEC-09 §3.4a / SPEC-11 §2a)", path, name, firstLineOf(after))
 	}
 	block := text[ai:mi]
 	for _, k := range wantKeys {
 		if !strings.Contains(block, k) {
-			t.Errorf("%s: the [%s] opt-out block does not name %q as part of the opt-in; a fresh operator must be told what turns it on (SPEC-09 §3.4a / SPEC-11 §2a)", path, name, k)
+			t.Errorf("%s: the [%s] block does not name %q as part of the opt-in; a fresh operator must be told what turns it on (SPEC-09 §3.4a / SPEC-11 §2a)", path, name, k)
 		}
 	}
 }
@@ -425,9 +430,10 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 		t.Errorf("status = %q on the shipped-example boot, want ok (every subsystem built, stamped build, healthy sensors): %s", after.Status, healthBody)
 	}
 
-	// AC2's file half: the opt-out is DECLARED in the shipped bytes — the file an
-	// operator copies states the posture and names what turns each subsystem on —
-	// so removing it from examples/config.toml breaks this test.
-	assertShippedOptOut(t, "issues", "owner", "repo", "duckbrain")
-	assertShippedOptOut(t, "skills", "source_path", "source_url")
+	// AC2's file half: the opt-out is DECLARED in the shipped bytes as LIVE keys
+	// — the file an operator copies states the posture in a table the daemon
+	// reads (SPEC-12 §3.1b) and names what turns each subsystem on — so removing
+	// it, or commenting it out again, breaks this test.
+	assertShippedSubsystemTable(t, "issues", "owner", "repo", "duckbrain")
+	assertShippedSubsystemTable(t, "skills", "source_path", "source_url")
 }

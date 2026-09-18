@@ -105,20 +105,20 @@ enabled = true
 # ---------------------------------------------------------------------------
 # OPTIONAL SUBSYSTEMS — the issue desk and the skill loop are OFF, deliberately.
 #
+# The two tables below are LIVE keys: [issues] and [skills] are part of the
+# config schema (SPEC-12 §3.1b) and each one is handed, verbatim, to the
+# subsystem that owns it. What you read here is the posture the daemon runs
+# with — uncommenting the opt-in named in either block is all it takes.
+#
 # Off is the shipped compiled default of both (SPEC-09 §3.4a, SPEC-11 §2a), and
 # it is the only credential-free posture: nothing is compiled in — no owner/repo,
 # no token, no distribution channel — so an ENABLED subsystem has no usable
 # driver/source, is refused at boot (TROUBLE-ISSUES-003 / TROUBLE-SKILLS-001) and
-# leaves /health.json degraded on a fresh operator's very first boot. OFF keeps a
-# stock boot complete: both subsystems are built and idle, no outbound call is
-# made, and /health.json reads ok.
+# leaves /health.json degraded. OFF keeps a stock boot complete: both subsystems
+# are built and idle, no outbound call is made, and /health.json reads ok.
 #
-# Their tables are decoded by internal/issues and internal/skills and are not yet
-# read by this build's composition root, which builds both subsystems from the
-# compiled defaults (a recorded parent gap), so the declarations below are
-# commented out: they state the opt-out each subsystem ships with, and they are
-# the shape to uncomment once that wiring lands. The opt-in for each one is named
-# in its own block.
+# A declaration that cannot be built is never ignored: it is refused, recorded
+# on the ledger, and named in the /health.json subsystem row (SPEC-12 §3.3a).
 # ---------------------------------------------------------------------------
 
 # --- [issues] --------------------------------------------------------------
@@ -144,26 +144,29 @@ enabled = true
 #   base_url = "http://127.0.0.1:7645"
 #
 # Enabling the desk with neither is refused at boot with the key it is missing
-# ("driver github needs owner and repo"), never silently.
+# ("driver github needs owner and repo" / "no enabled driver"), never silently.
+# Every other key of the table (dedup_window, caps, spool_*, ...) defaults to
+# SPEC-09 §3.4 and is listed by `bin/trouble config explain`.
 # ---------------------------------------------------------------------------
-#
-# [issues]
-# enabled = false
+
+[issues]
+enabled = false
 
 # --- [skills] --------------------------------------------------------------
 # The skill loop (SPEC-11 §2a) is OFF, built and idle: the daemon pulls nothing
 # and no skill is ever applied. ON, it reads the channel every pull_interval and
 # applies only signed artifacts that pass every gate (signature, version floor,
 # canary, approve policy, allowed modules). To turn it ON, set exactly ONE of the
-# two source keys:
+# two source keys in this table:
 #
 #   [skills]
 #   enabled = true
 #   source_path = "/srv/skills/release.git"        # a local git dir or bare repo
 #   # source_url = "https://host/org/skills.git"   # ...or a remote channel
 #
-# Enabling it with neither, or with both, is refused at boot.
+# Enabling it with neither, or with both, is refused at boot with
+# TROUBLE-SKILLS-001 naming the key.
 # ---------------------------------------------------------------------------
-#
-# [skills]
-# enabled = false
+
+[skills]
+enabled = false

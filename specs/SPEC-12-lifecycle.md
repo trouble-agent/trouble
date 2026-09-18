@@ -243,6 +243,52 @@ Rules, pinned:
 - **Duplicate public keys are refused** rather than resolved to one project: a key that maps to two projects
   makes the ingest audit trail ambiguous.
 
+### 3.1b Declaring the optional subsystems: the `[issues]` and `[skills]` tables
+
+Two subsystem tables are registered config keys: `issues` (the issue desk of SPEC-09 §3.4) and `skills` (the
+skill loop of SPEC-11 §2). They are the two namespaces whose keys this spec does not enumerate: every key
+under `issues.` belongs to SPEC-09 §3.4, and every key under `skills.` — plus a root-level `[[signers]]`,
+which SPEC-11 §2 also accepts there — belongs to SPEC-11 §2. Registration is mechanical in the §2.5 sense and
+takes no per-key mapping: `[issues]` and `[skills]` are two registered keys, each resolves to one
+`ConfigValue`, and the key names inside them are validated by the subsystem that owns the table.
+
+Rules, pinned:
+
+- **One resolved value per table.** The file's lines that declare a root table — `[issues]`,
+  `[issues.drivers.github]`, `[skills]`, `[[signers]]`, or a root-level dotted key such as
+  `issues.enabled = true` — are collected verbatim and resolved as ONE value, exactly as `[[projects]]`
+  resolves to one `projects` row (§3.1a). The text is carried, never re-serialized: the composition root
+  hands it to the subsystem's own loader, so the owning package's decoder reads the operator's own bytes and
+  applies the defaults of its own §3.4/§2 table. This spec's `internal/lifecycle` imports no subsystem
+  (§4.5/§8).
+- **A registered table is not a prefix wildcard.** Only a dotted child of a registered table name belongs to
+  it: a top-level `issues_note` is still an unknown file key (TROUBLE-LIFECYCLE-001, §3.1).
+- **A scalar source cannot express a table.** `TROUBLE_ISSUES=1` or `--skills=on` is refused by name
+  (`issues is a table ([issues])`), never silently ignored — the §3.1 wrong-value-type rule applied to a
+  table.
+- **A table is declared once.** A repeated `[issues]` header, or one reopened after its own sub-table, is
+  TROUBLE-LIFECYCLE-001 naming the repeated header: the reader refuses it there rather than folding two
+  declarations into one document and leaving the subsystem to report a line number from a fragment.
+- **Provenance, never a value.** The row of `trouble config explain` (and of the boot `config` record when
+  the value was sourced from the file) carries the winning source — `file` with the config path, or the
+  `builtin` default — and its value names the declared keys (`declared: enabled, drivers.github.owner`) or
+  `not declared`. It never carries a value of the table: a value in these tables can be a credential path,
+  and the redaction list for those belongs to the subsystem that owns the table (SPEC-09 §3.4 prints
+  `token_file` and `api_key_file` with `Redacted=true`).
+- **A declaration that cannot be built is refused, loudly, as that subsystem.** The composition root resolves
+  the table through the owning package's loader; a declaration the loader refuses — an unknown key inside the
+  table, an enabled desk with no enabled driver, an enabled loop with neither source — leaves that subsystem
+  NOT built and records the refusal with the subsystem's own code (TROUBLE-ISSUES-003 / TROUBLE-SKILLS-001)
+  and the key its reason names, so `status="ok"` is unreachable for that boot (§3.3a). The compiled default is
+  never substituted for a declaration that was written: that is the silent-default failure §3.1 refuses for a
+  scalar key, and it does not become legal for a table.
+- **No table is not a refusal.** With no `[issues]`/`[skills]` table anywhere, each subsystem keeps its
+  compiled default, which ships OFF and is BUILT (SPEC-09 §3.4a / SPEC-11 §2a): a stock boot stays complete
+  and reads `ok`.
+- **An explicit value from the composition root wins.** A subsystem config passed in by an embedding caller
+  is kept as it stands: the file is the operator's statement, the caller's own value is not overwritten by it
+  — the precedence §3.1a pins for the sentinel's project set.
+
 ### 3.2 State root, secret-file modes, bind preflight
 
 ```
@@ -887,6 +933,8 @@ Files and pass thresholds (all numbers normative regressions):
 | Test file | Cases | Threshold |
 |---|---|---|
 | `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0) |
+| `internal/lifecycle/subsystem_test.go` | the §3.1b tables as registered keys: a documented `[issues]`/`[skills]` opt-in resolves, carries the table text verbatim and the declared key names, and produces ONE `ConfigValue` per table (no per-sub-key row); a root-level dotted key declares the table; an absent table resolves to the `builtin` default `not declared`; the file-sourced row keeps `file` provenance and carries no value of the table (a declared `api_key_file` path appears zero times in the marshalled dump); a top-level typo, an unregistered sibling table and a repeated table are 001 (the last naming the repeated header); a scalar source (`TROUBLE_ISSUES`, `--skills`) is refused by name | every case asserted; 100 % of the table's declared keys named in the row; 0 values of a table anywhere in the explain dump |
+| `internal/app/subsystems_config_test.go` | the composition root's file→subsystem path: a valid `[issues]` opt-in builds a desk whose configured driver is the one that answers the boot probe, and a valid `[skills]` opt-in builds a loop holding the configured source; an invalid file (desk on with no enabled driver, loop on with no source) boots BOTH refused, each row carrying its own code and a reason naming the key, `status` not `ok`, one `subsystem_not_built` record per row; an unknown key inside a table is refused by name; the shipped example with its own documented opt-in applied to its own bytes boots `ok` | 12 table-driven resolver rows + 3 boots; 0 subsystems built from a refused declaration; 0 silent defaults |
 | `internal/lifecycle/stateroot_test.go` | 0700/0755/0700-wrong-owner matrix; forbidden-root refusal; remote-fs refusal; missing dir; read-only dir | 004/005 selected exactly; every offender reported in one pass |
 | `internal/lifecycle/secretfile_test.go` | each member of the 0600 set at 0644/0600/0604; config file containing a secret-class key at 0644 | 013 per offender; class 0600 with no secret-class key is accepted |
 | `internal/lifecycle/argv_test.go` | cmdline containing a mandate-shaped secret ⇒ refuse to start (013); env allowed; child-env allowlist: spawn a helper and grep its `/proc/<pid>/environ` | exit 13; child env contains 0 secret-shaped values |

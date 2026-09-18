@@ -294,6 +294,38 @@ type SubsystemOptions struct {
 	SentinelProjects []types.Project
 }
 
+// issueDeskConfig resolves the SPEC-09 desk's configuration. Precedence: an
+// explicit SubsystemOptions value (an embedder's own statement) wins over the
+// config file's `[issues]` table, which wins over the compiled default — the
+// same rule the sentinel's project set follows in daemon.go.
+//
+// A DECLARED table that cannot be turned into a desk is an error, never a
+// fallback: the operator asked for this desk, and answering with the compiled
+// default (OFF) would silently ignore the declaration. The error carries the
+// desk's own code and the key it names, and the caller records it as the
+// subsystem's refusal (SPEC-12 §3.3a).
+func issueDeskConfig(d *Daemon, opts SubsystemOptions) (types.IssueDeskConfig, error) {
+	if opts.IssuesCfg != nil {
+		return *opts.IssuesCfg, nil
+	}
+	if d == nil || !d.Cfg.IssuesTable.Declared() {
+		return issues.DefaultConfig(), nil
+	}
+	return issues.LoadConfig([]byte(d.Cfg.IssuesTable.Text))
+}
+
+// skillsLoopConfig resolves the SPEC-11 loop's configuration with the same
+// precedence and the same rule for a declared table that cannot be built.
+func skillsLoopConfig(d *Daemon, opts SubsystemOptions) (types.SkillsConfig, error) {
+	if opts.SkillsCfg != nil {
+		return *opts.SkillsCfg, nil
+	}
+	if d == nil || !d.Cfg.SkillsTable.Declared() {
+		return skills.DefaultConfig(), nil
+	}
+	return skills.LoadConfig([]byte(d.Cfg.SkillsTable.Text))
+}
+
 // buildSubsystems constructs the five subsystems. It never fails the boot for
 // a subsystem the operator can live without: every construction error is
 // recorded on the ledger and the member stays nil.
@@ -312,25 +344,30 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	}
 
 	// --- SPEC-09 first: both the ladder's outlet and the flow's desk want it.
-	issCfg := issues.DefaultConfig()
-	if opts.IssuesCfg != nil {
-		issCfg = *opts.IssuesCfg
-	}
-	issDeps := issues.Deps{
-		Ledger:    DraftWriter{d.Store},
-		Scan:      sentinel.LedgerSink{L: d.Ledger},
-		Scrub:     d.Scrubber,
-		Clock:     clock,
-		HostID:    hostID,
-		Actor:     actor,
-		StateRoot: d.Cfg.StateRoot,
-		ProjectOf: func(inc types.Incident) string { return "" }, // single-project v0.1 (parent gap, recorded)
-		LastSeq:   func() uint64 { return d.Store.Seq() },
-	}
-	if desk, err := issues.New(issCfg, issDeps); err != nil {
-		recordSubsystemRefusal(d, subs, ctx, "issues", err)
+	// The config comes from the operator's `[issues]` table when the file
+	// declared one (SPEC-12 §3.1b); a declaration that cannot be built is
+	// refused here with the desk's own code and the key it names, never replaced
+	// by the compiled default.
+	issCfg, issErr := issueDeskConfig(d, opts)
+	if issErr != nil {
+		recordSubsystemRefusal(d, subs, ctx, "issues", issErr)
 	} else {
-		subs.Issues = desk
+		issDeps := issues.Deps{
+			Ledger:    DraftWriter{d.Store},
+			Scan:      sentinel.LedgerSink{L: d.Ledger},
+			Scrub:     d.Scrubber,
+			Clock:     clock,
+			HostID:    hostID,
+			Actor:     actor,
+			StateRoot: d.Cfg.StateRoot,
+			ProjectOf: func(inc types.Incident) string { return "" }, // single-project v0.1 (parent gap, recorded)
+			LastSeq:   func() uint64 { return d.Store.Seq() },
+		}
+		if desk, err := issues.New(issCfg, issDeps); err != nil {
+			recordSubsystemRefusal(d, subs, ctx, "issues", err)
+		} else {
+			subs.Issues = desk
+		}
 	}
 
 	// --- SPEC-07 research.
@@ -356,11 +393,11 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 		subs.Flow = fl
 	}
 
-	// --- SPEC-11 skills.
-	skCfg := skills.DefaultConfig()
-	if opts.SkillsCfg != nil {
-		skCfg = *opts.SkillsCfg
-	}
+	// --- SPEC-11 skills. The config comes from the operator's `[skills]` table
+	// when the file declared one (SPEC-12 §3.1b); a declared table that cannot
+	// be built is refused with the loop's own code, never silently built from
+	// the compiled default.
+	skCfg, skErr := skillsLoopConfig(d, opts)
 	v, _, _, _ := lifecycle.VersionInfo()
 	skDeps := skills.Deps{
 		Ledger:        DraftWriter{d.Store},
@@ -380,7 +417,9 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 			return names
 		},
 	}
-	if sk, err := skills.New(skCfg, skDeps); err != nil {
+	if skErr != nil {
+		recordSubsystemRefusal(d, subs, ctx, "skills", skErr)
+	} else if sk, err := skills.New(skCfg, skDeps); err != nil {
 		recordSubsystemRefusal(d, subs, ctx, "skills", err)
 	} else {
 		subs.Skills = sk

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -203,6 +204,22 @@ type wireDoc struct {
 	Issues *deskWire `toml:"issues"`
 }
 
+// undecodedKeys lists, sorted, the keys a decoded document carried that no field
+// of the wire shape claimed: exactly the unknown keys a strict config decode
+// refuses, refused by NAME so the operator is told which one is wrong.
+func undecodedKeys(md toml.MetaData) []string {
+	bad := md.Undecoded()
+	if len(bad) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(bad))
+	for _, k := range bad {
+		out = append(out, k.String())
+	}
+	sort.Strings(out)
+	return out
+}
+
 // LoadConfig decodes the `[issues]` table over the defaults of §3.4 and applies
 // the §3.4/§3.8 clamps. A zero-length document yields the defaults.
 func LoadConfig(doc []byte) (types.IssueDeskConfig, error) {
@@ -210,9 +227,20 @@ func LoadConfig(doc []byte) (types.IssueDeskConfig, error) {
 	if len(doc) == 0 {
 		return cfg, ValidateConfig(cfg)
 	}
+	// The strict decode: a key this build does not know is REFUSED by name, never
+	// decoded past. SPEC-12 §3.1's rule for the config file ("a typo must not
+	// silently run with a default") reaches this table too — the table's keys are
+	// the desk's own surface (SPEC-09 §3.4), and the composition root hands the
+	// file's bytes straight to this loader (SPEC-12 §3.1b), so an unknown key has
+	// no other place to be caught.
 	var w wireDoc
-	if _, err := toml.Decode(string(doc), &w); err != nil {
+	md, err := toml.Decode(string(doc), &w)
+	if err != nil {
 		return cfg, newErr(types.CodeIssues003, ReasonConfig, 0, false, "issues config: %v", err)
+	}
+	if bad := undecodedKeys(md); len(bad) > 0 {
+		return cfg, newErr(types.CodeIssues003, ReasonConfig, 0, false,
+			"issues config: unknown key %q (known keys are SPEC-09 §3.4's)", bad[0])
 	}
 	if w.Issues == nil {
 		return cfg, ValidateConfig(cfg)
@@ -434,7 +462,9 @@ func ValidateConfig(cfg types.IssueDeskConfig) error {
 		return newErr(types.CodeIssues003, ReasonConfig, 0, false, "caps may not be negative")
 	}
 	if len(cfg.Drivers) == 0 {
-		return newErr(types.CodeIssues003, ReasonConfig, 0, false, "no driver block is configured")
+		return newErr(types.CodeIssues003, ReasonConfig, 0, false,
+			"no driver block is configured: declare [issues.drivers.<name>] enabled = true (this build knows: %s)",
+			strings.Join(Registered(), ", "))
 	}
 	enabled := 0
 	primaryOK := false
@@ -460,7 +490,9 @@ func ValidateConfig(cfg types.IssueDeskConfig) error {
 		}
 	}
 	if enabled == 0 {
-		return newErr(types.CodeIssues003, ReasonConfig, 0, false, "no enabled driver")
+		return newErr(types.CodeIssues003, ReasonConfig, 0, false,
+			"no enabled driver: set enabled = true in one [issues.drivers.<name>] block (this build knows: %s)",
+			strings.Join(Registered(), ", "))
 	}
 	if !primaryOK {
 		return newErr(types.CodeIssues003, ReasonConfig, 0, false,

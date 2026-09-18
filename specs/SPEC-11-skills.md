@@ -133,6 +133,33 @@ enabled    = true
 added_ts   = "2026-09-01T00:00:00.000Z"
 ```
 
+### 2a The shipped compiled default: the loop is OFF
+
+The `[skills]` table above is the **operator's opt-in**, not the compiled default. The shipped default column
+has `enabled = false`: `internal/skills.DefaultConfig()` returns the loop disabled, and `DisabledConfig()` is
+now the same value — the two named "off" constructors cannot drift apart. Every other key keeps the default
+shown above. With `enabled = false` the daemon pulls nothing and no skill is ever applied (the rule at the top
+of this section), and the loop is BUILT rather than refused, so the `/health.json` subsystem row of SPEC-12
+§3.3a reports `built=true, refused=false`.
+
+Why off: no distribution channel is compiled in and this build names none — neither `source_path` nor
+`source_url`. An *enabled* loop with neither key is refused at boot with `TROUBLE-SKILLS-001: exactly one of
+source_path or source_url must be set`. That is the correct answer for a loop someone ASKED for and cannot be
+built, and the wrong one for a stock boot that never asked: it would refuse the skill loop and degrade
+`/health.json` on the operator's first run, permanently, for a subsystem the operator never configured.
+
+Enabling the loop is the key that turns it on — exactly one of the two §4.1 source forms:
+
+| opt-in | keys |
+|---|---|
+| local channel (a git dir or bare repo) | `[skills] enabled = true, source_path = "/srv/skills/release.git"` |
+| remote channel | `[skills] enabled = true, source_url = "https://host/org/skills.git"` |
+
+Both keys at once, or neither while `enabled = true`, stays a boot rejection (`TROUBLE-SKILLS-001`), and every
+other §4.1 and §4.3 rule — a credential-bearing URL, an unknown `ref_mode` or `approve`, a
+`require_signature = false` loop that is not a review-policy local channel — applies unchanged the moment the
+loop is on.
+
 ## 3. Data model
 
 ### 3.1 The artifact — `skills/<name>/SKILL.toml`, schema generation 1

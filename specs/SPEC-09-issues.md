@@ -312,6 +312,35 @@ Config rules: `owner`/`repo` empty → the driver is refused at boot (config val
 explain` prints `token_file`/`api_key_file` with `Redacted=true` and prints `api_key_header` as the header
 **name** only — no key value is ever printed, logged, or placed in the ledger (SPEC-02 mandatory rules).
 
+### 3.4a The shipped compiled default: the desk is OFF
+
+The `[issues]` table of §3.4 is the **operator's opt-in**, not the compiled default. The shipped default column
+has `enabled = false`: `internal/issues.DefaultConfig()` returns the desk disabled, and a disabled desk is
+BUILT and idle rather than refused — no driver is constructed, no credential is read, no outbound call is
+made, and the `/health.json` subsystem row of SPEC-12 §3.3a reports `built=true, refused=false`.
+
+Why off, and why that is not a hole: no deployment value is compiled in, so the default driver set cannot be
+built — the github block has no `owner`/`repo` and no token (the rule below, and §3.9.1), and the local-first
+duckbrain block ships disabled. An *enabled* desk over those blocks is refused at boot with
+`TROUBLE-ISSUES-003: driver github needs owner and repo (SPEC-09 §3.9.1)`. That is the correct answer for a
+desk someone ASKED for and cannot be built, and the wrong one for a stock boot that never asked: it would leave
+the issue desk absent and `/health.json` degraded on the operator's first run, permanently, for a subsystem the
+operator never configured.
+
+Enabling the desk is one of two named opt-ins, each with its own credentials or local endpoint:
+
+| opt-in | keys |
+|---|---|
+| GitHub (the default driver) | `[issues] enabled = true` plus `[issues.drivers.github] enabled = true, owner = "<org>", repo = "<repo>"` and a token by `token_env` or a 0600 `token_file` (§3.9.1) |
+| local-first | `[issues] enabled = true` plus `[issues.drivers.duckbrain] enabled = true` and a reachable `base_url` (§3.10) |
+
+The driver blocks of `DefaultConfig()` are kept exactly as §3.4 shows them — the github block stays
+`enabled = true` **inside the list**, it is never silently switched off by the desk being off. Turning the desk
+on without the `owner`/`repo` pair must still fail with the message that names the missing key, never build a
+desk that cannot file. `ValidateConfig` early-returns `nil` while `enabled = false`, so the shipped default
+validates cleanly; every rejected-configuration rule of §3.4 and every token rule of §3.9.1 applies unchanged
+the moment the desk is on.
+
 ### 3.5 Rate limits, backoff, and the per-attempt ledger record
 
 | Driver | max_attempts | base | growth | max_backoff | jitter | per-attempt timeout | pause trigger |

@@ -143,20 +143,12 @@ token_file = %q
 		})
 		h.done <- err
 	}()
-	select {
-	case <-ready:
-	case err := <-h.done:
+	if reached, err := awaitBootReady(t, "daemon", bootReadyBase, ready, h.done); !reached {
 		t.Fatalf("daemon did not reach READY: %v", err)
-	case <-time.After(30 * time.Second):
-		t.Fatalf("daemon did not reach READY within 30s")
 	}
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-h.done:
-		case <-time.After(20 * time.Second):
-			t.Errorf("daemon did not drain within 20s")
-		}
+		awaitDrainBudget(t, "daemon", bootDrainBase, h.done)
 	})
 	return h
 }
@@ -676,22 +668,13 @@ source_path = %q
 		})
 		h.done <- err
 	}()
-	select {
-	case <-ready:
-	case err := <-h.done:
+	if reached, err := awaitBootReady(t, "the shipped example with its documented opt-in", bootReadyBase, ready, h.done); !reached {
 		cancel()
 		t.Fatalf("the shipped example with its documented opt-in did not reach READY: %v", err)
-	case <-time.After(30 * time.Second):
-		cancel()
-		t.Fatalf("READY timeout")
 	}
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-h.done:
-		case <-time.After(20 * time.Second):
-			t.Errorf("daemon did not drain within 20s")
-		}
+		awaitDrainBudget(t, "the shipped example with its documented opt-in", bootDrainBase, h.done)
 	})
 
 	code, body := h.anon("/health.json", "application/json")

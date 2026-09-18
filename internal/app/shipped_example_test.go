@@ -235,35 +235,29 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	ready := make(chan *Daemon, 1)
+	var d *Daemon
+	ready := make(chan struct{}, 1)
 	go func() {
 		_, err := RunDaemon(ctx, BootOptions{
 			Args:    args,
 			Env:     []string{},
 			Log:     nil,
-			OnReady: func(d *Daemon) { ready <- d },
+			OnReady: func(booted *Daemon) { d = booted; ready <- struct{}{} },
 		})
 		done <- err
 	}()
 
-	var d *Daemon
-	select {
-	case d = <-ready:
-	case err := <-done:
+	if reached, err := awaitBootReady(t, "the shipped-example boot", bootReadyBase, ready, done); !reached {
 		cancel()
 		t.Fatalf("boot against the shipped example %s did not reach serve: %v\n"+
 			"`cp examples/config.toml <workdir>/config.toml && bin/troubled --config config.toml` must boot (TRBL-005)", path, err)
-	case <-time.After(30 * time.Second):
-		cancel()
-		t.Fatalf("boot against the shipped example did not reach READY within 30s")
+	}
+	if d == nil {
+		t.Fatalf("the shipped-example boot signalled READY without handing over a daemon")
 	}
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-done:
-		case <-time.After(20 * time.Second):
-			t.Errorf("daemon did not drain within 20s")
-		}
+		awaitDrainBudget(t, "the shipped-example boot", bootDrainBase, done)
 	})
 
 	// Serve is real: the anonymous health route answers the JSON the external

@@ -179,20 +179,12 @@ token_file = %q
 		})
 		h.done <- err
 	}()
-	select {
-	case <-ready:
-	case err := <-h.done:
+	if reached, err := awaitBootReady(t, "daemon", bootReadyBase, ready, h.done); !reached {
 		t.Fatalf("daemon did not reach READY: %v", err)
-	case <-time.After(30 * time.Second):
-		t.Fatalf("daemon did not reach READY within 30s")
 	}
 	t.Cleanup(func() {
 		cancel()
-		select {
-		case <-h.done:
-		case <-time.After(20 * time.Second):
-			t.Errorf("daemon did not drain within 20s")
-		}
+		awaitDrainBudget(t, "daemon", bootDrainBase, h.done)
 	})
 	return h
 }

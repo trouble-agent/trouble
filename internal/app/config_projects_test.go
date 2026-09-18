@@ -13,9 +13,9 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -28,7 +28,11 @@ func bootConfigRefused(t *testing.T, cfgBody, root string, ingestPort int, args 
 	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// The context bound is deliberately looser than the wait it bounds: an
+	// exhausted wait budget must be reported by the wait, which knows the load
+	// and may skip, never by the context, whose cancellation reaches RunDaemon
+	// as an error and so looks exactly like the refusal under test.
+	ctx, cancel := context.WithTimeout(context.Background(), scaledBootBudget(bootReadyBase, bootLoadAvg(), runtime.NumCPU())+bootCtxGrace)
 	defer cancel()
 	ready := make(chan struct{}, 1)
 	done := make(chan error, 1)
@@ -40,18 +44,14 @@ func bootConfigRefused(t *testing.T, cfgBody, root string, ingestPort int, args 
 		})
 		done <- err
 	}()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatalf("the boot succeeded; a malformed project declaration must refuse it")
-		}
-		return err
-	case <-ready:
+	reached, err := awaitBootReady(t, "the refusal boot", bootReadyBase, ready, done)
+	if reached {
 		t.Fatalf("the boot reached READY with a malformed project declaration")
-	case <-time.After(30 * time.Second):
-		t.Fatalf("the boot neither refused nor reached READY within 30s")
 	}
-	return nil
+	if err == nil {
+		t.Fatalf("the boot succeeded; a malformed project declaration must refuse it")
+	}
+	return err
 }
 
 func TestMalformedProjectDeclarationRefusesTheBoot(t *testing.T) {

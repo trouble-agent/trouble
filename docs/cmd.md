@@ -21,6 +21,55 @@ reason the graph stays acyclic: `internal/ledger` never imports `internal/ladder
 `internal/registry` (the `PlayRunner` view is an interface), and neither of them
 knows that `internal/dashboard` exists.
 
+## The daemon's argv
+
+`cmd/troubled` parses four argv forms for itself and forwards everything else to
+`lifecycle.Resolve`, whose registry is the only whitelist that reads a key flag
+(SPEC-12 §2.5, §2.5a):
+
+```
+troubled [--config <path>] [-v] [--version] [--<key> <value>]...
+```
+
+| argv | Meaning |
+|---|---|
+| `--config <path>` / `--config=<path>` | the config file resolution reads |
+| `--config_path <path>` | the same selection in the mechanical §2.5 spelling; it also stays a resolved row, so `trouble config explain` shows a flag chose the path |
+| `-v` | debug logging |
+| `--version` | the version triple, exit 0 |
+| `-h` / `--help` | the daemon's real surface, exit 0 |
+| `--<key> <value>`, `--<key>=<value>`, bare `--<key>` | any registered key: `a.b_c` → `--a-b-c` (`state_root` → `--state_root`, `secrets.environment_file` → `--secrets-environment_file`). A flag beats env, file and default. |
+
+A scratch or second instance therefore needs no edit to the shipped file:
+
+```
+troubled --state_root ~/.local/state/trouble-scratch \
+         --ingest-bind 127.0.0.1:7645 --dashboard-bind 127.0.0.1:7646
+```
+
+Three behaviours are load-bearing:
+
+1. **An unknown key is refused by name.** `--no-such-key` reaches the resolver,
+   which exits TROUBLE-LIFECYCLE-001 `unknown flag "--no-such-key"`; the daemon
+   maps a boot refusal to exit 13. It is never ignored and never read as a
+   positional; a one-dash token that is not `-v`/`-h` is a usage error (exit 2).
+2. **Five keys cannot be set from argv.** `projects`, `issues` and `skills` are
+   tables and a flag value is a scalar (refused by name, 001). `dashboard.token_file`
+   and `hub.token` are refused by the argv secret scan at boot
+   (`cli_flag_secret`, TROUBLE-LIFECYCLE-013): their flag NAMES match a mandatory
+   rule, so the token that follows is read as a secret no matter what it holds —
+   a token-store path and a real token are the same shape to that rule. Set both
+   from the file or from `TROUBLE_DASHBOARD_TOKEN_FILE` / `TROUBLE_HUB_TOKEN`,
+   which is what the shipped unit's `EnvironmentFile=` is for.
+3. **The daemon's own surface prints its real shape.** `--help` lists its four
+   argv forms plus the per-key form and points at `trouble config explain`; it
+   never prints Go's flag-package automessage, which could only name the daemon's
+   own flags and so contradicted the documented surface (TRBL-018).
+
+`cmd/troubled/main_test.go` pins all three against the registry itself: it
+enumerates the keys from a default resolve and drives each one's flag spelling
+through the same split function the daemon uses.
+
 ## What each adapter is for
 
 | Adapter | Joins | Why it exists |

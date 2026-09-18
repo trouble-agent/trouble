@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -96,7 +97,7 @@ func TestLoadTokenStoreExpandsHomePath(t *testing.T) {
 	})
 	t.Chdir(work)
 
-	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil)
+	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}
@@ -127,7 +128,7 @@ func TestLoadTokenStoreTildePathReloadsFromHome(t *testing.T) {
 	writeStoreAt(t, path, 0o600, types.Token{
 		ID: "dash-read@old", Hash: oldHash, Scopes: []types.Scope{types.ScopeRead},
 	})
-	store, err := LoadTokenStore("~/"+".config/trouble/dashboard-tokens.json", nil)
+	store, err := LoadTokenStore("~/"+".config/trouble/dashboard-tokens.json", nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestLoadTokenStoreAbsolutePathUnchanged(t *testing.T) {
 		t.Fatalf("fixture path %q is not absolute", abs)
 	}
 
-	store, err := LoadTokenStore(abs, nil)
+	store, err := LoadTokenStore(abs, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestLoadTokenStoreRelativePathUnchanged(t *testing.T) {
 		ID: "dash-read@rel", Hash: hash, Scopes: []types.Scope{types.ScopeRead},
 	})
 
-	store, err := LoadTokenStore("tokens.json", nil)
+	store, err := LoadTokenStore("tokens.json", nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestLoadTokenStoreTildeModeViolationIsBootError(t *testing.T) {
 	path := filepath.Join(home, ".config/trouble/dashboard-tokens.json")
 	writeStoreAt(t, path, 0o644, types.Token{ID: "dash-read@loose", Hash: tokenHashFor(0x77), Scopes: []types.Scope{types.ScopeRead}})
 
-	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil)
+	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil, nil)
 	if err == nil {
 		t.Fatalf("world-readable /~ token file loaded (store %+v), want a boot error", store)
 	}
@@ -229,7 +230,7 @@ func TestLoadTokenStoreTildeModeViolationIsBootError(t *testing.T) {
 func TestLoadTokenStoreUnexpandablePathFailsLoud(t *testing.T) {
 	t.Setenv("HOME", "")
 
-	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil)
+	store, err := LoadTokenStore("~/.config/trouble/dashboard-tokens.json", nil, nil)
 	if err == nil {
 		t.Fatalf("unexpandable ~ path returned a store: %+v", store)
 	}
@@ -245,7 +246,7 @@ func TestLoadTokenStoreUnexpandablePathFailsLoud(t *testing.T) {
 	}
 
 	// "~user/…" is refused on the same path, not read as a literal directory.
-	if _, err := LoadTokenStore("~root/tokens.json", nil); err == nil {
+	if _, err := LoadTokenStore("~root/tokens.json", nil, nil); err == nil {
 		t.Fatal("~user path returned a store, want a boot error")
 	}
 }
@@ -256,7 +257,7 @@ func TestLoadTokenStoreUnexpandablePathFailsLoud(t *testing.T) {
 func TestLoadTokenStoreEmptyPathKeepsExistingBehavior(t *testing.T) {
 	t.Chdir(t.TempDir())
 
-	store, err := LoadTokenStore("", nil)
+	store, err := LoadTokenStore("", nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore(\"\"): %v", err)
 	}
@@ -310,6 +311,100 @@ func TestDashboardBearerTokenAuthenticatesFromTildeStore(t *testing.T) {
 	// Negative control: a token that is not in that file still 401s.
 	resp, body = env.get("/", tokenFor1())
 	wantStatus(t, resp, body, http.StatusUnauthorized)
+}
+
+// TestTokenStoreMissingAtBootLogsWarn is TRBL-006 AC-3: a missing token file is
+// still a valid EMPTY store — the boot succeeds and every route fails closed —
+// but it is no longer silent. Exactly one WARN names the resolved path and the
+// reason "missing", so the state that 401'd every CLI-minted token is visible
+// at boot instead of only in a bug report.
+func TestTokenStoreMissingAtBootLogsWarn(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "not-created", "dashboard-tokens.json")
+	logger, buf := testLogger()
+
+	env := newEnv(t, envOptions{
+		noRefresh: true,
+		cfg:       func(c *Config) { c.TokenFile = missing },
+		deps:      func(d *Deps) { d.Logger = logger },
+	})
+
+	lines := logLines(buf)
+	if len(lines) != 1 {
+		t.Fatalf("boot log records = %d (%q), want exactly one WARN", len(lines), lines)
+	}
+	for _, want := range []string{
+		"level=WARN",
+		`msg="dashboard token store is empty"`,
+		"path=" + missing,
+		"reason=missing",
+	} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("boot WARN %q does not carry %q", lines[0], want)
+		}
+	}
+
+	// Fail-closed stays, and it is not an error: the store is usable-but-empty,
+	// so the presented token 401s with 002 (not the 503 of an invalid store)
+	// and the anonymous loopback health surface still answers 200.
+	if err := env.s.store.invalid(); err != nil {
+		t.Fatalf("a missing store must stay VALID-and-empty, got %v", err)
+	}
+	resp, body := env.get("/incidents", env.readPlain)
+	wantStatus(t, resp, body, http.StatusUnauthorized)
+	if got := decodeError(t, body).Error.Code; got != string(types.CodeDashboard002) {
+		t.Fatalf("code = %s, want %s", got, types.CodeDashboard002)
+	}
+	resp, body = env.get("/health.json", "")
+	wantStatus(t, resp, body, http.StatusOK)
+}
+
+// TestTokenStorePresentButEmptyAtBootLogsWarn is the second half of TRBL-006
+// AC-3: a file that EXISTS and parses to an empty token set warns too, with the
+// reason that distinguishes it from a missing file, and parsing "" tokens is
+// never an error.
+func TestTokenStorePresentButEmptyAtBootLogsWarn(t *testing.T) {
+	logger, buf := testLogger()
+
+	env := newEnv(t, envOptions{
+		noRefresh: true,
+		tokens:    []types.Token{}, // present file, zero tokens
+		deps:      func(d *Deps) { d.Logger = logger },
+	})
+	fi, err := os.Stat(env.tokenFile)
+	if err != nil {
+		t.Fatalf("fixture store must exist for this case: %v", err)
+	}
+	if fi.Size() == 0 {
+		t.Fatalf("fixture store %s is empty on disk, want a parsed-empty file", env.tokenFile)
+	}
+
+	lines := logLines(buf)
+	if len(lines) != 1 {
+		t.Fatalf("boot log records = %d (%q), want exactly one WARN", len(lines), lines)
+	}
+	for _, want := range []string{
+		"level=WARN",
+		`msg="dashboard token store is empty"`,
+		"path=" + env.tokenFile,
+		"reason=empty",
+	} {
+		if !strings.Contains(lines[0], want) {
+			t.Errorf("boot WARN %q does not carry %q", lines[0], want)
+		}
+	}
+	if strings.Contains(lines[0], "reason=missing") {
+		t.Errorf("present-but-empty store logged reason=missing: %q", lines[0])
+	}
+
+	if err := env.s.store.invalid(); err != nil {
+		t.Fatalf("an empty store must stay VALID, got %v", err)
+	}
+	resp, body := env.get("/incidents", env.readPlain)
+	wantStatus(t, resp, body, http.StatusUnauthorized)
+	if got := decodeError(t, body).Error.Code; got != string(types.CodeDashboard002) {
+		t.Fatalf("code = %s, want %s", got, types.CodeDashboard002)
+	}
 }
 
 // writeStoreAt writes a §3.2 token file at an explicit path (writeTokenFile

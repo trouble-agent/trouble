@@ -127,7 +127,7 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	// does, so the dashboard serves the authenticated surfaces too; /health.json
 	// below stays the anonymous assertion.
 	tokenPath := filepath.Join(root, "dashboard-tokens.json")
-	store, err := dashboard.LoadTokenStore(tokenPath, nil)
+	store, err := dashboard.LoadTokenStore(tokenPath, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}

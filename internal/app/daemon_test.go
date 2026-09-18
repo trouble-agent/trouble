@@ -107,7 +107,7 @@ func bootDaemonWith(t *testing.T, so SubsystemOptions) *harness {
 	// The token store is minted first so the checker's environment file and the
 	// store agree from the first request.
 	tokenPath := filepath.Join(root, "dashboard-tokens.json")
-	store, err := dashboard.LoadTokenStore(tokenPath, nil)
+	store, err := dashboard.LoadTokenStore(tokenPath, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadTokenStore: %v", err)
 	}

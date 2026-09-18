@@ -336,7 +336,7 @@ func TestTokenStoreWrongModeRefusesBoot(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadTokenStore(path, nil); err == nil {
+	if _, err := LoadTokenStore(path, nil, nil); err == nil {
 		t.Fatal("0600 check did not refuse a 0644 token file")
 	} else {
 		var de *dashError
@@ -358,7 +358,7 @@ func TestIngestionKeyRefusals(t *testing.T) {
 	if err := os.WriteFile(path, b, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadTokenStore(path, []string{key}); err == nil {
+	if _, err := LoadTokenStore(path, []string{key}, nil); err == nil {
 		t.Fatal("load-time ingestion-key check did not refuse the store")
 	} else {
 		var de *dashError
@@ -618,7 +618,7 @@ func TestValidateConfigMatrix(t *testing.T) {
 func TestTokenStoreContract(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tokens.json")
-	store, err := LoadTokenStore(path, nil)
+	store, err := LoadTokenStore(path, nil, nil)
 	if err != nil {
 		t.Fatalf("load empty store: %v", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -120,6 +121,10 @@ type tokenSet struct {
 	invalidErr error
 	modTime    time.Time
 	size       int64
+	// missing records that the file did not exist when it was read — a valid
+	// empty store (no credentials yet) as opposed to a present file that holds
+	// no tokens. Both are empty; the boot WARN names which (TRBL-006 AC-3).
+	missing bool
 }
 
 // TokenStore is the 0600 token store: an immutable snapshot swapped per
@@ -152,7 +157,13 @@ var errTokenStoreInvalid = errors.New("token store invalid")
 // writes all address the same file (TROUBLE-DASHBOARD-002 — the CLI expands
 // before it mints, the daemon did not, so a minted token never authenticated).
 // An unexpandable tilde path is a boot error rather than a silent empty store.
-func LoadTokenStore(path string, forbidKeys []string) (*TokenStore, error) {
+//
+// A valid-but-empty store (missing file, or a present file with no tokens) logs
+// exactly one WARN naming the resolved path and the reason, so the
+// fail-closed-but-silent state TRBL-006 reported cannot recur. A nil logger
+// disables the warning: the CLI mints credentials with its own output contract
+// and is not a boot path.
+func LoadTokenStore(path string, forbidKeys []string, logger *slog.Logger) (*TokenStore, error) {
 	expanded, err := ExpandTokenPath(path)
 	if err != nil {
 		return nil, &dashError{
@@ -180,7 +191,27 @@ func LoadTokenStore(path string, forbidKeys []string) (*TokenStore, error) {
 		return ts, nil
 	}
 	ts.cur.Store(tf)
+	if !tf.invalid && len(tf.byHash) == 0 {
+		warnEmptyTokenStore(logger, path, tf.missing)
+	}
 	return ts, nil
+}
+
+// warnEmptyTokenStore logs the boot WARN for a valid-but-empty store: a missing
+// file (nothing minted yet) and a present file with no tokens are both usable
+// and fail closed — every presented token 401s TROUBLE-DASHBOARD-002 — so
+// neither may be silent (TRBL-006). Only the RESOLVED path and the reason are
+// logged; no token material is ever written to a log line.
+func warnEmptyTokenStore(logger *slog.Logger, path string, missing bool) {
+	if logger == nil {
+		return
+	}
+	reason := "empty"
+	if missing {
+		reason = "missing"
+	}
+	logger.Warn("dashboard token store is empty",
+		"path", path, "reason", reason)
 }
 
 // readFileIntoSet loads and validates the current file content. A missing file
@@ -195,6 +226,7 @@ func (ts *TokenStore) readFileIntoSet() (*tokenSet, error) {
 	fi, err := os.Stat(ts.path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			set.missing = true
 			return set, nil // no credentials yet — valid empty store
 		}
 		return nil, &dashError{Code: types.CodeLifecycle013, HTTP: 500, Message: "token store unstatable", Detail: "token_file_mode"}

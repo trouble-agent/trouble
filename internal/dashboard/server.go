@@ -266,7 +266,15 @@ func newServer(cfg Config, deps Deps) (*server, error) {
 		cfg.TokenFile = deps.TokenFile
 	}
 
-	store, err := LoadTokenStore(cfg.TokenFile, deps.IngestionKeys)
+	// The logger is resolved before the store load: loading an empty store is
+	// a WARN (TRBL-006 — the fail-closed empty store must not be silent), and
+	// a boot-time warning has to reach the same logger the listener uses.
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+
+	store, err := LoadTokenStore(cfg.TokenFile, deps.IngestionKeys, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -286,10 +294,6 @@ func newServer(cfg Config, deps Deps) (*server, error) {
 		return nil, err
 	}
 
-	logger := deps.Logger
-	if logger == nil {
-		logger = slog.New(slog.DiscardHandler)
-	}
 	s := &server{
 		cfg:      cfg,
 		deps:     deps,

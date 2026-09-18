@@ -381,7 +381,7 @@ func cmdDashboard(args []string) int {
 
 	// The plaintext is shown exactly once, here: this is the only code path in
 	// the repository that can mint a dashboard token (SPEC-10 §3.2).
-	store, err := dashboard.LoadTokenStore(path, nil)
+	store, err := dashboard.LoadTokenStore(path, nil, nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
 		return 13

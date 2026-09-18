@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -479,6 +480,25 @@ func tokenEntryFor(label string, b byte, scopes ...types.Scope) types.Token {
 		Scopes:    scopes,
 		CreatedTS: "2026-09-16T09:00:00.000Z",
 	}
+}
+
+// ---------------------------------------------------------------- logging
+
+// testLogger returns a logger over an in-memory sink plus that sink, so a test
+// can assert a boot-time WARN without a real process log (TRBL-006: an empty
+// token store must say so at boot).
+func testLogger() (*slog.Logger, *bytes.Buffer) {
+	buf := new(bytes.Buffer)
+	return slog.New(slog.NewTextHandler(buf, nil)), buf
+}
+
+// logLines returns the sink's non-empty lines (each line one log record).
+func logLines(buf *bytes.Buffer) []string {
+	raw := strings.TrimRight(buf.String(), "\n")
+	if raw == "" {
+		return nil
+	}
+	return strings.Split(raw, "\n")
 }
 
 // ---------------------------------------------------------------- environment

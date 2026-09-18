@@ -136,7 +136,32 @@ func (d *Daemon) dashboardDeps(ln net.Listener) dashboard.Deps {
 		Clock:      time.Now,
 		Logger:     d.log,
 		TokenFile:  d.DashConfig.TokenFile,
+		// The dashboard's token store refuses a token whose plaintext collides
+		// with an ingest credential (SPEC-10 §4.3.2/§4.3.3), so the declared
+		// project keys are handed over with the rest of the config.
+		IngestionKeys: ingestionKeys(d.Cfg),
 	}
+}
+
+// ingestionKeys is the DSN key material the dashboard must not collide with:
+// every declared project's public key and secret, in that order.
+func ingestionKeys(cfg lifecycle.Config) []string {
+	out := make([]string, 0, 2*len(cfg.Projects))
+	for _, p := range cfg.Projects {
+		if p.PublicKey != "" {
+			out = append(out, p.PublicKey)
+		}
+		if p.Secret != "" {
+			out = append(out, p.Secret)
+		}
+		if p.SecretKey != "" && p.SecretKey != p.Secret {
+			out = append(out, p.SecretKey)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (d *Daemon) liveRules() []types.Rule {

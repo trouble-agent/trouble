@@ -64,6 +64,12 @@ type Config struct {
 		} `toml:"auth"`
 	} `toml:"ingest"`
 
+	// Projects is the `[[projects]]` array-of-tables (SPEC-12 §3.1a): the
+	// config surface that declares the sentinel's project set. nil means the
+	// operator declared none, which is a supported configuration — the sentinel
+	// refuses, records why and never opens the ingest port (§3.3a).
+	Projects []ProjectConfig `toml:"projects"`
+
 	Dashboard DashboardConfig `toml:"dashboard"`
 
 	// HealthURL is the health surface the stall checker and the upgrade READY
@@ -153,6 +159,39 @@ type DashboardConfig struct {
 	// mandated proxy terminates TLS (SPEC-10 §2.4).
 	ReportAuthTimeoutSeconds int `toml:"report_auth_timeout_s"`
 }
+
+// ProjectConfig is one row of the `[[projects]]` array-of-tables (SPEC-12
+// §3.1a): the config surface that declares the sentinel's project set. Its keys
+// are the part of types.Project an operator decides; the parts sentinel derives
+// (AuthForms folded from the ledger, CreatedTS) are not configurable and stay
+// absent here.
+//
+// `secret` is optional: it is required only when the operator turns the
+// loopback DSN form off (ingest.auth.loopback_dsn = false, SPEC-12 §3.1).
+type ProjectConfig struct {
+	ID              string   `toml:"id"`                // numeric-as-string, 1..2^31-1; path element in the DSN
+	Slug            string   `toml:"slug"`              // display name; defaults to the id
+	PublicKey       string   `toml:"public_key"`        // 32 lowercase hex
+	Secret          string   `toml:"secret"`            // 32 lowercase hex, optional
+	SecretKey       string   `toml:"secret_key"`        // alias of secret (SPEC-04 §2.2 spells it secret_key)
+	AuthForms       []string `toml:"auth_forms"`        // x_sentry_auth | query_sentry_key | envelope_dsn
+	QuotaEPM        int      `toml:"quota_epm"`         // events per minute
+	DiskBudgetBytes int64    `toml:"disk_budget_bytes"` // per-project disk budget
+	LossPolicy      string   `toml:"loss_policy"`       // sample | drop-with-counter | spool-if-light
+	Enabled         bool     `toml:"enabled"`           // a declared project is enabled unless it says otherwise
+
+	// enabledSet records that the DECLARATION said something about `enabled`.
+	// Only with it can a false value mean "disabled": without it, a false means
+	// "not mentioned", and a declared project is enabled (the documented
+	// default). The distinction is why the parser, not the zero value, decides.
+	enabledSet bool
+}
+
+// Defaults a minimal `id` + `public_key` declaration inherits (SPEC-04 §2.2).
+const (
+	DefaultProjectQuotaEPM   = 600
+	DefaultProjectDiskBudget = 2147483648 // 2GiB
+)
 
 // Resolved is the output of Resolve: the typed config, every ConfigValue with
 // provenance, plus the non-fatal records that must be mirrored into the ledger.
@@ -443,6 +482,276 @@ func applyToMapStringDuration(m map[string]types.Duration, v any) error {
 	}
 }
 
+// setProjects is the `projects` key's setter: the only accepted source shape is
+// the array of tables the file parser builds for `[[projects]]` (SPEC-12 §3.1a).
+// Every key inside a declaration is validated HERE, so an unknown key inside a
+// row is refused by name exactly like an unknown top-level key (§3.1): a typo in
+// a project's key must not silently leave that project without the value.
+func setProjects(cfg *Config, v any) error {
+	switch x := v.(type) {
+	case nil:
+		cfg.Projects = nil
+		return nil
+	case string:
+		// A flag or env var can only carry a scalar; a project set is a table.
+		if strings.TrimSpace(x) == "" {
+			cfg.Projects = nil
+			return nil
+		}
+		return fmt.Errorf("projects is an array of tables ([[projects]]); %q is not a declaration", x)
+	case []map[string]any:
+		out := make([]ProjectConfig, 0, len(x))
+		for i, row := range x {
+			p, err := projectRow(row)
+			if err != nil {
+				return fmt.Errorf("projects[%d]: %w", i, err)
+			}
+			out = append(out, p)
+		}
+		cfg.Projects = out
+		return nil
+	case []any:
+		out := make([]ProjectConfig, 0, len(x))
+		for i, e := range x {
+			row, ok := e.(map[string]any)
+			if !ok {
+				return fmt.Errorf("projects[%d]: expected a table, got %T", i, e)
+			}
+			p, err := projectRow(row)
+			if err != nil {
+				return fmt.Errorf("projects[%d]: %w", i, err)
+			}
+			out = append(out, p)
+		}
+		cfg.Projects = out
+		return nil
+	default:
+		return fmt.Errorf("expected an array of tables ([[projects]]), got %T", v)
+	}
+}
+
+// projectRow converts one declaration into a ProjectConfig, rejecting unknown
+// keys and applying the two defaults a minimal declaration inherits (a declared
+// project is enabled, and its slug defaults to its id).
+func projectRow(row map[string]any) (ProjectConfig, error) {
+	p := ProjectConfig{Enabled: true}
+	for k, v := range row {
+		switch k {
+		case "id":
+			s, err := asString(v)
+			if err != nil {
+				return p, fmt.Errorf("id: %w", err)
+			}
+			p.ID = strings.TrimSpace(s)
+		case "slug":
+			s, err := asString(v)
+			if err != nil {
+				return p, fmt.Errorf("slug: %w", err)
+			}
+			p.Slug = strings.TrimSpace(s)
+		case "public_key":
+			s, err := asString(v)
+			if err != nil {
+				return p, fmt.Errorf("public_key: %w", err)
+			}
+			p.PublicKey = strings.TrimSpace(s)
+		case "secret", "secret_key":
+			s, err := asString(v)
+			if err != nil {
+				return p, fmt.Errorf("%s: %w", k, err)
+			}
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			if p.Secret != "" && p.Secret != s {
+				return p, fmt.Errorf("secret and secret_key disagree; declare one")
+			}
+			p.Secret = s
+		case "auth_forms":
+			ss, err := asStringSlice(v)
+			if err != nil {
+				return p, fmt.Errorf("auth_forms: %w", err)
+			}
+			p.AuthForms = ss
+		case "quota_epm":
+			i, err := asInt(v)
+			if err != nil {
+				return p, fmt.Errorf("quota_epm: %w", err)
+			}
+			p.QuotaEPM = i
+		case "disk_budget_bytes":
+			i, err := asInt64(v)
+			if err != nil {
+				return p, fmt.Errorf("disk_budget_bytes: %w", err)
+			}
+			p.DiskBudgetBytes = i
+		case "loss_policy":
+			s, err := asString(v)
+			if err != nil {
+				return p, fmt.Errorf("loss_policy: %w", err)
+			}
+			p.LossPolicy = strings.TrimSpace(s)
+		case "enabled":
+			b, err := asBool(v)
+			if err != nil {
+				return p, fmt.Errorf("enabled: %w", err)
+			}
+			p.Enabled = b
+			p.enabledSet = true
+		default:
+			return p, fmt.Errorf("unknown projects key %q", k)
+		}
+	}
+	return p, nil
+}
+
+// projectsSummary renders the declared project set for the explain dump and the
+// boot config record. It never carries a secret: a declared secret is reported
+// as present-but-unstated (SPEC-12 §3.1 — a config value can be set,
+// redacted-echoed or rejected, never revealed), which is why the `projects` row
+// is rendered rather than copied from its source value.
+//
+// The rendering says "secret (set)" and not "secret=<x>" on purpose: the
+// mandatory env_assign / kv_secret_assign scrub rules match SECRET followed by
+// `=` or `:`, and the boot config record travels through the ledger's
+// persistence-boundary re-scan, which refuses a record whose text still matches
+// a mandatory rule (TROUBLE-SCRUB-008). A summary that spells `secret=` never
+// reaches the ledger at all.
+func (c Config) projectsSummary() string {
+	if len(c.Projects) == 0 {
+		return "none declared"
+	}
+	parts := make([]string, 0, len(c.Projects))
+	for _, p := range c.Projects {
+		s := p.ID
+		if p.Slug != "" {
+			s += "/" + p.Slug
+		}
+		s += " public_key " + p.PublicKey
+		if p.Secret != "" {
+			s += " secret (set)"
+		} else {
+			s += " secret (none)"
+		}
+		if !p.Enabled {
+			s += " disabled"
+		}
+		parts = append(parts, s)
+	}
+	return fmt.Sprintf("%d declared: %s", len(c.Projects), strings.Join(parts, ", "))
+}
+
+// ProjectsSet is the declared project set in the shape the sentinel consumes
+// (SPEC-12 §3.1a): defaults applied, then validated. A malformed declaration is
+// an ERROR — the boot refuses with TROUBLE-LIFECYCLE-001 rather than dropping
+// the project, because a dropped project is an ingest plane that silently knows
+// no project while the port is open.
+//
+// No declaration is not a malformed declaration: it returns an empty set and the
+// sentinel's own refusal path reports it (SPEC-12 §3.3a).
+func (c Config) ProjectsSet() ([]types.Project, error) {
+	if len(c.Projects) == 0 {
+		return nil, nil
+	}
+	out := make([]types.Project, 0, len(c.Projects))
+	ids := make(map[string]bool, len(c.Projects))
+	keys := make(map[string]bool, len(c.Projects))
+	for i, p := range c.Projects {
+		where := fmt.Sprintf("projects[%d]", i)
+		if !validProjectID(p.ID) {
+			return nil, fmt.Errorf("%w: %s: id %q must be numeric-as-string 1..2^31-1 (SPEC-12 §3.1a)",
+				types.CodeLifecycle001, where, p.ID)
+		}
+		if ids[p.ID] {
+			return nil, fmt.Errorf("%w: %s: duplicate id %q", types.CodeLifecycle001, where, p.ID)
+		}
+		ids[p.ID] = true
+		if !validHexKey(p.PublicKey) {
+			return nil, fmt.Errorf("%w: %s: public_key %q must be exactly 32 lowercase hex (SPEC-12 §3.1a)",
+				types.CodeLifecycle001, where, p.PublicKey)
+		}
+		if keys[p.PublicKey] {
+			return nil, fmt.Errorf("%w: %s: duplicate public_key %q (one key resolves to one project)",
+				types.CodeLifecycle001, where, p.PublicKey)
+		}
+		keys[p.PublicKey] = true
+		if p.Secret != "" && !validHexKey(p.Secret) {
+			return nil, fmt.Errorf("%w: %s: secret must be exactly 32 lowercase hex (SPEC-12 §3.1a)",
+				types.CodeLifecycle001, where)
+		}
+		if p.QuotaEPM < 0 {
+			return nil, fmt.Errorf("%w: %s: quota_epm must be a positive integer or 0 for the default",
+				types.CodeLifecycle001, where)
+		}
+		if p.DiskBudgetBytes < 0 {
+			return nil, fmt.Errorf("%w: %s: disk_budget_bytes must be non-negative", types.CodeLifecycle001, where)
+		}
+		if p.LossPolicy != "" && !types.LossPolicy(p.LossPolicy).Valid() {
+			return nil, fmt.Errorf("%w: %s: loss_policy %q is not one of sample|drop-with-counter|spool-if-light",
+				types.CodeLifecycle001, where, p.LossPolicy)
+		}
+		out = append(out, c.projectOf(p))
+	}
+	return out, nil
+}
+
+// projectOf applies the declaration's defaults (a slug is the id when unset; a
+// zero quota or disk budget takes the SPEC-04 §2.2 default) and maps it onto the
+// shared type.
+func (c Config) projectOf(p ProjectConfig) types.Project {
+	proj := types.Project{
+		ID:         p.ID,
+		Slug:       p.Slug,
+		PublicKey:  p.PublicKey,
+		SecretKey:  p.Secret,
+		AuthForms:  append([]string(nil), p.AuthForms...),
+		QuotaEPM:   p.QuotaEPM,
+		DiskBudget: p.DiskBudgetBytes,
+		LossPolicy: types.LossPolicy(p.LossPolicy),
+		Enabled:    p.Enabled || !p.enabledSet,
+	}
+	if proj.Slug == "" {
+		proj.Slug = proj.ID
+	}
+	if proj.QuotaEPM == 0 {
+		proj.QuotaEPM = DefaultProjectQuotaEPM
+	}
+	if proj.DiskBudget == 0 {
+		proj.DiskBudget = DefaultProjectDiskBudget
+	}
+	return proj
+}
+
+// validProjectID reports whether id is numeric-as-string 1..2^31-1 (the shape
+// the DSN path element and the sentinel's project index require).
+func validProjectID(id string) bool {
+	if id == "" || len(id) > 10 {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		if id[i] < '0' || id[i] > '9' {
+			return false
+		}
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && n >= 1 && n <= 2147483647
+}
+
+// validHexKey reports whether s is exactly 32 lowercase hex.
+func validHexKey(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // registry lists every known key, its default and a typed setter.
 func registry(c *Config) []keyMeta {
 	return []keyMeta{
@@ -501,6 +810,7 @@ func registry(c *Config) []keyMeta {
 			return err
 		}},
 		{"health_url", "", "health_url", c.HealthURL, func(cfg *Config, v any) error { s, err := asString(v); cfg.HealthURL = s; return err }},
+		{"projects", "", "projects", "", setProjects},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
 		{"dashboard.port", "dashboard", "port", c.Dashboard.Port, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Port = i; return err }},
 		{"dashboard.mandate", "dashboard", "mandate", c.Dashboard.Mandate, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Mandate = s; return err }},
@@ -750,6 +1060,13 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			cv.Value = resolved.Config.Checker.StateFile
 		case "checker.alarm_file":
 			cv.Value = resolved.Config.Checker.AlarmFile
+		case "projects":
+			// The `projects` row is the one config value whose SOURCE shape is a
+			// table carrying credentials, and the explain dump plus the boot
+			// config record are where a value is echoed. It is rendered instead
+			// of copied: what was declared, and whether a secret is set, never
+			// the secret itself (§3.1).
+			cv.Value = resolved.Config.projectsSummary()
 		}
 	}
 
@@ -955,7 +1272,11 @@ func parseArgs(args []string, known map[string]keyMeta) (map[string]any, error) 
 }
 
 // parseTOMLFile is a minimal TOML subset reader: sections, key = value,
-// strings, ints, bools, arrays of strings.
+// strings, ints, bools, arrays of strings, and arrays of tables (`[[name]]`).
+//
+// An array of tables parses into []map[string]any: every `[[name]]` header
+// starts a NEW row which the keys after it fill. That is the shape the
+// `[[projects]]` declarations of SPEC-12 §3.1a arrive in.
 func parseTOMLFile(path string) (map[string]any, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -964,14 +1285,23 @@ func parseTOMLFile(path string) (map[string]any, error) {
 	defer f.Close()
 	vals := make(map[string]any)
 	section := ""
+	arraySection := ""
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
+			name := strings.Trim(line, "[]")
+			rows, _ := vals[name].([]map[string]any)
+			vals[name] = append(rows, map[string]any{})
+			section, arraySection = "", name
+			continue
+		}
 		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
 			section = strings.Trim(line, "[]")
+			arraySection = ""
 			continue
 		}
 		if !strings.Contains(line, "=") {
@@ -980,6 +1310,19 @@ func parseTOMLFile(path string) (map[string]any, error) {
 		parts := strings.SplitN(line, "=", 2)
 		key := strings.TrimSpace(parts[0])
 		valStr := strings.TrimSpace(parts[1])
+		if arraySection != "" {
+			rows, _ := vals[arraySection].([]map[string]any)
+			if len(rows) == 0 {
+				continue // unreachable: the header above always appends a row
+			}
+			row := rows[len(rows)-1]
+			v, err := parseTOMLValue(valStr)
+			if err != nil {
+				return nil, fmt.Errorf("%s: key %q: %w", path, arraySection+"."+key, err)
+			}
+			row[key] = v
+			continue
+		}
 		if section != "" {
 			key = section + "." + key
 		}

@@ -28,9 +28,14 @@ alarm_command = []
 
 [ingest]
 bind = "127.0.0.1:7643"
-advertised_host = ""
+# A NAME the reporting apps resolve — never an IP literal, never "localhost"
+# (SPEC-04 §2.2): the DSN is baked into every deployed app, so a bind address
+# here is a fleet-wide silent-no-report. Replace this placeholder with your host.
+advertised_host = "trouble.example.net"
 
 [ingest.auth]
+# true = a loopback request authenticates with the project's DSN public key
+# alone (SPEC-12 §3.1). Off loopback the bind matrix still requires the token.
 loopback_dsn = true
 nonloopback_mode = "token"
 public_require_proxy = true
@@ -71,3 +76,28 @@ timeout = "10s"
 [origin]
 host_id = ""
 hub_id = ""
+
+# ---------------------------------------------------------------------------
+# The sentinel's project set (SPEC-12 §3.1a): one [[projects]] table per app
+# that may report to this instance. The ingest listener is only built when at
+# least one project is declared — with none, the port stays closed, the refusal
+# is recorded, and /health.json reports it (SPEC-12 §3.3a).
+#
+# id                numeric-as-string, 1..2^31-1 — the DSN path element
+# public_key        exactly 32 lowercase hex. THE place to put your own:
+#                   bin/trouble config explain projects shows what is declared.
+# slug              display name; defaults to the id
+# quota_epm         events/minute, default 600
+# disk_budget_bytes per-project budget, default 2147483648 (2 GiB)
+# loss_policy       sample | drop-with-counter | spool-if-light
+# secret            only needed when [ingest.auth] loopback_dsn = false
+# ---------------------------------------------------------------------------
+
+[[projects]]
+id = "1"
+slug = "trouble-dev"
+# A PLACEHOLDER key: valid in shape (32 lowercase hex) so the shipped example
+# boots, and useless as a credential. Replace it before anything reports here.
+public_key = "0123456789abcdef0123456789abcdef"
+quota_epm = 600
+enabled = true

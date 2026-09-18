@@ -200,6 +200,49 @@ Rules, pinned:
   SIGHUP reload, carrying the full redacted dump. Any key whose `source` is `env` is recorded with
   `payload.env_source=true`, so a surprise environment override is always legible in the ledger.
 
+### 3.1a Declaring projects: the `[[projects]]` array of tables
+
+The sentinel's project set is configuration, not an embedded default: nothing listens for an app until the
+operator declares that app. Each row is one project (SPEC-04's `Project` type, SPEC-TYPES §3.6):
+
+```toml
+[[projects]]
+id = "1"                                    # numeric-as-string 1..2^31-1: the DSN path element
+slug = "payment-api"                        # display name; defaults to the id
+public_key = "<32 lowercase hex>"            # the only unredacted credential in the system
+secret = "<32 lowercase hex>"                # optional; only needed when ingest.auth.loopback_dsn = false
+auth_forms = ["x_sentry_auth"]               # optional: the forms this project may use
+quota_epm = 600                              # default 600 (SPEC-04 §2.2)
+disk_budget_bytes = 2147483648               # default 2 GiB
+loss_policy = "drop-with-counter"            # sample | drop-with-counter | spool-if-light
+enabled = true                               # a declared project is enabled unless it says otherwise
+```
+
+Rules, pinned:
+
+- **The declaration is the operator's statement** about the sentinel's project set. It reaches the sentinel
+  through the composition root, which builds the server from exactly these rows.
+- **A minimal declaration is a complete one.** `id` + `public_key` is enough: a zero `quota_epm` or
+  `disk_budget_bytes` takes the default above, an absent `slug` is the id, and an absent `enabled` is enabled.
+- **A malformed declaration is fatal** (TROUBLE-LIFECYCLE-001, refused before the bind preflight opens a
+  listener): a non-numeric `id`, a `public_key` or `secret` that is not exactly 32 lowercase hex, a negative
+  quota or budget, an unknown `loss_policy`, a duplicate `id` or `public_key`, or an unknown key inside a
+  table. A project is never silently dropped — an ingest listener that knows no project is worse than a boot
+  that refuses to start.
+- **No declaration is not a malformed declaration**: with no `[[projects]]` table the sentinel is not built,
+  the ingest port stays closed, the refusal is recorded and `/health.json` degrades (§3.3a). That is the
+  honest state of an instance with no app pointed at it.
+- **The explain dump renders it, never echoes it**: the `projects` row of `trouble config explain` and of the
+  boot `config` record carries `<n> declared: <id>/<slug> public_key <hex> secret (set|none)` per project. A
+  declared secret is reported as `secret (set)` and never printed, exactly like every other secret-class value
+  (§3.1 redaction rule). The public key stays unredacted by design: it is a submit-only credential. The
+  rendering avoids the `secret=` / `secret:` spelling deliberately — the mandatory `env_assign` and
+  `kv_secret_assign` scrub rules match that shape, and the boot `config` record travels through the ledger's
+  persistence-boundary re-scan, which refuses (`TROUBLE-SCRUB-008`) a record whose text still matches a
+  mandatory rule.
+- **Duplicate public keys are refused** rather than resolved to one project: a key that maps to two projects
+  makes the ingest audit trail ambiguous.
+
 ### 3.2 State root, secret-file modes, bind preflight
 
 ```

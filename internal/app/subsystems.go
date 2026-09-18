@@ -454,8 +454,16 @@ func buildSentinel(d *Daemon, hostID string, projects []types.Project) (*sentine
 		Actor:          lifecycle.Actor(types.ActorDaemon, "troubled"),
 		Projects:       projects,
 		ProxyTrust:     "loopback",
-		RequireSecret:  d.Cfg.Ingest.Auth.NonloopbackMode != "",
-		LedgerWait:     types.Duration("2s"),
+		// `require_secret` is the sentinel's per-request secret requirement, and
+		// SPEC-12 §3.1 gives the operator one key for it: loopback_dsn. With it
+		// on (the default) a loopback request authenticates with the DSN public
+		// key alone; off-loopback the bind matrix still demands the project
+		// token (internal/sentinel resolveMaterial), and turning loopback_dsn
+		// off asks for the secret on loopback too. The pre-existing mapping
+		// (`nonloopback_mode != ""`, i.e. true by default) contradicted the
+		// documented loopback form and made every project need a secret key.
+		RequireSecret: !d.Cfg.Ingest.Auth.LoopbackDSN,
+		LedgerWait:    types.Duration("2s"),
 	}
 	srv, err := sentinel.NewServer(cfg, sentinelSink{L: d.Ledger, d: d}, d.Scrubber)
 	if err != nil {

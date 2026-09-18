@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -214,6 +215,125 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	for zone, want := range map[string]types.Duration{"loopback": "10m", "lan": "15m", "tailnet": "20m", "public": "30m"} {
 		if zones[zone] != want {
 			t.Errorf("running daemon verify.zone_windows[%s] = %q, want %q", zone, zones[zone], want)
+		}
+	}
+
+	// --- TRBL-007: the shipped example declares a project (SPEC-12 §3.1a), so
+	// the ingest plane is BUILT and the README's on-ramp is reachable. Before
+	// this the example's boot had no listener on ingest.bind at all: the
+	// headline `POST /api/{id}/event/` was connection-refused.
+	if d.Subsystems == nil || d.Subsystems.Sentinel == nil {
+		t.Fatalf("the shipped example did not build the sentinel: subsystems=%+v", d.Subsystems)
+	}
+	if len(d.Cfg.Projects) != 1 {
+		t.Fatalf("the shipped example declares %d projects, want 1", len(d.Cfg.Projects))
+	}
+	projectKey := d.Cfg.Projects[0].PublicKey
+
+	ingestBase := fmt.Sprintf("http://127.0.0.1:%d", ingestPort)
+	// The DSN reachability probe: the listener is bound and resolves the project.
+	probe, err := http.Get(ingestBase + "/api/1/")
+	if err != nil {
+		t.Fatalf("GET the ingest probe on the shipped-example boot: %v\n"+
+			"CP: the shipped example must bind ingest.bind (TRBL-007 AC2)", err)
+	}
+	probeBody, _ := io.ReadAll(probe.Body)
+	probe.Body.Close()
+	if probe.StatusCode != http.StatusOK || !strings.Contains(string(probeBody), `"id":"1"`) {
+		t.Fatalf("GET /api/1/ = %d %s, want 200 and the declared project", probe.StatusCode, probeBody)
+	}
+
+	// The documented on-ramp for curl: SPEC-04 §2.4's generic_json_query form. A
+	// loopback request authenticates with the DSN public key alone while
+	// ingest.auth.loopback_dsn = true (SPEC-12 §3.1), so no secret is needed.
+	evBody := `{"message":"shipped-example on-ramp","level":"error","release":"0.1.0"}`
+	post, err := http.Post(ingestBase+"/api/1/event/?sentry_key="+projectKey,
+		"application/json", strings.NewReader(evBody))
+	if err != nil {
+		t.Fatalf("POST the documented on-ramp form: %v", err)
+	}
+	postBody, _ := io.ReadAll(post.Body)
+	post.Body.Close()
+	if post.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/1/event/ = %d %s, want 200 (auth form: ?sentry_key=<public_key>)",
+			post.StatusCode, postBody)
+	}
+	if !strings.Contains(string(postBody), `"id"`) {
+		t.Errorf("POST /api/1/event/ answered without an event id: %s", postBody)
+	}
+
+	// AC3's ledger half: the POST's event record AND its fingerprint group
+	// record. The sensors write `event` records of their own on a boot, so the
+	// assertion keys on the event id the on-ramp returned and ties the group to
+	// that event's digest instead of counting the kind.
+	var postedID string
+	if err := json.Unmarshal(postBody, &struct{ ID *string }{&postedID}); err != nil || postedID == "" {
+		t.Fatalf("POST response carried no event id: %v (%s)", err, postBody)
+	}
+	var onRampEvents, groups int
+	var onRampDigest string
+	var groupOps []string
+	var groupDigests []string
+	if err := d.Ledger.Query().ScanFrom(1, func(rec types.Record) bool {
+		switch rec.Kind {
+		case types.KEvent:
+			if id, _ := rec.Payload["native_id"].(string); id == postedID {
+				onRampEvents++
+				onRampDigest, _ = rec.Payload["digest"].(string)
+			}
+		case types.KGroup:
+			groups++
+			if op, _ := rec.Payload["op"].(string); op != "" {
+				groupOps = append(groupOps, op)
+			}
+			if dg, _ := rec.Payload["digest"].(string); dg != "" {
+				groupDigests = append(groupDigests, dg)
+			}
+		}
+		return true
+	}); err != nil {
+		t.Fatalf("ledger scan: %v", err)
+	}
+	if onRampEvents != 1 {
+		t.Errorf("%d event records for the posted event id %s, want exactly 1 (AC3)", onRampEvents, postedID)
+	}
+	if groups != 1 || len(groupOps) != 1 || groupOps[0] != "create" {
+		t.Errorf("group records = %d ops=%v, want exactly 1 with op=create (AC3)", groups, groupOps)
+	}
+	if onRampDigest == "" || len(groupDigests) != 1 || groupDigests[0] != onRampDigest {
+		t.Errorf("the group record does not belong to the posted event: event digest %q, group digests %v",
+			onRampDigest, groupDigests)
+	}
+
+	// --- AC1/AC4/AC5's health half: /health.json carries the per-subsystem
+	// block, reports the sentinel as built, and refuses to call the boot "ok"
+	// while the issue desk and the skill loop are refused.
+	resp2, err := http.Get(base + "/health.json")
+	if err != nil {
+		t.Fatalf("GET /health.json after the on-ramp: %v", err)
+	}
+	healthBody, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	var after types.HealthResponse
+	if err := json.Unmarshal(healthBody, &after); err != nil {
+		t.Fatalf("health is not a HealthResponse: %v (%s)", err, healthBody)
+	}
+	if after.Status == "ok" {
+		t.Errorf("status = ok on a boot that refused the issue desk and the skill loop: %s", healthBody)
+	}
+	if row := rowOf(t, after, "sentinel"); !row.Built || row.Refused {
+		t.Errorf("sentinel row = %+v, want built after the shipped example declared a project", row)
+	}
+	for name, wantCode := range map[string]string{
+		"issues": "TROUBLE-ISSUES-003",
+		"skills": "TROUBLE-SKILLS-001",
+	} {
+		row := rowOf(t, after, name)
+		if !row.Refused || row.Built {
+			t.Errorf("%s row = %+v, want refused (the example declares no driver/source for it)", name, row)
+		}
+		if row.Code != wantCode {
+			t.Errorf("%s code = %q, want %q", name, row.Code, wantCode)
 		}
 	}
 }

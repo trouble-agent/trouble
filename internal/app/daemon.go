@@ -189,6 +189,24 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		return nil, err
 	}
 
+	// 6b. the declared project set (SPEC-12 §3.1a). A declaration that cannot be
+	// used is refused HERE, before the bind preflight opens a listener: a
+	// malformed project must never be silently dropped, because the ingest plane
+	// would then be open while knowing no project. A config with NO declaration
+	// is not malformed — it leaves the set empty and buildSubsystems records the
+	// sentinel's refusal (§3.3a).
+	declaredProjects, err := cfg.ProjectsSet()
+	if err != nil {
+		d.bootFailure(ctx, types.CodeLifecycle001, err)
+		return nil, err
+	}
+	if len(declaredProjects) > 0 && o.Subsystems.SentinelProjects == nil {
+		// The config file is the operator's statement about the sentinel's
+		// project set; an embedder that passed its own set keeps it (the
+		// subsystem options stay overridable).
+		o.Subsystems.SentinelProjects = declaredProjects
+	}
+
 	// 7. bind preflight (003) — listeners are held, never closed and reopened.
 	probes, err := lifecycle.PreflightBinds(cfg)
 	if err != nil {

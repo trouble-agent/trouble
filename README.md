@@ -208,6 +208,63 @@ model pin is compiled in.
 Operational detail (what to look at when one of them misbehaves, and the runbook
 facts that surprise people) lives in `docs/operations.md` §12 and §13.
 
+## Run it: the on-ramp, end to end
+
+`POST /api/{id}/event/` is trouble's own on-ramp (SPEC-04 §3.6) — one `curl` from any runtime, no SDK, no
+agent. The shipped example already declares the one project the ingest plane needs, so a stock boot serves it.
+
+```
+cp examples/config.toml ~/.config/trouble/config.toml
+$EDITOR ~/.config/trouble/config.toml      # state_root, ingest.advertised_host, ingest.bind, dashboard.bind
+make bin
+bin/trouble install                        # or run it in the foreground: bin/troubled --config ~/.config/trouble/config.toml
+```
+
+The declaration is a `[[projects]]` table (SPEC-12 §3.1a); `id` and `public_key` are enough:
+
+```toml
+[[projects]]
+id = "1"                                         # numeric; the DSN path element
+slug = "trouble-dev"
+public_key = "0123456789abcdef0123456789abcdef"  # 32 lowercase hex — replace it
+```
+
+With `ingest.auth.loopback_dsn = true` (the default) a loopback request authenticates with that public key
+alone, which makes the query form the documented one for `/api/{id}/event/`:
+
+```
+curl -sS -X POST 'http://127.0.0.1:7643/api/1/event/?sentry_key=0123456789abcdef0123456789abcdef' \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"hello from the on-ramp","level":"error","release":"0.1.0"}'
+{"id":"8a0f0f6c…"}
+```
+
+One accepted event writes two records — the `event` and the fingerprint `group` — into
+`<state_root>/ledger/YYYY-MM-DD.jsonl`:
+
+```
+jq -r 'select(.kind=="event" or .kind=="group") | "\(.kind) \(.sig) \(.payload.op // "")"' \
+  ~/.local/state/trouble/ledger/*.jsonl
+```
+
+`/health.json` then reports the subsystem block (SPEC-12 §3.3a):
+
+```
+curl -sS localhost:7644/health.json | jq '.status, .subsystems'
+"degraded"
+[{"name":"sentinel","built":true,"refused":false},                # ← the ingest plane is up
+ {"name":"issues","built":false,"refused":true,"code":"TROUBLE-ISSUES-003","reason":"…"},
+ {"name":"research","built":true,"refused":false},
+ {"name":"flow","built":true,"refused":false},
+ {"name":"skills","built":false,"refused":true,"code":"TROUBLE-SKILLS-001","reason":"…"}]
+```
+
+`status` is `degraded`, never `ok`, while any subsystem is refused: the block names which one, its code and
+its reason, and `detail.subsystem_refused` carries the code for an alarm line. A stock boot refuses the issue
+desk (no driver credentials) and the skill loop (no distribution source) until you point them at one — the
+ingest plane above is the part this quickstart turns on. Declaring no project at all is also a valid config:
+the ingest port stays closed, the refusal is recorded, and `/health.json` says so instead of pretending.
+
 ## Read the specs
 
 * `specs/SPEC-INDEX.md` — suite map, the AC-to-spec matrix and the frozen v0.1 cut line.

@@ -45,6 +45,65 @@ import (
 // of the example is exactly the file that ships. Optional subsystems
 // (SubsystemOptions{}) are left at their defaults, exactly as bootDaemon does.
 
+// stampBuildForTest supplies the link-time version triple (SPEC-12 §3.4) that a
+// `go test` binary does not carry. /health.json degrades every build whose
+// GitSHA is empty or "unknown" (`detail.reason=unstamped_build`,
+// internal/lifecycle/health.go), so without this the status assertion in
+// TestShippedExampleConfigBootsToServe could only ever prove "degraded for a
+// reason that is not a subsystem". The triple `make bin` passes through ldflags
+// is supplied here for the duration of the test instead of asserting a weaker
+// status.
+func stampBuildForTest(t *testing.T) {
+	t.Helper()
+	v, sha, bt := lifecycle.Version, lifecycle.GitSHA, lifecycle.BuildTime
+	t.Cleanup(func() { lifecycle.Version, lifecycle.GitSHA, lifecycle.BuildTime = v, sha, bt })
+	lifecycle.Version, lifecycle.GitSHA, lifecycle.BuildTime =
+		"0.1.0", "767e537", "2026-09-18T00:00:00.000Z"
+}
+
+// assertShippedOptOut requires the shipped example's own bytes to declare the
+// deliberate opt-out of one optional subsystem (TRBL-016 AC2's file half): the
+// named block, the commented `# [<name>]` table marker, the `# enabled = false`
+// line under it, and — in that same block — every key an operator must set to
+// turn the subsystem on. Deleting the opt-out from examples/config.toml fails
+// this test; the posture is never implied by an absent table.
+func assertShippedOptOut(t *testing.T, name string, wantKeys ...string) {
+	t.Helper()
+	path := shippedExampleConfigPath(t)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	text := string(raw)
+
+	anchor := "# --- [" + name + "] "
+	marker := "\n# [" + name + "]\n"
+	ai, mi := strings.Index(text, anchor), strings.Index(text, marker)
+	if ai < 0 {
+		t.Fatalf("%s carries no `%s` block: the opt-out of SPEC-09 §3.4a / SPEC-11 §2a must be visible in the file operators copy", path, anchor)
+	}
+	if mi < 0 || mi < ai {
+		t.Fatalf("%s carries no commented `# [%s]` / `# enabled = false` declaration: the shipped default must be stated, not implied by an absent table", path, name)
+	}
+	after := text[mi+len(marker):]
+	if !strings.HasPrefix(after, "# enabled = false") {
+		t.Fatalf("%s: `# [%s]` is not followed by the commented `# enabled = false` opt-out line (found %q)", path, name, firstLineOf(after))
+	}
+	block := text[ai:mi]
+	for _, k := range wantKeys {
+		if !strings.Contains(block, k) {
+			t.Errorf("%s: the [%s] opt-out block does not name %q as part of the opt-in; a fresh operator must be told what turns it on (SPEC-09 §3.4a / SPEC-11 §2a)", path, name, k)
+		}
+	}
+}
+
+func firstLineOf(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
+}
+
 // shippedZoneWindows is SPEC-12 §167's pinned default, verbatim.
 const shippedZoneWindows = "loopback=10m lan=15m tailnet=20m public=30m"
 
@@ -119,10 +178,23 @@ func TestShippedExampleConfigResolves(t *testing.T) {
 // example as the config file, boot reaches serve. See the file comment for
 // exactly what starts and what is deliberately overridden.
 func TestShippedExampleConfigBootsToServe(t *testing.T) {
+	stampBuildForTest(t)
 	path := shippedExampleConfigPath(t)
 
 	root := stateBase(t)
 	dashPort, ingestPort := freePortPair(t)
+
+	// The rules dir the sensors watch unconditionally lives beside the state root
+	// (SPEC-03 §3.7: `<state_root>/../config/rules.d`). `trouble install` creates
+	// it on a real host; a throwaway state root starts without one and the inotify
+	// sensor then reports TROUBLE-SENSORS-025, degrading the whole boot for a
+	// reason that has nothing to do with the subsystems this test is about. It is
+	// created here — and every sensor row is asserted healthy below — rather than
+	// weakening the AC3 status assertion.
+	rulesDir := filepath.Join(filepath.Dir(root), "config", "rules.d")
+	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", rulesDir, err)
+	}
 
 	// A token store minted into the temp state root, exactly as bootDaemonWith
 	// does, so the dashboard serves the authenticated surfaces too; /health.json
@@ -305,9 +377,13 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 			onRampDigest, groupDigests)
 	}
 
-	// --- AC1/AC4/AC5's health half: /health.json carries the per-subsystem
-	// block, reports the sentinel as built, and refuses to call the boot "ok"
-	// while the issue desk and the skill loop are refused.
+	// --- TRBL-016 AC2/AC3: the shipped example ships the two optional
+	// subsystems OFF, deliberately and visibly (SPEC-09 §3.4a, SPEC-11 §2a), so
+	// this boot is COMPLETE rather than permanently degraded: every subsystem row
+	// is built, none is refused, and /health.json reads ok. Before the change the
+	// two shipped defaults failed their own validators, so the shipped example —
+	// the file docs/cmd.md and deploy/README.md tell a new operator to copy —
+	// booted permanently missing the issue desk and the skill loop.
 	resp2, err := http.Get(base + "/health.json")
 	if err != nil {
 		t.Fatalf("GET /health.json after the on-ramp: %v", err)
@@ -318,22 +394,40 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	if err := json.Unmarshal(healthBody, &after); err != nil {
 		t.Fatalf("health is not a HealthResponse: %v (%s)", err, healthBody)
 	}
-	if after.Status == "ok" {
-		t.Errorf("status = ok on a boot that refused the issue desk and the skill loop: %s", healthBody)
+	if len(after.Subsystems) != len(subsystemNames) {
+		t.Errorf("the health block carries %d subsystem rows, want %d: %+v", len(after.Subsystems), len(subsystemNames), after.Subsystems)
 	}
-	if row := rowOf(t, after, "sentinel"); !row.Built || row.Refused {
-		t.Errorf("sentinel row = %+v, want built after the shipped example declared a project", row)
-	}
-	for name, wantCode := range map[string]string{
-		"issues": "TROUBLE-ISSUES-003",
-		"skills": "TROUBLE-SKILLS-001",
-	} {
+	for _, name := range subsystemNames {
 		row := rowOf(t, after, name)
-		if !row.Refused || row.Built {
-			t.Errorf("%s row = %+v, want refused (the example declares no driver/source for it)", name, row)
+		if row.Refused {
+			t.Errorf("%s row = %+v, want not refused: the shipped example declares the deliberate opt-out instead of asking for a subsystem it cannot build", name, row)
 		}
-		if row.Code != wantCode {
-			t.Errorf("%s code = %q, want %q", name, row.Code, wantCode)
+		if !row.Built {
+			t.Errorf("%s row = %+v, want built=true on the shipped-example boot", name, row)
 		}
 	}
+	// AC3's status half, with nothing left to explain the degraded branch away:
+	// no row refused/unbuilt, no subsystem key in detail, and no sensor degraded
+	// (a degraded sensor would make the status assertion fail for a reason this
+	// test is not about, so the sensor is named instead of the status being
+	// loosened).
+	for _, k := range []string{"subsystem_refused", "subsystem_unbuilt"} {
+		if v, ok := after.Detail[k]; ok {
+			t.Errorf("detail.%s = %v on a boot whose every subsystem row is built", k, v)
+		}
+	}
+	for _, s := range after.Sensors {
+		if s.Degraded {
+			t.Errorf("sensor %s is degraded on the shipped-example boot (%s): the AC3 ok assertion below would fail for a sensor reason, not a subsystem one", s.Sensor, s.Reason)
+		}
+	}
+	if after.Status != "ok" {
+		t.Errorf("status = %q on the shipped-example boot, want ok (every subsystem built, stamped build, healthy sensors): %s", after.Status, healthBody)
+	}
+
+	// AC2's file half: the opt-out is DECLARED in the shipped bytes — the file an
+	// operator copies states the posture and names what turns each subsystem on —
+	// so removing it from examples/config.toml breaks this test.
+	assertShippedOptOut(t, "issues", "owner", "repo", "duckbrain")
+	assertShippedOptOut(t, "skills", "source_path", "source_url")
 }

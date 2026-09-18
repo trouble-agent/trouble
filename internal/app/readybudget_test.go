@@ -121,11 +121,16 @@ func loadPerCore(loadAvg float64, cores int) float64 {
 }
 
 // bootBudgetScale scales a quiet-host budget by the observed load:
-// 1 + loadPerCore/2, clamped into [1, bootScaleMax]. It is monotonically
-// non-decreasing in load, never below 1 (a budget is never tightened by a quiet
-// host) and never above bootScaleMax.
+// 1 + loadPerCore, clamped into [1, bootScaleMax]. The slope is 1 per runnable
+// thread per core, the first-order model for a CPU-bound single-threaded boot
+// sharing the box: L other runnable threads per core deschedule it by ~(1+L).
+// Measured, not assumed: at 1.23 per core an in-suite boot needed 1.95x
+// (48.63s against the 1.62x budget of the half-slope form), so the half slope
+// under-budgets exactly the case this policy exists for. It is monotonically
+// non-decreasing in load, never below 1 (a quiet host never tightens a budget)
+// and never above bootScaleMax.
 func bootBudgetScale(loadAvg float64, cores int) float64 {
-	s := 1 + loadPerCore(loadAvg, cores)/2
+	s := 1 + loadPerCore(loadAvg, cores)
 	if s < 1 {
 		return 1
 	}
@@ -324,13 +329,13 @@ func TestBootBudgetDerivation(t *testing.T) {
 	}{
 		{name: "no host signal keeps the base", load: 0, cores: 16, base: bootReadyBase, want: 30 * time.Second, wantPer: 0},
 		{name: "negative load is coerced to zero", load: -3, cores: 16, base: bootReadyBase, want: 30 * time.Second, wantPer: 0},
-		{name: "half a thread per core", load: 8, cores: 16, base: bootReadyBase, want: 37500 * time.Millisecond, wantPer: 0.5},
-		{name: "one thread per core", load: 16, cores: 16, base: bootReadyBase, want: 45 * time.Second, wantPer: 1},
-		{name: "two threads per core", load: 32, cores: 16, base: bootReadyBase, want: 60 * time.Second, wantPer: 2},
-		{name: "the drain base scales identically", load: 32, cores: 16, base: bootDrainBase, want: 40 * time.Second, wantPer: 2},
-		{name: "the skip fence", load: 64, cores: 16, base: bootReadyBase, want: 90 * time.Second, wantPer: 4},
-		{name: "eight cores carry twice the per-core load", load: 32, cores: 8, base: bootReadyBase, want: 90 * time.Second, wantPer: 4},
-		{name: "six threads per core reaches the cap", load: 96, cores: 16, base: bootReadyBase, want: 120 * time.Second, wantPer: 6, wantCap: true},
+		{name: "half a thread per core", load: 8, cores: 16, base: bootReadyBase, want: 45 * time.Second, wantPer: 0.5},
+		{name: "one thread per core", load: 16, cores: 16, base: bootReadyBase, want: 60 * time.Second, wantPer: 1},
+		{name: "two threads per core", load: 32, cores: 16, base: bootReadyBase, want: 90 * time.Second, wantPer: 2},
+		{name: "the drain base scales identically", load: 32, cores: 16, base: bootDrainBase, want: 60 * time.Second, wantPer: 2},
+		{name: "three threads per core reaches the cap", load: 48, cores: 16, base: bootReadyBase, want: 120 * time.Second, wantPer: 3, wantCap: true},
+		{name: "the skip fence is already at the cap", load: 64, cores: 16, base: bootReadyBase, want: 120 * time.Second, wantPer: 4, wantCap: true},
+		{name: "eight cores carry twice the per-core load", load: 32, cores: 8, base: bootReadyBase, want: 120 * time.Second, wantPer: 4, wantCap: true},
 		{name: "an unusable core count is read as one core", load: 16, cores: 0, base: bootReadyBase, want: 120 * time.Second, wantPer: 16, wantCap: true},
 		{name: "a silly load stays at the cap", load: 1e6, cores: 16, base: bootReadyBase, want: 120 * time.Second, wantPer: 62500, wantCap: true},
 	}
@@ -395,14 +400,14 @@ func TestBootBudgetVerdictText(t *testing.T) {
 	const cores = 16
 	load := 32.0                                  // 2.0 per core on 16 cores
 	base := bootReadyBase                         // 30s
-	scaled := scaledBootBudget(base, load, cores) // 60s
+	scaled := scaledBootBudget(base, load, cores) // 90s
 	elapsed := 65 * time.Second
 
 	skip, msg := bootBudgetVerdict("READY", "daemon", base, scaled, elapsed, load, cores, "the boot was still in flight after 260 polls")
 	if skip {
 		t.Fatalf("a load of %.2f per core must not skip: %s", loadPerCore(load, cores), msg)
 	}
-	for _, want := range []string{"daemon did not reach READY", "load_avg 32.00", "load_avg 32.00 / 16 cores = 2.00 per core", "elapsed 1m5s", "allowed 1m0s", "base 30s × 2.00", "still in flight after 260 polls"} {
+	for _, want := range []string{"daemon did not reach READY", "load_avg 32.00", "load_avg 32.00 / 16 cores = 2.00 per core", "elapsed 1m5s", "allowed 1m30s", "base 30s × 3.00", "still in flight after 260 polls"} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("failure text is missing %q:\n%s", want, msg)
 		}
@@ -432,7 +437,7 @@ func TestBootBudgetVerdictText(t *testing.T) {
 	// budget the harness actually allowed, and the elapsed time that blew it.
 	lowBase, lowScaled, lowElapsed := time.Millisecond, scaledBootBudget(time.Millisecond, 8, cores), 2*time.Second
 	_, lowMsg := bootBudgetVerdict("READY", "boot against the shipped example", lowBase, lowScaled, lowElapsed, 8, cores, "the boot was still in flight after 8 polls")
-	for _, want := range []string{"load_avg 8.00", "elapsed 2s", "allowed 1.25ms", "base 1ms × 1.25"} {
+	for _, want := range []string{"load_avg 8.00", "elapsed 2s", "allowed 1.5ms", "base 1ms × 1.50"} {
 		if !strings.Contains(lowMsg, want) {
 			t.Fatalf("forced-low-budget text is missing %q:\n%s", want, lowMsg)
 		}

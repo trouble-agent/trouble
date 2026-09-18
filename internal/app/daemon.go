@@ -101,10 +101,13 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 
 	// 1. config resolve (flag > env > file > default; 001/002).
 	//
-	// `--config <path>` is the operator's spelling of the `config_path` key; it is
-	// consumed here because the path is an INPUT to resolution, not a key
-	// resolution can already have read. The mechanical `--config-path` form works
-	// too (SPEC-12 §2.5) and is what Resolve itself would accept.
+	// The config FILE is chosen before resolution, because the file is an INPUT
+	// to resolution rather than a key resolution can already have read.
+	// splitConfigFlag consumes both spellings for that purpose: the operator form
+	// `--config <path>` and the mechanical key form `--config_path <path>`
+	// (SPEC-12 §2.5). Nothing else on argv is interpreted here — the key flags go
+	// to Resolve untouched, which is what makes the documented per-key surface
+	// reachable from the shipped binary (TRBL-018).
 	args, cfgPath := splitConfigFlag(o.Args, defaultConfigPath())
 	res, err := lifecycle.Resolve(args, o.Env, cfgPath)
 	if err != nil {
@@ -730,22 +733,37 @@ func setResolved(vals []types.ConfigValue, key, value, source, sourceRef string)
 	return append(vals, row)
 }
 
-// splitConfigFlag pulls `--config <path>` out of argv and returns the remaining
-// arguments plus the config path to resolve against.
+// splitConfigFlag pulls the config-file selector out of argv and returns the
+// remaining arguments plus the path to resolve against.
+//
+// Two spellings select the file, and the last one on argv wins: the operator form
+// `--config <path>` / `--config=<path>`, and the mechanical key form
+// `--config_path <path>` / `--config_path=<path>` (SPEC-12 §2.5 — config_path is a
+// registered key, so its flag form has to mean what the key means, not merely be
+// recorded after the file has already been read).
+//
+// Only the operator form is removed from the returned arguments. The mechanical
+// form stays in argv: it is still a resolved key, and `trouble config explain` has
+// to show that a flag — not the file — chose it.
 func splitConfigFlag(args []string, def string) ([]string, string) {
 	out := make([]string, 0, len(args))
 	path := def
 	for i := 0; i < len(args); i++ {
-		if args[i] == "--config" && i+1 < len(args) {
+		arg := args[i]
+		switch {
+		case arg == "--config" && i+1 < len(args):
 			path = args[i+1]
 			i++
 			continue
-		}
-		if v, ok := strings.CutPrefix(args[i], "--config="); ok {
-			path = v
+		case strings.HasPrefix(arg, "--config="):
+			path = strings.TrimPrefix(arg, "--config=")
 			continue
+		case arg == "--config_path" && i+1 < len(args):
+			path = args[i+1]
+		case strings.HasPrefix(arg, "--config_path="):
+			path = strings.TrimPrefix(arg, "--config_path=")
 		}
-		out = append(out, args[i])
+		out = append(out, arg)
 	}
 	return out, path
 }

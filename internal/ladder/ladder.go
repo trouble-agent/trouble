@@ -127,6 +127,14 @@ type Deps struct {
 	// PIDAlive resolves process liveness for the lease and the re-adopter
 	// (§3.6, §3.5). A nil check treats every pid as dead.
 	PIDAlive func(pid int) bool
+
+	// Agent is the agent stage's LLM port (SPEC-05 §2a). Nil means the stage
+	// refuses with TROUBLE-LADDER-021 instead of inventing a completion.
+	Agent AgentPort
+
+	// Skills is the local SKILL.md library (SPEC-05 §2b). Nil means no library is
+	// read and no skill step runs.
+	Skills SkillLibrary
 }
 
 // Observation is the admission input (scrubbed and sig-keyed before it arrives).

@@ -377,6 +377,8 @@ type harnessOpts struct {
 	research bool
 	playFor  map[string]types.Play
 	rules    map[string]types.Rule
+	agent    AgentPort    // SPEC-05 §2a; nil = the stage refuses
+	skills   SkillLibrary // SPEC-05 §2b; nil = no library is read
 }
 
 func newHarness(t *testing.T, opts harnessOpts) *harness {
@@ -398,6 +400,8 @@ func newHarness(t *testing.T, opts harnessOpts) *harness {
 		Clock:  h.clock,
 		Eval:   fakeEval{Matched: true, Stab: true},
 		Cfg:    opts.cfg,
+		Agent:  opts.agent,
+		Skills: opts.skills,
 	}
 	if h.rules != nil {
 		deps.Rules = func(name string) (types.Rule, bool) {

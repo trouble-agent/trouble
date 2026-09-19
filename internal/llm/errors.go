@@ -139,6 +139,24 @@ func ClassOf(err error) string {
 	return ""
 }
 
+// FailureClass is ClassOf as a method, so a caller that holds only an error value
+// can read the class through an interface (internal/ladder's portFailure) without
+// importing this package.
+func (e *Error) FailureClass() string {
+	if e == nil {
+		return ""
+	}
+	return e.Class
+}
+
+// FailureReason is the stable reason token as a method (see FailureClass).
+func (e *Error) FailureReason() string {
+	if e == nil {
+		return ""
+	}
+	return e.Reason
+}
+
 // ReasonOf reports the stable reason token carried by err ("").
 func ReasonOf(err error) string {
 	var e *Error

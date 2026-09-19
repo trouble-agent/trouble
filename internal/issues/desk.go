@@ -392,37 +392,6 @@ func (d *Desk) AnchorAt(driver, sig string) (types.IssueRef, bool) {
 	return types.IssueRef{}, false
 }
 
-// EnqueueSpool places one foreign payload on the desk's durable queue: the
-// export of §3.7 to a collaborator that has an ENABLED desk to replay through.
-// It is not a generic durability service — Replay walks the configured driver
-// names, and DecodePayload accepts only the operation shape below, so a
-// collaborator that needs its own queue owns that queue and its drain
-// (SPEC-08 §3.9a is the flow's). A drop event is one gap record on the desk's
-// own record path.
-func (d *Desk) EnqueueSpool(ctx context.Context, e types.SpoolEntry) error {
-	if d == nil || d.spool == nil {
-		return newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "spool not built")
-	}
-	if err := d.requireEnabled("EnqueueSpool"); err != nil {
-		// A disabled desk runs no replay loop (Run returns early before any
-		// driver timer), so an entry accepted here would be "spooled" forever.
-		// This spool is the DESK's queue, keyed by driver: Replay walks
-		// d.order, so it lists no other tree, and DecodePayload accepts only
-		// the desk's own operation shape. A collaborator with its own durable
-		// queue owns that queue and the loop that drains it — SPEC-08 §3.9a is
-		// the flow's, for exactly this reason. Refusing keeps every caller's
-		// record honest.
-		return err
-	}
-	drops, err := d.spool.Put("issue", e)
-	for range drops {
-		_, _ = d.record(ctx, types.KGap, "", "", map[string]any{
-			"est_lost": 1, "cause": types.CauseQueueOverflow, "subsystem": "issues", "scope": "spool",
-		})
-	}
-	return err
-}
-
 // EntryFor returns the anchor entry (read-only) for diagnostics and tests.
 func (d *Desk) EntryFor(driver, sig, project string) (*anchorEntry, bool) {
 	d.mu.Lock()

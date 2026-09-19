@@ -15,7 +15,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -119,19 +118,5 @@ func TestDisabledDeskIsBuiltAndAnswersWithTheOptOut(t *testing.T) {
 	// so all is well" while the desk is off.
 	if n, err := d.Replay(context.Background(), 10); err == nil || n != 0 {
 		t.Errorf("Replay on a disabled desk = (%d, %v), want (0, the disabled refusal)", n, err)
-	}
-
-	// The composition root hands the SPEC-08 flow this spool as its durable
-	// dispatch queue. Accepting an entry a disabled desk will never replay would
-	// let the flow record a dispatch as "spooled" forever.
-	err = d.EnqueueSpool(context.Background(), types.SpoolEntry{
-		ID: "ev_trbl016", TS: types.FormatUTC(time.Now()), Kind: "spawn",
-		Payload: []byte(`{"inc":"inc_trbl016"}`), IdemKey: "tsk_trbl016",
-	})
-	if err == nil {
-		t.Fatalf("EnqueueSpool on a disabled desk = nil, want the disabled refusal: nothing would ever replay the entry")
-	}
-	if !strings.Contains(err.Error(), "the issue desk is disabled") {
-		t.Errorf("EnqueueSpool refusal = %q, want it to name the disabled desk", err)
 	}
 }

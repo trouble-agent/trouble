@@ -175,6 +175,14 @@ token_file = %q
 				h.d = d
 				close(ready)
 			},
+			// bootPhaseObserver is nil unless bootphase_test.go installs it;
+			// the boot reports its §4.1 phase boundaries through the same hook
+			// an operator harness would use (BootOptions.OnBootPhase).
+			OnBootPhase: func(name string, at time.Time) {
+				if bootPhaseObserver != nil {
+					bootPhaseObserver(name, at)
+				}
+			},
 			Subsystems: so,
 		})
 		h.done <- err

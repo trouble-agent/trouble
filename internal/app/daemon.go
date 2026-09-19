@@ -51,6 +51,16 @@ type BootOptions struct {
 	// READY=1 here); tests use it to proceed deterministically.
 	OnReady func(d *Daemon)
 
+	// OnBootPhase, when non-nil, is called at the START of every phase of the
+	// §4.1 startup sequence, in the order BootPhaseNames lists them, with the
+	// phase's name and the instant it began. It exists so a caller can
+	// ATTRIBUTE a boot's wall time to the sequence it ran: this boot is
+	// dominated by ledger durability waits (one group-commit window per ledger
+	// batch, SPEC-01 §3.5), and "the boot was slow" with no phase attribution is
+	// not a diagnosis — SPEC-12 §7b records the measured table. Nil (the
+	// default, and what the shipped binary passes) costs one branch per phase.
+	OnBootPhase func(phase string, at time.Time)
+
 	// Subsystems carries the optional per-subsystem config tables. Nil fields
 	// select each package's defaults; SentinelProjects non-nil (even empty)
 	// is the operator's statement about the sentinel's project set.
@@ -109,6 +119,23 @@ type Daemon struct {
 	drainErr error
 }
 
+// bootPhaseNames is the §4.1 startup sequence in execution order: the phases
+// BootOptions.OnBootPhase reports, and the names BootPhaseNames publishes. The
+// list is the contract — a phase added to RunDaemon without a name here (or a
+// name reused twice) is a boot sequence nobody can attribute, so the boot-phase
+// test asserts the observed sequence against this list.
+var bootPhaseNames = []string{
+	"config_resolve", "state_root", "secrets", "schema_compat", "ledger_open",
+	"config_record", "projects", "hub_gate", "bind_preflight", "scrubber",
+	"sensors_build", "subsystems", "registry", "skill_library", "llm_port",
+	"ladder", "sensors_probe", "checker_mirror", "dashboard_config",
+	"sensors_start", "dashboard_serve", "hub_runtime", "sentinel_start",
+	"background_loops", "ready",
+}
+
+// BootPhaseNames returns the §4.1 startup phase names in execution order.
+func BootPhaseNames() []string { return append([]string(nil), bootPhaseNames...) }
+
 // RunDaemon performs the full boot, serves until ctx is cancelled, then drains.
 func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	log := o.Log
@@ -116,6 +143,13 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	}
 	started := time.Now()
+	// phase marks the start of one §4.1 startup phase for BootOptions.OnBootPhase.
+	phase := func(name string) {
+		if o.OnBootPhase != nil {
+			o.OnBootPhase(name, time.Now())
+		}
+	}
+	phase("config_resolve")
 
 	// 1. config resolve (flag > env > file > default; 001/002).
 	//
@@ -151,11 +185,13 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	res.Values = setResolved(res.Values, "origin.hub_id", cfg.Origin.HubID, "derived", "derived:t1-zero-satellites")
 
 	// 2. state root + modes (004/005).
+	phase("state_root")
 	root, err := lifecycle.CheckStateRoot(cfg)
 	if err != nil {
 		return nil, err
 	}
 	// 3. secret-file modes + the argv secret scan (013).
+	phase("secrets")
 	if _, err := lifecycle.CheckSecretFiles(cfg); err != nil {
 		return nil, err
 	}
@@ -163,6 +199,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		return nil, err
 	}
 	// 4. schema_version compatibility (012).
+	phase("schema_compat")
 	if err := lifecycle.CheckSchemaCompat(root.Path, ledger.SchemaVersionV1); err != nil {
 		return nil, err
 	}
@@ -177,6 +214,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	if hostID == "" {
 		hostID = hostnameOr("unknown-host")
 	}
+	phase("ledger_open")
 	l, err := ledger.Open(ctx, ledger.Options{
 		Root:           filepath.Join(root.Path, "ledger"),
 		Rotation:       ledger.DefaultRotationPolicy(),
@@ -205,6 +243,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	d.Store = NewStore(l, actor, hostID)
 
 	// 6. the config record: the full redacted dump, one per boot/RELOAD.
+	phase("config_record")
 	if err := lifecycle.WriteConfigRecord(DraftWriter{d.Store}, res); err != nil {
 		_ = l.Close(ctx)
 		return nil, err
@@ -216,6 +255,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// would then be open while knowing no project. A config with NO declaration
 	// is not malformed — it leaves the set empty and buildSubsystems records the
 	// sentinel's refusal (§3.3a).
+	phase("projects")
 	declaredProjects, err := cfg.ProjectsSet()
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle001, err)
@@ -240,6 +280,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// target (009 pauses archival without touching ingestion). `require_redis`
 	// decides whether a Redis that cannot be reached degrades the start (§4.3 row
 	// one) or refuses the boot (row two) — and it is a decision, not a default.
+	phase("hub_gate")
 	gate, gerr := hub.GateWithPaths(cfg, root.Path, hubLedgerPath(root.Path), l.Status().File)
 	if gerr != nil {
 		d.bootFailure(ctx, types.CodeHub001, gerr)
@@ -257,6 +298,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	}
 
 	// 7. bind preflight (003) — listeners are held, never closed and reopened.
+	phase("bind_preflight")
 	probes, err := lifecycle.PreflightBinds(cfg)
 	if err != nil {
 		// The refusal is auditable: one lifecycle record, zero HTTP responses.
@@ -287,12 +329,14 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	d.HealthURL = "http://" + dashLn.Addr().String() + "/health.json"
 
 	// 8. the scrubber (SPEC-02) is a shared boundary, not a per-call construction.
+	phase("scrubber")
 	if eng, err := scrub.New(nil, nil); err == nil {
 		d.Scrubber = eng
 	}
 
 	// 9. sensors start (SPEC-03). The emit path is where an event becomes a
 	// ledger record AND, when a rule fired, a ladder observation.
+	phase("sensors_build")
 	sn, err := sensors.New(res.Values, d.emit, d.redact, time.Now)
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)
@@ -305,6 +349,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// from the resolved config. The five late-landing subsystems are built
 	// first: the registry's flow modules and the ladder's outlets hand their
 	// work to them.
+	phase("subsystems")
 	d.Subsystems = buildSubsystems(d, hostID, o.Subsystems)
 
 	// The ingest listener: held for the sentinel when one was built, closed
@@ -317,6 +362,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		ingestLn = nil
 	}
 
+	phase("registry")
 	reg, err := registry.New(registry.RegistryDeps{
 		Append: func(rec types.Record) (types.Record, error) {
 			return l.Append(ctx, types.RecordDraft{
@@ -361,6 +407,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// step runs through the same play engine the ladder uses. A declared library
 	// that cannot be built is a boot refusal (SPEC-12 §3.1c), never a silent
 	// fall back to "off".
+	phase("skill_library")
 	library, err := buildSkillLibrary(d, hostID, NewClock(started), o.Subsystems)
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle001, err)
@@ -373,12 +420,14 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// agent stage refuses with TROUBLE-LADDER-021 rather than fabricating a model).
 	// A declared table that cannot be built is a config refusal, recorded with
 	// TROUBLE-LIFECYCLE-001 (SPEC-12 §3.1c).
+	phase("llm_port")
 	agentPort, err := llmAgentPort(d)
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle001, err)
 		return nil, err
 	}
 
+	phase("ladder")
 	d.Ladder, err = ladder.New(ladder.Deps{
 		Ledger:   d.Store,
 		Index:    d.Store,
@@ -402,26 +451,31 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 
 	// 11. sensors run only after the ladder exists: the first fired rule must
 	// find an admission path.
+	phase("sensors_probe")
 	if err := d.Sensors.Probe(ctx); err != nil {
 		log.Warn("sensors probe", "err", err)
 	}
 
 	// 12. checker.alarm mirror (SPEC-12 §3.3): the daemon is the only ledger
 	// writer, so alarms the checker wrote while it was down become records now.
+	phase("checker_mirror")
 	d.mirrorCheckerAlarms(ctx)
 
 	// 13. the dashboard, on the listener the preflight already holds.
+	phase("dashboard_config")
 	d.DashConfig = dashboardConfig(cfg)
 	if err := dashboard.ValidateConfig(d.DashConfig); err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle001, err)
 		return nil, err
 	}
+	phase("sensors_start")
 	if err := d.Sensors.Start(ctx); err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)
 		return nil, err
 	}
 	// The preflight's listener, not a second bind: SPEC-12 §3.2 keeps the fd so
 	// the check and the serve cannot disagree (dashboard.ServeOn).
+	phase("dashboard_serve")
 	go func() {
 		if err := dashboard.ServeOn(ctx, d.DashConfig, d.dashboardDeps(dashLn), dashLn); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("dashboard", "err", err)
@@ -432,6 +486,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// listener accepts traffic (SPEC-13 §4.1 step 3), so no request can be
 	// 200-acked into a queue nobody drains. The ladder exists by now, so a queued
 	// `group` record finds an admission path exactly as the local path does.
+	phase("hub_runtime")
 	if err := startHubRuntime(ctx, d); err != nil {
 		d.bootFailure(ctx, hubBootCodeOf(err), err)
 		return nil, err
@@ -442,6 +497,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// → sentinel (a group record arriving before the ladder exists would find
 	// no admission path; the sentinel's own LedgerWait backpressure covers the
 	// residual race, and Drain stops ingest first).
+	phase("sentinel_start")
 	if d.Subsystems.Sentinel != nil && d.sentinelLn != nil {
 		if err := d.Subsystems.Sentinel.Start(ctx); err != nil {
 			d.bootFailure(ctx, types.CodeLifecycle003, err)
@@ -455,6 +511,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		}()
 	}
 
+	phase("background_loops")
 	// 13c. the background loops of research (capability probe), the issue desk
 	// (healthchecks, quiet-close sweep, spool replay) and the flow (the spawn
 	// queue's durable drain, the registration probe).
@@ -490,6 +547,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		}()
 	}
 
+	phase("ready")
 	close(d.ready)
 	d.notify.ready(d.statusLine())
 	if o.OnReady != nil {

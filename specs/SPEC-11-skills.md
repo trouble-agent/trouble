@@ -280,10 +280,13 @@ Rules, each of which a §7 test falsifies:
    never passed to a runner: `RunStep` takes a step INDEX and reads it from the parsed frontmatter.
 3. **The parse is a documented subset, and unsupported syntax FAILS LOUD.** Supported: flat `key:`
    scalars, one level of nesting (the `trouble:` block), `- ` list items with scalar keys, block
-   scalars (`>`, `>-`, `|`, `|-`) for multi-line values, and `#` comments. Unsupported (a deeper nesting, a list of
-   lists, a tab indent, a duplicate key, a `[[…]]` header, a value that runs past the frontmatter
-   delimiter) is refused with the file, line and key named. A hand-rolled subset that silently ignores
-   what it cannot read is how a step disappears from a reviewed skill.
+   scalars (`>`, `>-`, `|`, `|-`) for multi-line values, and `#` comments. Unsupported (a deeper
+   nesting, a list of lists, a tab indent, a duplicate key, a `[[…]]` header, a value that runs past
+   the frontmatter delimiter) is refused with the file named — plus the **line** where the syntax is
+   line-oriented (an unparsable line, a tab indent, a header, a duplicate key, a mis-indented key, an
+   unterminated frontmatter) and the **key** where the refusal is about a value's shape (a nested arg
+   value, a module name that is not a descriptor name, a missing name or description). A hand-rolled
+   subset that silently ignores what it cannot read is how a step disappears from a reviewed skill.
 4. **Per-file isolation.** One malformed `SKILL.md` is refused (a `refused` record with the reason) and
    the rest of the directory still loads: a broken draft must not blind the whole library.
 5. **The directory must not be a local privilege escalation.** A `local_dir` (or any ancestor up to the

@@ -123,6 +123,11 @@ const (
 	PhaseCanaryFailed      = "canary_failed"
 	PhaseStats             = "stats"
 	PhasePullFailed        = "pull_failed"
+	// The local SKILL.md library (SPEC-11 §4.7a, v0.1.1b): a scan and one record
+	// per refused file and per executed step.
+	PhaseLibraryLoaded  = "library_loaded"
+	PhaseLibraryRefused = "library_refused"
+	PhaseStepExecuted   = "step_executed"
 )
 
 // phaseRecord writes one phase record with its required payload fields (§4.7).

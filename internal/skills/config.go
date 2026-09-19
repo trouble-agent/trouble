@@ -41,7 +41,15 @@ func DefaultConfig() types.SkillsConfig {
 		DemoteAfterFailures: 2,
 		RetainVersions:      2,
 		GitBinary:           "git",
-		AutoAcceptModules:   []string{"proc.connections", "proc.top"},
+		// The local SKILL.md library (§2b) ships OFF: nothing on disk is read and
+		// no step can run until the operator names local_dir.
+		LocalEnabled:      false,
+		LocalDir:          "",
+		LocalMaxBytes:     DefaultLocalMaxBytes,
+		LocalMaxSkills:    DefaultLocalMaxSkills,
+		LocalMaxSteps:     DefaultLocalMaxSteps,
+		LocalStepTimeout:  DefaultLocalStepTimeout,
+		AutoAcceptModules: []string{"proc.connections", "proc.top"},
 	}
 }
 
@@ -80,31 +88,39 @@ type wireDoc struct {
 }
 
 type skillsWire struct {
-	Enabled             *bool               `toml:"enabled"`
-	SourcePath          string              `toml:"source_path"`
-	SourceURL           string              `toml:"source_url"`
-	SourceRef           string              `toml:"source_ref"`
-	RefMode             string              `toml:"ref_mode"`
-	PullInterval        string              `toml:"pull_interval"`
-	PullJitterPct       *int                `toml:"pull_jitter_pct"`
-	PullOnBoot          *bool               `toml:"pull_on_boot"`
-	PullTimeout         string              `toml:"pull_timeout"`
-	PullMaxBytes        int64               `toml:"pull_max_bytes"`
-	RequireSignature    *bool               `toml:"require_signature"`
-	Approve             string              `toml:"approve"`
-	CanaryHostID        string              `toml:"canary_host_id"`
-	CanaryValidity      string              `toml:"canary_validity"`
-	CanaryOverride      *bool               `toml:"canary_override"`
-	AutoAcceptEnabled   *bool               `toml:"auto_accept_enabled"`
-	AutoAcceptThreshold *int                `toml:"auto_accept_threshold"`
-	AutoAcceptWindow    string              `toml:"auto_accept_window"`
-	AutoAcceptModules   []string            `toml:"auto_accept_modules"`
-	MaxHold             string              `toml:"max_hold"`
-	DemoteAfterFailures *int                `toml:"demote_after_failures"`
-	RetainVersions      *int                `toml:"retain_versions"`
-	StateDir            string              `toml:"state_dir"`
-	GitBinary           string              `toml:"git_binary"`
-	Signers             []types.SkillSigner `toml:"signers"`
+	Enabled             *bool    `toml:"enabled"`
+	SourcePath          string   `toml:"source_path"`
+	SourceURL           string   `toml:"source_url"`
+	SourceRef           string   `toml:"source_ref"`
+	RefMode             string   `toml:"ref_mode"`
+	PullInterval        string   `toml:"pull_interval"`
+	PullJitterPct       *int     `toml:"pull_jitter_pct"`
+	PullOnBoot          *bool    `toml:"pull_on_boot"`
+	PullTimeout         string   `toml:"pull_timeout"`
+	PullMaxBytes        int64    `toml:"pull_max_bytes"`
+	RequireSignature    *bool    `toml:"require_signature"`
+	Approve             string   `toml:"approve"`
+	CanaryHostID        string   `toml:"canary_host_id"`
+	CanaryValidity      string   `toml:"canary_validity"`
+	CanaryOverride      *bool    `toml:"canary_override"`
+	AutoAcceptEnabled   *bool    `toml:"auto_accept_enabled"`
+	AutoAcceptThreshold *int     `toml:"auto_accept_threshold"`
+	AutoAcceptWindow    string   `toml:"auto_accept_window"`
+	AutoAcceptModules   []string `toml:"auto_accept_modules"`
+	MaxHold             string   `toml:"max_hold"`
+	DemoteAfterFailures *int     `toml:"demote_after_failures"`
+	RetainVersions      *int     `toml:"retain_versions"`
+	StateDir            string   `toml:"state_dir"`
+	GitBinary           string   `toml:"git_binary"`
+	// The local SKILL.md library (SPEC-11 §2b). Strict like every other key: an
+	// unknown `local_*` spelling is refused by name, not defaulted away.
+	LocalEnabled     *bool               `toml:"local_enabled"`
+	LocalDir         string              `toml:"local_dir"`
+	LocalMaxBytes    *int64              `toml:"local_max_bytes"`
+	LocalMaxSkills   *int                `toml:"local_max_skills"`
+	LocalMaxSteps    *int                `toml:"local_max_steps"`
+	LocalStepTimeout string              `toml:"local_step_timeout"`
+	Signers          []types.SkillSigner `toml:"signers"`
 }
 
 // undecodedKeys lists, sorted, the keys a decoded document carried that no field
@@ -219,6 +235,24 @@ func LoadConfig(doc []byte) (types.SkillsConfig, error) {
 	if sw.GitBinary != "" {
 		cfg.GitBinary = sw.GitBinary
 	}
+	if sw.LocalEnabled != nil {
+		cfg.LocalEnabled = *sw.LocalEnabled
+	}
+	if sw.LocalDir != "" {
+		cfg.LocalDir = sw.LocalDir
+	}
+	if sw.LocalMaxBytes != nil {
+		cfg.LocalMaxBytes = *sw.LocalMaxBytes
+	}
+	if sw.LocalMaxSkills != nil {
+		cfg.LocalMaxSkills = *sw.LocalMaxSkills
+	}
+	if sw.LocalMaxSteps != nil {
+		cfg.LocalMaxSteps = *sw.LocalMaxSteps
+	}
+	if sw.LocalStepTimeout != "" {
+		cfg.LocalStepTimeout = types.Duration(sw.LocalStepTimeout)
+	}
 	switch {
 	case len(sw.Signers) > 0:
 		cfg.Signers = sw.Signers
@@ -231,6 +265,9 @@ func LoadConfig(doc []byte) (types.SkillsConfig, error) {
 // ValidateConfig is the §4.1 source discipline plus the enum rules. A credential
 // embedded in a source URL is refused here, never dialled.
 func ValidateConfig(cfg types.SkillsConfig) error {
+	if err := ValidateLibraryConfig(cfg); err != nil {
+		return err
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -338,6 +375,33 @@ func Explain(cfg types.SkillsConfig) []string {
 		fmt.Sprintf("skills.approve = %q", cfg.Approve),
 		fmt.Sprintf("skills.canary_host_id = %q", cfg.CanaryHostID),
 		fmt.Sprintf("skills.signers = [%s]", strings.Join(SignerList(cfg), ", ")),
+		fmt.Sprintf("skills.local_enabled = %t", cfg.LocalEnabled),
+		fmt.Sprintf("skills.local_dir = %q", cfg.LocalDir),
 	}
 	return lines
+}
+
+// ValidateLibraryConfig enforces the §2b local-library keys. It runs whatever the
+// pull loop's own switch says: the library is a separate surface, so an enabled
+// library with no directory is refused here even when the loop is off.
+func ValidateLibraryConfig(cfg types.SkillsConfig) error {
+	if !cfg.LocalEnabled {
+		return nil
+	}
+	switch {
+	case strings.TrimSpace(cfg.LocalDir) == "":
+		return newErr(types.CodeSkills001, ReasonConfig,
+			"local_enabled = true needs local_dir: the library root is the operator's statement")
+	case strings.Contains(cfg.LocalDir, ".."), strings.Contains(cfg.LocalDir, "://"):
+		return newErr(types.CodeSkills001, ReasonConfig,
+			"local_dir %q must be a plain absolute path (no .., no URL)", cfg.LocalDir)
+	}
+	if cfg.LocalMaxBytes <= 0 || cfg.LocalMaxSkills <= 0 || cfg.LocalMaxSteps <= 0 {
+		return newErr(types.CodeSkills001, ReasonConfig,
+			"the local_max_bytes/local_max_skills/local_max_steps caps must be > 0")
+	}
+	if cfg.LocalStepTimeout != "" && cfg.LocalStepTimeout.Std() <= 0 {
+		return newErr(types.CodeSkills001, ReasonConfig, "local_step_timeout must be > 0")
+	}
+	return nil
 }

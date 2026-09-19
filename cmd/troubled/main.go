@@ -48,7 +48,7 @@ the daemon's own flags:
   -h, --help        this text
 
 config keys (flag > env > file > default, SPEC-12 §3.1):
-  every key the resolver registers is also a flag: a.b_c -> --a-b-c, with the
+  every key the resolver registers is also a flag: a.b_c -> --a-b_c, with the
   value in the next argument or after '='. A flag beats the environment, the file
   and the default. An unknown key is refused by name (TROUBLE-LIFECYCLE-001) and
   the daemon exits 13. A single-dash token that is not -v or -h is refused for the

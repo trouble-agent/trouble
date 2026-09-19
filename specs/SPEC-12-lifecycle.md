@@ -111,7 +111,7 @@ injects the resulting `Actor` into the ledger writer constructor (§8).
 
 ### 2.5 Config key naming (mechanical, no hand-written mappings)
 
-`a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b-c`. Env vars are read only with the `TROUBLE_` prefix. A dot
+`a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b_c`. Env vars are read only with the `TROUBLE_` prefix. A dot
 becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secrets.environment_file` is
 `--secrets-environment_file`, `lifecycle.unit_name` is `--lifecycle-unit_name`. Every registered key of §3.1
 is flag-addressable in that form except the six §2.5a names — five of them are declarations rather than

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -169,6 +170,20 @@ type Config struct {
 		Fsync           string `toml:"fsync"`
 		FsyncWindowMS   int    `toml:"fsync_window_ms"`
 	} `toml:"spool"`
+
+	// Flow is the SPEC-08 §3.9a dispatch queue's bound set, resolved as five
+	// ordinary registry keys (SPEC-12 §3.1d). Before these keys the queue's
+	// limits were compile-time constants in `internal/flow`, so an operator
+	// could neither tune them nor read them out of `trouble config explain`.
+	// The defaults are exactly the constants §3.9a states, so a host that sets
+	// none of them keeps the documented posture.
+	Flow struct {
+		SpoolMaxEntries  int            `toml:"spool_max_entries"`
+		SpoolTTL         types.Duration `toml:"spool_ttl"`
+		SpoolMaxAttempts int            `toml:"spool_max_attempts"`
+		ReplayEvery      types.Duration `toml:"replay_every"`
+		ReplayBatch      int            `toml:"replay_batch"`
+	} `toml:"flow"`
 
 	Verify struct {
 		ZoneWindows map[string]types.Duration `toml:"zone_windows"`
@@ -507,6 +522,15 @@ func defaults() *Config {
 	c.Spool.GapReserveBytes = 2097152
 	c.Spool.Fsync = "group"
 	c.Spool.FsyncWindowMS = 200
+	// SPEC-12 §3.1d: the SPEC-08 §3.9a queue's five bounds. Every default is
+	// the number that section already pins (256 entries, a 72 h TTL, a 5
+	// attempt retry budget, a 5 s drain cadence, 100 entries per drain), so the
+	// documented defaults and the resolvable defaults cannot drift apart.
+	c.Flow.SpoolMaxEntries = 256
+	c.Flow.SpoolTTL = "72h"
+	c.Flow.SpoolMaxAttempts = 5
+	c.Flow.ReplayEvery = "5s"
+	c.Flow.ReplayBatch = 100
 	c.Verify.ZoneWindows = map[string]types.Duration{
 		"loopback": "10m",
 		"lan":      "15m",
@@ -679,6 +703,44 @@ func asDuration(v any) (types.Duration, error) {
 		return "", err
 	}
 	return types.Duration(s), nil
+}
+
+// asPositiveInt is asInt plus the bound rule the SPEC-12 §3.1d keys carry: a
+// queue bound of zero (or less) is not a bound, so it is refused by name at
+// resolution — the same TROUBLE-LIFECYCLE-001 class every other bad key value
+// is — rather than resolved into an unbounded queue.
+func asPositiveInt(v any) (int, error) {
+	i, err := asInt(v)
+	if err != nil {
+		return 0, err
+	}
+	if i <= 0 {
+		return 0, fmt.Errorf("must be a positive integer, got %d", i)
+	}
+	return i, nil
+}
+
+// asPositiveDuration is asDuration plus the bound rule: the value must be a
+// parsable Go duration string AND strictly positive. `types.Duration.Std()`
+// answers 0 for both an empty and an unparsable value, so a bare positivity
+// check on the parsed result would accept garbage as "zero"; parsing here names
+// the offending text instead.
+func asPositiveDuration(v any) (types.Duration, error) {
+	d, err := asDuration(v)
+	if err != nil {
+		return "", err
+	}
+	if d == "" {
+		return "", fmt.Errorf("must be a positive duration, got an empty value")
+	}
+	std, perr := time.ParseDuration(string(d))
+	if perr != nil {
+		return "", fmt.Errorf("must be a Go duration string (for example 72h, 5m, 30s), got %q", string(d))
+	}
+	if std <= 0 {
+		return "", fmt.Errorf("must be a positive duration, got %q", string(d))
+	}
+	return d, nil
 }
 
 func applyToMapStringDuration(m map[string]types.Duration, v any) error {
@@ -1218,6 +1280,40 @@ func registry(c *Config) []keyMeta {
 		{"spool.gap_reserve_bytes", "spool", "gap_reserve_bytes", c.Spool.GapReserveBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Spool.GapReserveBytes = i; return err }},
 		{"spool.fsync", "spool", "fsync", c.Spool.Fsync, func(cfg *Config, v any) error { s, err := asString(v); cfg.Spool.Fsync = s; return err }},
 		{"spool.fsync_window_ms", "spool", "fsync_window_ms", c.Spool.FsyncWindowMS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Spool.FsyncWindowMS = i; return err }},
+		// SPEC-08 §3.9a × SPEC-12 §3.1d: the flow's durable dispatch queue is
+		// bounded by five keys registered here leaf by leaf, so the queue's
+		// limits resolve with the ordinary precedence (flag > env > file >
+		// default), the ordinary provenance and one `trouble config explain`
+		// row each — instead of being compile-time constants in internal/flow.
+		// Each bound is refused when it is not strictly positive: a zero bound
+		// is not a bound, and resolving it would hand the daemon an unbounded
+		// queue (the refusal is the TROUBLE-LIFECYCLE-001 class this resolver
+		// already carries for a bad key value).
+		{"flow.spool_max_entries", "flow", "spool_max_entries", c.Flow.SpoolMaxEntries, func(cfg *Config, v any) error {
+			i, err := asPositiveInt(v)
+			cfg.Flow.SpoolMaxEntries = i
+			return err
+		}},
+		{"flow.spool_ttl", "flow", "spool_ttl", c.Flow.SpoolTTL, func(cfg *Config, v any) error {
+			d, err := asPositiveDuration(v)
+			cfg.Flow.SpoolTTL = d
+			return err
+		}},
+		{"flow.spool_max_attempts", "flow", "spool_max_attempts", c.Flow.SpoolMaxAttempts, func(cfg *Config, v any) error {
+			i, err := asPositiveInt(v)
+			cfg.Flow.SpoolMaxAttempts = i
+			return err
+		}},
+		{"flow.replay_every", "flow", "replay_every", c.Flow.ReplayEvery, func(cfg *Config, v any) error {
+			d, err := asPositiveDuration(v)
+			cfg.Flow.ReplayEvery = d
+			return err
+		}},
+		{"flow.replay_batch", "flow", "replay_batch", c.Flow.ReplayBatch, func(cfg *Config, v any) error {
+			i, err := asPositiveInt(v)
+			cfg.Flow.ReplayBatch = i
+			return err
+		}},
 		{"verify.zone_windows", "verify", "zone_windows", c.Verify.ZoneWindows, func(cfg *Config, v any) error { return applyToMapStringDuration(cfg.Verify.ZoneWindows, v) }},
 		{"escalate.channels", "escalate", "channels", c.Escalate.Channels, func(cfg *Config, v any) error {
 			switch x := v.(type) {

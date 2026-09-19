@@ -27,7 +27,7 @@ func TestFlowDepsWiresAQueueTheFlowCanReplayWithTheDeskOff(t *testing.T) {
 	d := &Daemon{Cfg: lifecycle.Config{StateRoot: stateRoot}}
 	clk := NewClock(time.Now())
 
-	spool, err := newFlowSpool(d, clk)
+	spool, err := newFlowSpool(d, clk, flowSpoolBounds(d.Cfg))
 	if err != nil {
 		t.Fatalf("newFlowSpool: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestFlowDepsWiresNoQueueWhenTheStoreCannotBeBuilt(t *testing.T) {
 		t.Fatalf("block the spool path: %v", err)
 	}
 	d := &Daemon{Cfg: lifecycle.Config{StateRoot: stateRoot}}
-	spool, err := newFlowSpool(d, NewClock(time.Now()))
+	spool, err := newFlowSpool(d, NewClock(time.Now()), flowSpoolBounds(d.Cfg))
 	if err == nil {
 		t.Fatalf("newFlowSpool accepted a blocked path (root=%v)", spool)
 	}

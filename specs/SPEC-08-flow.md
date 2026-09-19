@@ -457,17 +457,25 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
   marshalled `SpawnRequest`, already scrubbed (SPEC-02), so the queue is not a leak surface. The
   directory is `0700` and is proved writable when the store is built: a store that cannot be built is a
   recorded refusal and leaves the flow with no queue rather than an in-memory illusion.
-- **Bounds.** Every bound has a default taken from the number this suite already pins, and every eviction
-  is recorded — the bound costs evidence, never silence.
+- **Bounds.** Every bound is an operator-tunable registry key — the five `flow.*` keys of SPEC-12 §3.1d
+  (`flow.spool_max_entries`, `flow.spool_ttl`, `flow.spool_max_attempts`, `flow.replay_every`,
+  `flow.replay_batch`) — and every bound has a default taken from the number this suite already pins, which
+  is the value a host that declares no `[flow]` table runs. Every eviction is recorded: the bound costs
+  evidence, never silence. The composition root resolves the five keys once and hands the SAME resolved set
+  to both halves, the store (`flow.NewSpool`) and the flow (`flow.NewFlowWithBounds`), so neither the queue's
+  limits nor the loop that drains it can end up on the compiled constants while an operator's key sits
+  unread. A key that is not strictly positive (zero, negative, `0s`, or a duration string that does not
+  parse) is refused at resolution with TROUBLE-LIFECYCLE-001 naming the key, before the store is built: a
+  resolved zero would be an unbounded queue, which is the posture this section exists to make impossible.
 
-| Bound | Default | Behaviour at the bound |
-|---|---|---|
-| `max_entries` | 256 (the §3.9 in-memory bound) | evict the OLDEST entry — never the incoming one — and record the eviction |
-| `spool_ttl` | 72 h (SPEC-09 §3.7's TTL) | drop the entry with `{"stage":"dispatch","decision":"failed","dispatch_state":"dropped","drop_reason":"ttl"}` |
-| `max_attempts` | 5 (§3.9's bounded retry budget) | drop the entry with `drop_reason:"attempts"` |
-| an undecodable `payload` | — | drop the entry with `drop_reason:"corrupt"` (a shape this build cannot read is not a retryable failure) |
-| replay cadence | 5 s | the drain tick; a queue with nothing due costs one directory listing |
-| `replay_batch` | 100 entries | entries per drain |
+| Bound | SPEC-12 key | Default | Behaviour at the bound |
+|---|---|---|---|
+| `max_entries` | `flow.spool_max_entries` | 256 (the §3.9 in-memory bound) | evict the OLDEST entry — never the incoming one — and record the eviction |
+| `spool_ttl` | `flow.spool_ttl` | 72 h (SPEC-09 §3.7's TTL) | drop the entry with `{"stage":"dispatch","decision":"failed","dispatch_state":"dropped","drop_reason":"ttl"}` |
+| `max_attempts` | `flow.spool_max_attempts` | 5 (§3.9's bounded retry budget) | drop the entry with `drop_reason:"attempts"` |
+| an undecodable `payload` | — (not a bound) | — | drop the entry with `drop_reason:"corrupt"` (a shape this build cannot read is not a retryable failure) |
+| replay cadence | `flow.replay_every` | 5 s | the drain tick; a queue with nothing due costs one directory listing |
+| `replay_batch` | `flow.replay_batch` | 100 entries | entries per drain |
 
 - **Replay rules.** Order is `(next_try_ts asc, ts asc, id asc)`. One in-flight dispatch per `IdemKey`,
   so a replay can never race the original attempt or a second replay of the same entry. Re-dispatch goes
@@ -516,6 +524,15 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
   asserts the composition root: with the issue desk OFF (the shipped posture) `flowDeps` still hands the
   flow a queue it can replay, the wired sink writes one `0600` entry under the state root, and a store
   that cannot be built leaves the flow reporting "no queue" instead of claiming durability.
+- **The bounds are proven where they are wired.** `internal/lifecycle/flow_bounds_test.go` pins the five
+  SPEC-12 §3.1d keys (defaults, a half-specified `[flow]` table, flag > env > file > default, the explain
+  rows, and the non-positive/unparsable refusals with the key named);
+  `internal/app/flow_bounds_wiring_test.go` drives the composition root's own seams (`flowSpoolBounds`,
+  `newFlowSpool`, `newFlowSubsystem`) and proves an operator's key is the bound in force on BOTH halves: four
+  writes at `flow.spool_max_entries = 3` leave three entries and evict the oldest where the compiled default
+  keeps four, and a two-hour-old entry is dropped with `drop_reason:"ttl"` under `flow.spool_ttl = 1h` where
+  the compiled default never TTL-drops it. Reverting either half of the wiring — the projection or the
+  flow's construction — makes that test fail, which is what makes it evidence rather than a restatement.
 
 ### 3.10 One-fix-per-sig lease
 
@@ -899,6 +916,7 @@ All tests are `internal/flow` package tests plus one end-to-end harness; `-count
 | `flow_e2e_test.go` | **AC-21**: scripted bad line in an allowed repo, `hotfix.enabled=true` → direct row + spawn within 60 s, patch lands in the worktree only (`git -C <main> status --porcelain` empty), window passes → promotion prompt, recurrence → rollback + reopen. **AC-9**: both drivers file a row and the router path round-trips. **AC-19**: the timeline function returns filed → foreman → patch → verify → promote with PR link. **AC-26**: `full` + `auto-after-verify` runs detection → row → spawn → verify → promote → skill candidate with zero human actions, and the kill-switch before the spawn yields exactly one parked stage and no spawn | AC-21 `trig_to_spawn_ms ≤ 60 000` (asserted on the recorded value); main checkout diff empty; AC-19 timeline complete and ordered; AC-26 zero human actors in the ledger slice |
 | `testdata/` | strict board (10 000 rows), non-strict legacy board, empty board, foreign-rewrite board, config set (valid, `/tmp` base, `max_concurrent=5`, unknown priority class) | fixtures reused by every test above |
 | `spool_test.go` | §3.9a on the shipped store: an `Enqueue`-only sink (the desk adapter's shape) yields EXACTLY ONE outcome — an honest `unspooled` record naming the coupling — and zero `spooled` claims; a typed-nil store is not adopted; with the flow's own store a parked spawn is one `0600` file under `<state_root>/spool/flow/spawn/` and the record says `spooled`; a drain re-dispatches with the SAME idem key against a real HTTP router, deletes the entry on success, re-drains to zero, and leaves an empty queue after a simulated restart; an entry written by one store instance is listed, decoded and replayed by a second one; `attempts`, `ttl`, `corrupt` and overflow each drop the entry with a `flow` + `spawn` record pair and zero `gap` records; overflow evicts the OLDEST entry, never the incoming one; `Flow.Run` drains the queue on its ticker. `flow_spool_wiring_test.go` (internal/app) drives the REAL `flowDeps` with the issue desk OFF (the shipped posture): the flow still receives a replayable queue, the wired sink writes one `0600` entry under the state root, and a store that cannot be built leaves the flow reporting "no queue" | 0 `spooled` records while no replayable queue is wired; exactly 1 file per entry, mode `0600`, directory `0700`; queue depth 0 after a successful replay and 0 after the restart; 2 overflow drops for 4 writes at a bound of 2; the loop test's deadline is generous by design (wall-clock driven), every other assertion is clock-injected |
+| `internal/app/flow_bounds_wiring_test.go` | the §3.9a bounds as resolved SPEC-12 §3.1d keys at the composition root: `flowSpoolBounds` over a config file with `[flow] spool_max_entries = 3` carries 3 and the §3.9a defaults for the four undeclared keys; four `Put`s through `newFlowSpool` leave three entries, report exactly one `overflow` drop for the OLDEST id and leave it off disk — where the same four writes with no `[flow]` table leave four; a two-hour-old, undecodable entry is dropped with `drop_reason:"ttl"` through `newFlowSubsystem` + `Replay` under `flow.spool_ttl = 1h`, and never with `"ttl"` under the compiled default | 2 eviction cases (configured 3 → depth 3 + oldest gone; default → depth 4); the TTL case is a 2-row table whose control row must NOT produce a `ttl` drop; reverting either the projection or the flow's construction fails the suite |
 
 Regression numbers carried from the judges' measurements: worktree creation cost is a full checkout
 (68 MB / 242 MB / 464 MB / 8.9 GB measured) so the disk gate and cap are exercised with those sizes

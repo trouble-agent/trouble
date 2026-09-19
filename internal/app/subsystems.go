@@ -397,11 +397,17 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	// built is a recorded refusal and leaves the flow with no queue — which every
 	// dispatch record then states (`dispatch_state="unspooled"` + the coupling),
 	// rather than a durability claim nothing backs.
-	flowQueue, qErr := newFlowSpool(d, clock)
+	//
+	// The bounds come from the resolved `flow.*` keys (SPEC-12 §3.1d) and reach
+	// BOTH halves — the store and the flow — from this one value, so no path can
+	// run the queue on the compiled constants while the operator's key sits
+	// unread.
+	flowBounds := flowSpoolBounds(d.Cfg)
+	flowQueue, qErr := newFlowSpool(d, clock, flowBounds)
 	if qErr != nil {
 		recordSubsystemRefusal(d, subs, ctx, "flow_spool", qErr)
 	}
-	if fl, err := flow.NewFlow(flowCfg, ladderCfgGates(d)); err != nil {
+	if fl, err := newFlowSubsystem(d, flowCfg, flowBounds); err != nil {
 		recordSubsystemRefusal(d, subs, ctx, "flow", err)
 	} else {
 		fl.SetDeps(flowDeps(d, subs, hostID, actor, clock, flowQueue))
@@ -426,13 +432,39 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	return subs
 }
 
+// flowSpoolBounds projects the resolved SPEC-12 §3.1d `flow.*` keys onto the
+// SPEC-08 §3.9a bound set. `WithDefaults()` is the last step on purpose: it fills
+// any bound the config left unset (an embedder's hand-built lifecycle.Config, a
+// caller that resolved no key at all), so the composition root can never hand the
+// store or the flow a zero bound — and a host that sets ONE key still gets the
+// documented defaults for the other four.
+func flowSpoolBounds(cfg lifecycle.Config) flow.SpoolBounds {
+	return flow.SpoolBounds{
+		MaxEntries:  cfg.Flow.SpoolMaxEntries,
+		TTL:         cfg.Flow.SpoolTTL.Std(),
+		MaxAttempts: cfg.Flow.SpoolMaxAttempts,
+		ReplayEvery: cfg.Flow.ReplayEvery.Std(),
+		ReplayBatch: cfg.Flow.ReplayBatch,
+	}.WithDefaults()
+}
+
 // newFlowSpool builds the flow's own durable dispatch queue (§3.9a) under the
-// state root. The bounds are the §3.9a defaults, which mirror the numbers the two
-// adjacent contracts already pin; no new registry key is minted here, so the
-// queue's path and limits are composition, not operator configuration.
-func newFlowSpool(d *Daemon, clk Clock) (*flow.Spool, error) {
-	return flow.NewSpool(flow.SpoolPath(d.Cfg.StateRoot), flow.SpoolBounds{},
+// state root, bounded by the SPEC-12 §3.1d `flow.*` keys the caller resolved.
+// The bounds are a parameter rather than a second read of the config so the store
+// and the flow are bounded by the SAME value the operator set: the queue's path
+// is composition, its limits are operator configuration.
+func newFlowSpool(d *Daemon, clk Clock, b flow.SpoolBounds) (*flow.Spool, error) {
+	return flow.NewSpool(flow.SpoolPath(d.Cfg.StateRoot), b,
 		func() time.Time { return clk.Now() })
+}
+
+// newFlowSubsystem builds the flow itself with the SAME bound set the store got,
+// on top of the live autonomy gates. It is a named seam for the same reason
+// newFlowSpool is one: the wiring test drives exactly the call the daemon makes,
+// so "the flow runs on the compiled constants while the operator's key sits
+// unread" is a failing test rather than a code-reading exercise.
+func newFlowSubsystem(d *Daemon, cfg types.FlowConfig, b flow.SpoolBounds) (*flow.Flow, error) {
+	return flow.NewFlowWithBounds(cfg, ladderCfgGates(d), b)
 }
 
 // flowDeps wires the flow's collaborator set. The spawn seam is the REAL

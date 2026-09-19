@@ -208,6 +208,11 @@ real, has a default, and appears in the explain dump.
 | `spool.budget_bytes` | `268435456` (256MB) | brief §1.P |
 | `spool.gap_reserve_bytes` | `2097152` (2MB) | drop-oldest never touches this: loss notices must survive |
 | `spool.fsync` / `spool.fsync_window_ms` | `group` / `200` | same group-commit window as the ledger |
+| `flow.spool_max_entries` | `256` | SPEC-08 §3.9a: the flow-owned dispatch queue's entry bound. At it the OLDEST entry is evicted — never the incoming one — and each eviction is a `flow` + `spawn` record pair. `0` is refused: a bound of zero is not a bound |
+| `flow.spool_ttl` | `72h` | the queued dispatch's maximum age; past it the entry is dropped with `drop_reason:"ttl"` |
+| `flow.spool_max_attempts` | `5` | replay attempts per entry before it is dropped with `drop_reason:"attempts"` |
+| `flow.replay_every` | `5s` | the flow's own drain cadence (`Flow.Run`); a queue with nothing due costs one directory listing |
+| `flow.replay_batch` | `100` | entries per drain |
 | `verify.zone_windows` | `loopback=10m lan=15m tailnet=20m public=30m` | zone-aware windows; never below a rule's `verify_window` |
 | `escalate.channels` | `[]` | ordered argv arrays; empty ⇒ install check fails with 016 |
 | `escalate.timeout` | `10s` per channel | |
@@ -357,6 +362,39 @@ Secret handling: the table carries references only. `key_ref` names an environme
 reaches the process through `[secrets] environment_file` (§3.1) — so the boot `config` record, the explain
 dump, the `agent_run` payload and every error message can be printed without redaction because none of them
 can contain a credential.
+
+### 3.1d The `[flow]` table: the SPEC-08 §3.9a dispatch queue's bounds
+
+The flow's durable dispatch queue (SPEC-08 §3.9a) is bounded by five keys, registered here leaf by leaf:
+
+```toml
+[flow]
+spool_max_entries = 256     # entries; at the bound the OLDEST is evicted, never the incoming one
+spool_ttl = "72h"           # maximum age of a queued dispatch
+spool_max_attempts = 5      # replay attempts per entry
+replay_every = "5s"         # the drain cadence Flow.Run ticks on
+replay_batch = 100          # entries per drain
+```
+
+Rules, pinned:
+
+- **The defaults are §3.9a's own numbers.** `256` / `72h` / `5` / `5s` / `100` are the values that section
+  states, so a host that declares no `[flow]` table runs the documented posture, and the resolvable default
+  and the documented default cannot drift apart.
+- **These are ordinary keys, not a subsystem table.** Each is registered individually, so each resolves with
+  the ordinary precedence (flag > env > file > default), the ordinary provenance and its own
+  `trouble config explain` row: `--flow-spool_max_entries`, `TROUBLE_FLOW_SPOOL_TTL`,
+  `flow.replay_batch`, and so on. There is no `[flow]`-level row and no second resolution path.
+- **A half-specified table still bounds the queue.** An unset key keeps its default of the list above, so a
+  `[flow]` table that declares one bound leaves the other four at the values §3.9a states — never at zero.
+- **A bound that is not strictly positive is a boot refusal.** A zero, a negative, a `0s`, and a duration
+  string that does not parse are each refused with **TROUBLE-LIFECYCLE-001** naming the key, at exit 13,
+  before any listener opens. A resolved zero is not "the default": it is an unbounded queue, which is the
+  posture §3.9a exists to make impossible.
+- **The values reach both halves of §3.9a.** The composition root projects the resolved set once — onto the
+  store (`flow.NewSpool`) and onto the flow itself (`flow.NewFlowWithBounds`) — so the queue's limits and
+  the loop that drains it read the same resolved bound, and no path runs on the compiled constants while an
+  operator's key sits unread.
 
 ### 3.2 State root, secret-file modes, bind preflight
 
@@ -1048,6 +1086,7 @@ Files and pass thresholds (all numbers normative regressions):
 | Test file | Cases | Threshold |
 |---|---|---|
 | `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0) |
+| `internal/lifecycle/flow_bounds_test.go` | the §3.1d `flow.*` keys: the five defaults with NO file, env or flag (256 / 72h / 5 / 5s / 100, each `source=default`/`builtin`); a `[flow]` table resolves and a HALF-specified one leaves the other four at those defaults; flag > env > file > default with the winning `source`/`source_ref` on each row; all five present exactly once in the explain dump (plus the `--key` filter form); a zero, a negative, a `0s`, an empty and an unparsable duration refused through all three sources | 5 defaults + 1 file/1 half-table resolve + 3 precedence rows + 5 explain rows + 16 refusal cases; every refusal 001 AND naming the key; 0 cases resolving to a non-positive bound |
 | `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the five non-addressable keys asserted by name and reason (three tables, two refused by the argv scan); a secret-shaped flag value driven through a real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a secret-shaped flag value still exits 13 with 013, and a control value passes the same scan |
 | `internal/lifecycle/subsystem_test.go` | the §3.1b tables as registered keys: a documented `[issues]`/`[skills]` opt-in resolves, carries the table text verbatim and the declared key names, and produces ONE `ConfigValue` per table (no per-sub-key row); a root-level dotted key declares the table; an absent table resolves to the `builtin` default `not declared`; the file-sourced row keeps `file` provenance and carries no value of the table (a declared `api_key_file` path appears zero times in the marshalled dump); a top-level typo, an unregistered sibling table and a repeated table are 001 (the last naming the repeated header); a scalar source (`TROUBLE_ISSUES`, `--skills`) is refused by name | every case asserted; 100 % of the table's declared keys named in the row; 0 values of a table anywhere in the explain dump |
 | `internal/app/subsystems_config_test.go` | the composition root's file→subsystem path: a valid `[issues]` opt-in builds a desk whose configured driver is the one that answers the boot probe, and a valid `[skills]` opt-in builds a loop holding the configured source; an invalid file (desk on with no enabled driver, loop on with no source) boots BOTH refused, each row carrying its own code and a reason naming the key, `status` not `ok`, one `subsystem_not_built` record per row; an unknown key inside a table is refused by name; the shipped example with its own documented opt-in applied to its own bytes boots `ok` | 12 table-driven resolver rows + 3 boots; 0 subsystems built from a refused declaration; 0 silent defaults |

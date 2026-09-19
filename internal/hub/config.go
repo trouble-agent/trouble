@@ -30,6 +30,27 @@ const (
 	DefaultArchiveInterval = time.Hour
 	DefaultArchiveFiles    = 8
 	DefaultKeepLocalGens   = 2
+	// DefaultSuperviseInterval is the recovery loop's steady-state cadence: how
+	// often the supervisor asks whether the queue is still live (attached, group
+	// present, consumer draining). It is the cadence only while the queue IS
+	// live — while it is not, the rewire is retried on the consumer's bounded
+	// backoff (nextBackoff, ≈1–2s), so a Redis that comes back is wired in about
+	// a second rather than at the next probe (SPEC-13 §4.3 "Redis returns": the
+	// rewire happens with no external trigger).
+	//
+	// Two seconds is the detection window for the one case the serve path cannot
+	// see (§2.1.1 rule 5: a cold server that still answers), and it bounds how
+	// long a sender's 429 can outlive the server it was caused by. The probes
+	// are a single XPENDING each, an order of magnitude less work than the
+	// consumer's own idle blocking read.
+	DefaultSuperviseInterval = 2 * time.Second
+	// consumerStopTimeout bounds how long a rewire waits for the previous
+	// consumer goroutine to return before REFUSING to start a second one
+	// (SPEC-13 §1 rule 3: exactly one consumer per state root). A consumer idle
+	// in XREADGROUP (BLOCK ≤ 1s) or in a bounded backoff (≤ 2s + jitter) returns
+	// as soon as its context is cancelled, so this bound is a multiple of the
+	// client's read timeout and cannot fire on a healthy queue.
+	consumerStopTimeout = 15 * time.Second
 	// DefaultDoorWait bounds how long the ingestion door waits for the
 	// consumer's append+fsync before it refuses the request. It is deliberately
 	// shorter than the sentinel's LedgerWait (2s) so the refusal — never a

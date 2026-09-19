@@ -91,10 +91,27 @@ type Runtime struct {
 	reason   atomic.Value // string
 	bootCode atomic.Value // string
 
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	consumerCancel context.CancelFunc
-	lifeCtx        context.Context
-	archivePaused  bool
+	// consumerDone closes when the goroutine registered with consumerCancel has
+	// returned. A rewire waits on it before a second consumer starts, so two
+	// consumers never share one state root (SPEC-13 §1 rule 3).
+	consumerDone  chan struct{}
+	lifeCtx       context.Context
+	archivePaused bool
+
+	// rewireMu serializes recoveries: two rewires racing would build two
+	// consumers for one state root.
+	rewireMu sync.Mutex
+	// probeFailures counts consecutive failed queue liveness probes taken while
+	// the state machine still says "up". The supervisor is the only reader and
+	// the only writer.
+	probeFailures int
+	// wake is the loss signal: markLost (the serve path that DETECTS the loss)
+	// pokes it so the supervisor retries the rewire at once instead of sleeping
+	// out the rest of its interval. Buffered and written non-blockingly, so the
+	// serve path never blocks on the recovery loop.
+	wake chan struct{}
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -156,6 +173,7 @@ func Open(ctx context.Context, cfg RuntimeConfig) (*Runtime, error) {
 		return r, nil
 	}
 	r.enabled = true
+	r.wake = make(chan struct{}, 1)
 	r.eachRoute()
 
 	if err := EnsureStateDirs(cfg.StateRoot); err != nil {
@@ -210,29 +228,50 @@ func (r *Runtime) dial(ctx context.Context) (*Client, error) {
 // attach wires a live client: gate → door → consumer. The group is created here
 // and a TROUBLE-HUB-005 refusal is returned, never swallowed: a queue nobody
 // drains must not accept traffic (SPEC-13 §5).
+//
+// Every pointer it installs is written under the runtime's lock, and the client
+// it REPLACES is released once installed: the serve path and the health surface
+// read the wiring while a rewire is in flight, and the previous client's
+// consumer has already been stopped by reconnect before this is called (so
+// closing it releases a connection nothing is using).
 func (r *Runtime) attach(ctx context.Context, c *Client) error {
 	if err := c.EnsureGroup(ctx); err != nil {
 		return err
 	}
-	r.client = c
-	r.dedup = NewDedupGate(r.redis, c)
-	r.door = NewDoor(c, r.dedup, DoorConfig{
+	gate := NewDedupGate(r.redis, c)
+	door := NewDoor(c, gate, DoorConfig{
 		Route:  RouteA,
 		HostID: r.hostID(),
 		HubID:  r.hubID(),
 		Ack:    r.cfg.AckCursor,
 		Wait:   r.redis.DoorWait,
 	})
-	r.consumer = NewConsumer(c, r.cfg.Ledger, r.dedup, r.redis).
-		WithCompletion(r.door.Complete).
+	cs := NewConsumer(c, r.cfg.Ledger, gate, r.redis).
+		WithCompletion(door.Complete).
 		WithStrandedHook(r.onStranded).
 		WithLogger(r.cfg.Log)
+	r.mu.Lock()
+	prev := r.client
+	r.client = c
+	r.dedup = gate
+	r.door = door
+	r.consumer = cs
+	r.mu.Unlock()
+	if prev != nil && prev != c {
+		_ = prev.Close()
+	}
 	r.setMode(ModeUp, DegradedNone)
 	return nil
 }
 
-// Start launches the consumer, the reconnect supervisor (only when needed) and
-// the archive timer. It is idempotent: a second call is a no-op.
+// Start launches the consumer, the recovery supervisor and the archive timer.
+// It is idempotent: a second call is a no-op.
+//
+// The supervisor runs for EVERY enabled runtime, not only for one that booted
+// degraded. A runtime that booted UP and then LOST its queue has no other path
+// back: SPEC-13 §4.3's "Redis returns" row is a daemon behaviour ("rewires the
+// consumer"), and §2.1.1 rule 5 makes a cold (empty) server a recovery too, not
+// a reason to restart the process.
 func (r *Runtime) Start(ctx context.Context) error {
 	if r == nil || !r.enabled {
 		return nil
@@ -248,18 +287,16 @@ func (r *Runtime) Start(ctx context.Context) error {
 	// from it, so Close stops them all regardless of which caller triggered the
 	// last rewire.
 	r.lifeCtx = cctx
-	needSupervisor := !r.connected()
 	r.mu.Unlock()
 
-	if !needSupervisor {
+	if r.connected() {
 		r.startConsumer(cctx)
-	} else {
-		r.wg.Add(1)
-		go func() {
-			defer r.wg.Done()
-			r.supervise(cctx)
-		}()
 	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.supervise(cctx)
+	}()
 	if r.archiver != nil {
 		r.wg.Add(1)
 		go func() {
@@ -272,11 +309,7 @@ func (r *Runtime) Start(ctx context.Context) error {
 
 func (r *Runtime) startConsumer(ctx context.Context) {
 	r.mu.Lock()
-	if r.consumer == nil {
-		r.mu.Unlock()
-		return
-	}
-	if r.consumerCancel != nil {
+	if r.consumer == nil || r.consumerCancel != nil {
 		r.mu.Unlock()
 		return
 	}
@@ -285,46 +318,182 @@ func (r *Runtime) startConsumer(ctx context.Context) {
 	}
 	cs := r.consumer
 	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	r.consumerCancel = cancel
+	r.consumerDone = done
 	r.mu.Unlock()
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		// The registration is released BEFORE `done` closes (deferred calls run
+		// in reverse order), so a caller that waited on `done` knows the slot is
+		// free — and only the goroutine that owns the registration clears it: a
+		// rewire that already installed a new one must not have it wiped by the
+		// consumer it replaced.
 		defer func() {
 			r.mu.Lock()
-			r.consumerCancel = nil
+			if r.consumerDone == done {
+				r.consumerCancel = nil
+				r.consumerDone = nil
+			}
 			r.mu.Unlock()
 		}()
+		defer close(done)
 		if err := cs.Run(runCtx); err != nil {
 			r.cfg.Log("hub: consumer stopped: %v", err)
 		}
 	}()
 }
 
-// supervise retries the queue while the profile is degraded at boot, and rewires
-// the consumer the moment Redis returns (SPEC-13 §4.3 row "Redis returns":
-// "rewires the consumer", lifecycle `redis_restored`).
+// stopConsumer cancels the running consumer and waits for its goroutine to
+// return, reporting whether it did within the timeout.
+//
+// It is what makes "the stale consumer must be stopped before the new one
+// drains" a structural property rather than a hope: SPEC-13 §1 rule 3 allows
+// exactly one consumer per state root, and a rewire that started a second one
+// while the first was between two XREADGROUPs would be two writers on one
+// ledger. A consumer that does not stop in time is a REFUSAL to rewire (the
+// caller keeps the old wiring and retries), never a second consumer.
+func (r *Runtime) stopConsumer(timeout time.Duration) bool {
+	r.mu.Lock()
+	cancel, done := r.consumerCancel, r.consumerDone
+	r.mu.Unlock()
+	if cancel == nil {
+		return true
+	}
+	cancel()
+	if done == nil {
+		return true
+	}
+	t := time.NewTimer(timeout)
+	defer t.Stop()
+	select {
+	case <-done:
+		return true
+	case <-t.C:
+		return false
+	}
+}
+
+// consumerRunning reports whether a consumer goroutine is registered. It is the
+// second half of "the queue is live": a group nobody drains is not a live queue
+// (SPEC-13 §5, TROUBLE-HUB-005).
+func (r *Runtime) consumerRunning() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.consumerCancel != nil
+}
+
+// supervise is the recovery loop. It keeps asking whether the queue is LIVE
+// (attached, group present, consumer draining) and rewires it when it is not —
+// with no external trigger, which is what SPEC-13 §4.3's "Redis returns" row
+// and §2.1.1 rule 5 require of the daemon.
+//
+// The cadence is deliberately two-speed. While the queue is live the loop is a
+// cheap liveness probe on the steady-state interval; while it is NOT, it retries
+// on the consumer's own bounded backoff (≈1–2s) so a Redis that answers is wired
+// in about a second. The operation is identical either way — only how soon a
+// FAILED attempt is retried changes.
 func (r *Runtime) supervise(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	wait := DefaultSuperviseInterval
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
+		case <-r.wake:
+			// A loss was detected by the serve path: stop waiting out the
+			// interval and act now.
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		}
-		if r.connected() {
-			continue
+		if r.superviseOnce(ctx) {
+			wait = DefaultSuperviseInterval
+		} else {
+			wait = nextBackoff(wait)
 		}
-		r.reconnect(ctx)
+		timer.Reset(wait)
 	}
+}
+
+// superviseOnce is one pass of the recovery loop. It reports whether the queue
+// is live afterwards.
+func (r *Runtime) superviseOnce(ctx context.Context) bool {
+	if !r.connected() {
+		// The state machine already knows the queue is down (a refusal moved it
+		// there): retry the rewire.
+		r.probeFailures = 0
+		return r.reconnect(ctx)
+	}
+	live, err := r.queueLive(ctx)
+	if !live {
+		r.probeFailures++
+		// A NOGROUP answer is a FACT, not a hypothesis: the server replied, and
+		// it does not know the group — the cold-Redis case of §2.1.1 rule 5 —
+		// so it is acted on at once. A transport failure is re-probed once: one
+		// slow round trip must not tear down a working consumer.
+		if !IsNoGroup(err) && r.probeFailures < 2 {
+			r.cfg.Log("hub: queue probe failed once (%v): re-probing before the rewire", err)
+			return false
+		}
+		r.cfg.Log("hub: the queue is not live while the runtime says up (%v): rewiring", err)
+		// The state machine said "up"; it must not (SPEC-13 §1 rule 4:
+		// degradation is a designed state, never a silent success).
+		r.markLost(err)
+		r.probeFailures = 0
+		return r.reconnect(ctx)
+	}
+	r.probeFailures = 0
+	if !r.consumerRunning() {
+		// The group is fine and nobody is draining it: the consumer returned
+		// (TROUBLE-HUB-005 is the §5 case) and the runtime would otherwise
+		// report `up` with no writer behind it.
+		r.cfg.Log("hub: the queue is live but no consumer is running: restarting the consumer")
+		r.startConsumer(ctx)
+		return r.consumerRunning()
+	}
+	return true
+}
+
+// queueLive asks the attached server whether it still knows the consumer group.
+//
+// This is the probe §2.1.1 rule 5 needs and the serve path cannot provide: a
+// cold (empty) Redis that answers on the same address leaves the daemon attached
+// to a server with no `trouble:ingest` — and XADD happily creates the key again,
+// so an offer that follows is answered 429 by a door timeout, not by anything
+// that says "the group is gone".
+func (r *Runtime) queueLive(ctx context.Context) (bool, error) {
+	c := r.clientRef()
+	if c == nil {
+		return false, errf(types.CodeHub004, ReasonXAdd, "the queue is not attached: nothing is draining the stream")
+	}
+	if _, err := c.Pending(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reconnect is one attempt to bring the queue back (SPEC-13 §4.3 row "Redis
 // returns": "rewires the consumer", lifecycle `redis_restored`). It reports
 // whether the queue is live afterwards, and it is callable outside the ticker so
 // a caller can force a rewire (the `trouble hub` verbs) instead of waiting.
+//
+// The stale consumer is stopped FIRST and the rewire is refused if it will not
+// stop: the new consumer must never drain alongside the old one (§1 rule 3).
 func (r *Runtime) reconnect(ctx context.Context) bool {
+	r.rewireMu.Lock()
+	defer r.rewireMu.Unlock()
+
+	if !r.stopConsumer(consumerStopTimeout) {
+		r.cfg.Log("hub: the previous consumer did not stop within %s: refusing to run a second one", consumerStopTimeout)
+		return false
+	}
 	c, err := r.dial(ctx)
 	if err != nil {
 		r.setMode(r.failureMode(), DegradedReasonFor(CodeOf(err), r.redis.RequireRedis))
@@ -366,13 +535,17 @@ func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Re
 	}
 	switch Mode(r.mode.Load().(string)) {
 	case ModeUp:
-		rec, err := r.door.Offer(ctx, draft)
+		// The door is always present while the mode says "up": attach installs
+		// it before the state machine moves, and a rewire replaces it with
+		// another one, never with nil.
+		door := r.doorRef()
+		rec, err := door.Offer(ctx, draft)
 		if err != nil {
 			r.markLost(err)
 			return types.Record{}, err
 		}
 		r.countIngested.Add(1)
-		r.countRoute(r.door.Route())
+		r.countRoute(door.Route())
 		return rec, nil
 	case ModeDegradedBoot:
 		if r.cfg.Standalone == nil {
@@ -406,7 +579,16 @@ func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Re
 }
 
 // markLost records a runtime Redis loss and moves the state machine (§4.3).
+//
+// The record describes the TRANSITION, not every observation: while the state
+// machine is already degraded the supervisor keeps retrying the rewire without
+// writing a second `redis_lost` for every attempt. The loss signal is poked
+// afterwards so the recovery loop retries the rewire at once instead of sleeping
+// out the rest of its interval.
 func (r *Runtime) markLost(err error) {
+	if r.degraded() {
+		return
+	}
 	code := CodeOf(err)
 	reason := DegradedReasonFor(code, r.redis.RequireRedis)
 	mode := ModeUnavailable
@@ -419,6 +601,19 @@ func (r *Runtime) markLost(err error) {
 		"error_code": string(code),
 		"reason":     reason,
 	})
+	r.signalLoss()
+}
+
+// signalLoss wakes the supervisor (non-blocking: the serve path must never wait
+// on the recovery loop).
+func (r *Runtime) signalLoss() {
+	if r == nil || r.wake == nil {
+		return
+	}
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
 }
 
 // onStranded is the consumer's TROUBLE-HUB-008 hook: one ledger record per
@@ -546,6 +741,32 @@ func (r *Runtime) archiveLoop(ctx context.Context) {
 	}
 }
 
+// ---- wiring accessors ----
+//
+// The wiring (client, gate, door, consumer) is REPLACED by a rewire while
+// requests are being served and while the health surface is reading, so every
+// read goes through the runtime's lock. A pointer handed to a caller is a
+// snapshot: it stays valid for the call, and the rewire replaces r.<field>, not
+// the object.
+
+func (r *Runtime) clientRef() *Client {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.client
+}
+
+func (r *Runtime) dedupRef() *DedupGate {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.dedup
+}
+
+func (r *Runtime) doorRef() *Door {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.door
+}
+
 // Close stops the consumer, the supervisor and the archive timer, and releases
 // Redis. The ledger is not touched: it belongs to the composition root.
 func (r *Runtime) Close() error {
@@ -560,13 +781,15 @@ func (r *Runtime) Close() error {
 		cancel()
 	}
 	r.wg.Wait()
-	if r.dedup != nil {
-		_ = r.dedup.SaveState(r.cfg.StateRoot)
+	r.mu.Lock()
+	dedup, client := r.dedup, r.client
+	r.client = nil
+	r.mu.Unlock()
+	if dedup != nil {
+		_ = dedup.SaveState(r.cfg.StateRoot)
 	}
-	if r.client != nil {
-		err := r.client.Close()
-		r.client = nil
-		return err
+	if client != nil {
+		return client.Close()
 	}
 	return nil
 }
@@ -612,7 +835,7 @@ func (r *Runtime) Door() *Door {
 	if r == nil {
 		return nil
 	}
-	return r.door
+	return r.doorRef()
 }
 
 // Dedup is the dedup gate (nil while the queue is not attached).
@@ -620,14 +843,18 @@ func (r *Runtime) Dedup() *DedupGate {
 	if r == nil {
 		return nil
 	}
-	return r.dedup
+	return r.dedupRef()
 }
 
-// Consumer is the ledger writer (nil while the queue is not attached).
+// Consumer is the ledger writer (nil while the queue is not attached). A rewire
+// installs a NEW one, so a caller must read it again after a recovery rather
+// than hold the value it saw at boot.
 func (r *Runtime) Consumer() *Consumer {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.consumer
 }
 
@@ -787,8 +1014,8 @@ func (r *Runtime) RecordBoot(ctx context.Context) {
 }
 
 func (r *Runtime) consumerName() string {
-	if r.client != nil {
-		return r.client.ConsumerName()
+	if c := r.clientRef(); c != nil {
+		return c.ConsumerName()
 	}
 	if r.redis.Consumer != "" {
 		return r.redis.Consumer

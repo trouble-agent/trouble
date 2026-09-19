@@ -136,6 +136,21 @@ func IsBusyGroup(err error) bool {
 	return strings.Contains(err.Error(), "BUSYGROUP")
 }
 
+// IsNoGroup reports whether err is Redis's NOGROUP reply: the server ANSWERED,
+// and it does not know the stream/consumer group the daemon is attached to.
+//
+// That is the cold-server case of SPEC-13 §2.1.1 rule 5 (re-create the group
+// with MKSTREAM), not a transport failure — and the distinction decides how the
+// recovery supervisor reacts: a NOGROUP answer is a fact and is acted on at
+// once, while a transport error is re-probed before the daemon tears down a
+// working consumer.
+func IsNoGroup(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "NOGROUP")
+}
+
 // ---- go-redis implementation ----
 
 type goRedisStreams struct{ c *redis.Client }

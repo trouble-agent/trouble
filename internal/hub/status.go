@@ -79,45 +79,46 @@ func (r *Runtime) redisOffsets(ctx context.Context) types.RedisStreamOffsets {
 	} else if out.Consumer == "" {
 		out.Consumer = r.cfg.Redis.HostID
 	}
-	if r.dedup != nil {
-		hits, misses, conflicts, _ := r.dedup.Counters()
+	if gate := r.dedupRef(); gate != nil {
+		hits, misses, conflicts, _ := gate.Counters()
 		out.DedupHits = hits
 		out.DedupMisses = misses
 		out.DedupConflicts = conflicts
-		out.DedupWindow = r.dedup.Window()
+		out.DedupWindow = gate.Window()
 	} else if out.DedupHits+out.DedupMisses > 0 {
 		out.DedupWindow = "lru"
 	}
 	out.Degraded = r.degraded()
 	out.DegradedReason = r.degradedReason()
-	if r.client == nil || !r.connected() {
+	client := r.clientRef()
+	if client == nil || !r.connected() {
 		// Offline: the offsets are the zero value plus the counters we still own
 		// and the LRU window, which is what a degraded stanza must say rather
 		// than reporting a stale "ok".
 		out.OptionsChecked = false
 		return out
 	}
-	out.OptionsChecked = r.client.ServerInfo().OptionsChecked
-	out.AOF = r.client.ServerInfo().AOFEnabled
-	out.Policy = r.client.ServerInfo().Policy
-	out.EvictedKeys = r.client.ServerInfo().EvictedKeys
-	out.Reclaims = r.client.Counters.Reclaims.Load()
-	out.Backpressure = r.client.Counters.Backpressure.Load()
+	out.OptionsChecked = client.ServerInfo().OptionsChecked
+	out.AOF = client.ServerInfo().AOFEnabled
+	out.Policy = client.ServerInfo().Policy
+	out.EvictedKeys = client.ServerInfo().EvictedKeys
+	out.Reclaims = client.Counters.Reclaims.Load()
+	out.Backpressure = client.Counters.Backpressure.Load()
 	if ctx == nil {
 		return out
 	}
-	if n, err := r.client.StreamLen(ctx); err == nil {
+	if n, err := client.StreamLen(ctx); err == nil {
 		out.StreamLen = n
 	}
-	if gi, err := r.client.GroupInfo(ctx); err == nil {
+	if gi, err := client.GroupInfo(ctx); err == nil {
 		out.Pending = gi.Pending
 		out.Lag = gi.Lag
 		out.LastDeliveredID = gi.LastDeliveredID
 	}
-	if pending, err := r.client.Pending(ctx); err == nil && out.Pending == 0 {
+	if pending, err := client.Pending(ctx); err == nil && out.Pending == 0 {
 		out.Pending = pending.Count
 	}
-	acked, _ := r.client.Watermarks()
+	acked, _ := client.Watermarks()
 	out.LastAckedID = acked
 	return out
 }

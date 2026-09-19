@@ -393,9 +393,12 @@ func (d *Desk) AnchorAt(driver, sig string) (types.IssueRef, bool) {
 }
 
 // EnqueueSpool places one foreign payload on the desk's durable queue: the
-// export of §3.7 to the collaborators that hand work over (the flow's own
-// pending-spawn replay rides the same store, so a restart replays both).
-// A drop event is one gap record on the desk's own record path.
+// export of §3.7 to a collaborator that has an ENABLED desk to replay through.
+// It is not a generic durability service — Replay walks the configured driver
+// names, and DecodePayload accepts only the operation shape below, so a
+// collaborator that needs its own queue owns that queue and its drain
+// (SPEC-08 §3.9a is the flow's). A drop event is one gap record on the desk's
+// own record path.
 func (d *Desk) EnqueueSpool(ctx context.Context, e types.SpoolEntry) error {
 	if d == nil || d.spool == nil {
 		return newErr(types.CodeIssues003, ReasonUnknownDriver, 0, false, "spool not built")

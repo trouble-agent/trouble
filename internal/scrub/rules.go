@@ -69,6 +69,7 @@ type builtinRule struct {
 	signals    signalMask // non-literal trigger families of the rule
 	extend     extendMode // how a value span longer than RE2's 1000 ceiling is grown
 	exemptIP   bool       // loopback/RFC1918 exemption on the matched value (§3.3)
+	exemptPath bool       // explicit-path-value exemption on the matched value (§3.3 rule 9)
 	strictQuad bool       // spans that look like a dotted quad must be a valid IPv4
 
 	// test-only knobs, reachable only from an in-package injected table (never
@@ -133,12 +134,19 @@ const (
 
 	patKVSecretAssign = `(?i)(?:^|[^A-Za-z0-9])(?:passphrase|password|passwd|pwd|secret_key|secret|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret|session[_-]?key|encryption[_-]?key|signing[_-]?key|token|dsn|connection[_-]?string|conn[_-]?str|credentials?|authorization|auth[_-]?token)["']?\s*[:=]\s*("[^"\n]*"|'[^'\n]*'|[^\s,}\]&;]+)`
 
-	// patCLIFlagSecret: the spec writes the leading flag-name fragment as
-	// [a-z][a-z0-9_-]{0,31} (mandatory), which cannot match a flag whose name IS
-	// the sensitive word (--api-key=…, vector P6): the class consumes the 'a' of
-	// "api" and the name alternation then has nothing to match. The fragment is
-	// therefore optional here, which accepts the spec's language plus the
-	// name-is-the-flag form — a strict superset, and P6 is normative.
+	// patCLIFlagSecret is name-driven by construction (SPEC-02 §3.3 rule 9): the
+	// flag NAME carries the sensitive word, so the rule sees a path, a token and
+	// an environment-variable name as one thing. The value class below is the
+	// rule the boundary re-scan of §3.4 uses, and the explicit-path exemption
+	// that keeps a token-store path storable is a post-match filter
+	// (filterPathExemptSpans, exemptPath) rather than a change to this pattern.
+	//
+	// The spec writes the leading flag-name fragment as [a-z][a-z0-9_-]{0,31}
+	// (mandatory), which cannot match a flag whose name IS the sensitive word
+	// (--api-key=…, vector P6): the class consumes the 'a' of "api" and the name
+	// alternation then has nothing to match. The fragment is therefore optional
+	// here, which accepts the spec's language plus the name-is-the-flag form — a
+	// strict superset, and P6 is normative.
 	patCLIFlagSecret = `(?i)(?:^|\s)--?(?:[a-z][a-z0-9_\-]{0,29})?(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)[a-z0-9_\-]{0,8}(?:=|\s+)("[^"\n]*"|[^\s"]+)`
 
 	patAuthHeader = `(?im)^[ \t]*(?:authorization|proxy-authorization|x-api-key|x-auth-token|x-sentry-auth|x-amz-security-token|api-key|cookie|set-cookie)[ \t]*:[ \t]*(.+)$`
@@ -214,9 +222,15 @@ var builtinTable = []builtinRule{
 		anchors: []string{"pass", "pwd", "secret", "key", "auth", "credential", "conn", "token", "dsn"},
 	},
 	{
+		// The rule that makes a pasted token on argv a hard refusal, and the one
+		// that used to refuse a token-store PATH with it: exemptPath is the §3.3
+		// rule-9 exemption — a value that is explicitly path-shaped (`/…`, `~/…`,
+		// `./…`, `../…`, an absolute one carrying path structure as well) is left
+		// unchanged and counted as exempt (SPEC-12 §2.5a; flagvalue.go).
 		name: "cli_flag_secret", kind: kindRegex, pattern: patCLIFlagSecret,
 		replace: "[REDACTED:cli_flag_secret]", mandatory: true, targets: allTargets(), extend: extFlagValue,
-		anchors: []string{"pass", "pwd", "secret", "token", "key", "api", "access"},
+		exemptPath: true,
+		anchors:    []string{"pass", "pwd", "secret", "token", "key", "api", "access"},
 	},
 	{
 		name: "auth_header", kind: kindRegex, pattern: patAuthHeader,
@@ -298,6 +312,7 @@ type compiledRule struct {
 	gate       []uint64   // per-rule trigger gate (§3.6 rule 10); nil = always run
 	signals    signalMask // non-literal trigger families of the rule
 	exemptIP   bool       // loopback/RFC1918 exemption on the matched value (§3.3)
+	exemptPath bool       // explicit-path-value exemption on the matched value (§3.3 rule 9)
 	strictQuad bool       // spans that look like a dotted quad must be a valid IPv4
 	extend     extendMode // value-span extension (RE2 caps repetition at 1000)
 	rescan     bool
@@ -350,6 +365,7 @@ func compileBuiltin(r builtinRule, index int) (*compiledRule, error) {
 		anchors:    append([]string(nil), r.anchors...),
 		signals:    r.signals,
 		exemptIP:   r.exemptIP,
+		exemptPath: r.exemptPath,
 		strictQuad: r.strictQuad,
 		builtin:    true,
 	}

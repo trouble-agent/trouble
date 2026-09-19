@@ -103,6 +103,14 @@ func boundaryHitFor(b []byte, sh *shield) (string, bool) {
 				spans = dsnAnySpans(b, sh)
 			}
 		}
+		if r.exemptPath {
+			// The rule-9 explicit-path exemption (§3.3) holds at the boundary
+			// too: the daemon's argv scan is this scanner, and a token-store
+			// path that the scrub pass leaves in place must not be refused by
+			// the re-scan of its own output. A token value is not path-shaped,
+			// so it is still a hit here and the daemon still refuses to start.
+			spans, _ = filterPathExemptSpans(b, spans)
+		}
 		for _, s := range spans {
 			if overlapsAny(s, notes) {
 				continue // the reserved payload["scrub"] note (§3.7)

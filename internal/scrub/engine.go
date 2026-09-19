@@ -211,7 +211,8 @@ func (e *Engine) Stats() types.ScrubStats { return e.st.snapshot() }
 func (e *Engine) UnmappedFields() uint64 { return e.st.unmappedFields.Load() }
 
 // ExemptValues reports how many candidate values were left unchanged by the
-// loopback/RFC1918 exemption of rules 15/16 (§3.3).
+// exemptions the rules declare on their captured value: the loopback/RFC1918
+// exemption of rules 15/16 (§3.3) and the explicit-path exemption of rule 9.
 func (e *Engine) ExemptValues() uint64 { return e.st.exemptValues.Load() }
 
 // entry builds the per-table view of a compiled rule. Most rules gate on their
@@ -483,6 +484,13 @@ func (e *Engine) ruleSpans(r *compiledRule, tbl *ruleTable, buf []byte, reserved
 		if r.exemptIP {
 			var skipped int
 			spans, skipped = filterExemptSpans(buf, spans, r.strictQuad)
+			if skipped > 0 {
+				e.st.exemptValues.Add(uint64(skipped))
+			}
+		}
+		if r.exemptPath {
+			var skipped int
+			spans, skipped = filterPathExemptSpans(buf, spans)
 			if skipped > 0 {
 				e.st.exemptValues.Add(uint64(skipped))
 			}

@@ -268,6 +268,18 @@ Exact patterns and replacement markers. `Replace` is always `[REDACTED:<rule-nam
 9  cli_flag_secret
    (?i)(?:^|\s)--?[a-z][a-z0-9_\-]{0,31}(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)
    [a-z0-9_\-]{0,8}(?:=|\s+)("[^"\n]{0,8192}"|[^\s"]{1,8192})                                     [1 group]
+   post-match exemption (left unchanged, counted as exempt, not redacted): a captured value that is
+   explicitly path-shaped — one of the prefixes `/`, `~/`, `./`, `../` followed by at least one byte,
+   every byte of it in the path alphabet `[A-Za-z0-9._/-]` — because a token STORE PATH is a locator,
+   not a credential, and the rule is name-driven: the flag NAME is what matched, so a path, a token and
+   an environment-variable name are one shape to it. An ABSOLUTE value additionally carries path
+   STRUCTURE (a separator or an extension after the leading slash: `/srv/tokens.json`, `/tokens.json`);
+   `/` is in the standard-base64 credential alphabet, so a slash-prefixed word with neither is a
+   credential shape that happens to begin with a slash and stays in scope. The exemption is a post-match
+   filter on the captured value, like the loopback exemption of rules 15/16 — never a hedge on the
+   pattern: `--hub-token <token>`, `--api-key=abcdef123456` (P6) and a bare file name are still matched.
+   It holds at the persistence boundary too (§3.4 point 3), so the daemon's argv control does not refuse
+   the value the scrub pass left in place (SPEC-12 §2.5a, TRBL-026).
 
 10 auth_header
    (?im)^[ \t]*(?:authorization|proxy-authorization|x-api-key|x-auth-token|x-sentry-auth|
@@ -602,6 +614,7 @@ Vector and conformance files are CI-fatal. Names are exact so the selfcheck and 
 | `internal/scrub/conformance_test.go` | one positive vector per mandatory rule proving each is compiled, present, and fires on its vector; a deliberately missing mandatory rule (built via a test-only table) returns TROUBLE-SCRUB-006 | 13/13 mandatory, 5/5 optional |
 | `internal/scrub/limits_test.go` | 256 KiB truncation boundary (cut at the last `\n`, marker exact, partial line dropped), refuse-mode targets return SCRUB-003 with no partial output, non-UTF-8 on a text target returns SCRUB-007, timeout injection returns SCRUB-005 with `Value==nil` | 100% |
 | `internal/scrub/dsn_test.go` | DSN with secret, without secret, percent-encoded, embedded in a traceback, `Project.SecretKey` echo | secret bytes absent in all 5 |
+| `internal/scrub/flagvalue_test.go` | rule 9's explicit-path exemption in both directions: a token-store path value after `--dashboard-token_file`/`--hub-token` is left unchanged and counted exempt (space and `=` spellings, the quoted form, `/home/…`, `/tokens.json` and the shell idioms `~/`, `./`, `../`), and the exemption is a fixed point whose output the boundary accepts; against it, a token value, a bare file name, a slash-prefixed word with no path structure (`/tokens`, `/abcDEF…`), a credential-alphabet run (`/9j4K+fg==`), the lone `/` and every `NAME=value` assignment (including `HUB_TOKEN=/srv/hub.token` and `--hub-token=/srv/hub.token`) are still redacted or refused | 100% exact-byte equality; 0 non-path values exempted; every refusal stays TROUBLE-SCRUB-008 at the boundary |
 | `internal/scrub/bench_test.go` | `BenchmarkPrefilter1KiB` ≤3 µs, `BenchmarkMandatory1KiB` ≤25 µs, `BenchmarkFull1KiB` ≤60 µs, `BenchmarkScrub256KiB` ≤15 ms, `BenchmarkVerify1KiB` ≤10 µs | budget table in §3.9, regression-barred |
 | `internal/scrub/e2e_ledger_test.go` | **the "no unredacted secret reached the ledger" test** | see below |
 | `internal/scrub/corpus_test.go` | 10,000-line corpus of real-shaped journal lines containing no rule-shaped span (verified independently with `grep -E`) | 0 redactions with the mandatory set; ≤0.5% of lines touched by `entropy_token` |

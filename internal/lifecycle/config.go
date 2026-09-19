@@ -104,6 +104,55 @@ type Config struct {
 		DedupLRU            int            `toml:"dedup_lru"`
 	} `toml:"hub"`
 
+	// Server is the SPEC-13 §2.1 `[server]` surface: the server profile
+	// (`standalone` | `light-hub`) and the keys its two dependencies — Redis
+	// (queue + dedup gate) and DuckBrain (archival tier) — need. Every leaf key
+	// is registered individually like any other key, because SPEC-12 §3.7a
+	// rule 1 pins the profile as ordinary config: no profile-specific file, no
+	// second resolution path, and the registry stays the only whitelist (an
+	// unknown key inside `[server]` is still TROUBLE-LIFECYCLE-001).
+	//
+	// The runtime half of the profile (dial, consumer group, XACK seam, dedup
+	// gate, archival) lives in internal/hub (SPEC-13 §2.3) and is not part of
+	// this struct: what is resolved here is what a boot can decide BEFORE a
+	// connection is opened. Config.ServerProfile projects this struct onto the
+	// shared types.ProfileConfig.
+	Server struct {
+		Profile string `toml:"profile"`
+		HubID   string `toml:"hub_id"`
+		Redis   struct {
+			URL                string         `toml:"url"`
+			PasswordEnv        string         `toml:"password_env"`
+			Stream             string         `toml:"stream"`
+			Group              string         `toml:"group"`
+			Consumer           string         `toml:"consumer"`
+			MaxLen             int64          `toml:"maxlen"`
+			DedupPrefix        string         `toml:"dedup_prefix"`
+			DedupTTL           types.Duration `toml:"dedup_ttl"`
+			BatchRecords       int            `toml:"batch_records"`
+			BatchBytes         int            `toml:"batch_bytes"`
+			BlockMS            int            `toml:"block_ms"`
+			ClaimMinIdle       types.Duration `toml:"claim_min_idle"`
+			DialTimeout        types.Duration `toml:"dial_timeout"`
+			ReadTimeout        types.Duration `toml:"read_timeout"`
+			WriteTimeout       types.Duration `toml:"write_timeout"`
+			RequireRedis       bool           `toml:"require_redis"`
+			RequirePersistence bool           `toml:"require_persistence"`
+			CheckPolicy        bool           `toml:"check_policy"`
+			FailoverGrace      types.Duration `toml:"failover_grace"`
+		} `toml:"redis"`
+		DuckBrain struct {
+			Enabled           bool           `toml:"enabled"`
+			Namespace         string         `toml:"namespace"`
+			Endpoint          string         `toml:"endpoint"`
+			ArchiveInterval   types.Duration `toml:"archive_interval"`
+			ArchiveBatchFiles int            `toml:"archive_batch_files"`
+			KeepLocalGens     int            `toml:"keep_local_generations"`
+			VerifyAfterWrite  bool           `toml:"verify_after_write"`
+			Gzip              bool           `toml:"gzip"`
+		} `toml:"duckbrain"`
+	} `toml:"server"`
+
 	Spool struct {
 		BudgetBytes     int64  `toml:"budget_bytes"`
 		GapReserveBytes int64  `toml:"gap_reserve_bytes"`
@@ -403,6 +452,41 @@ func defaults() *Config {
 	c.Hub.RetryBase = "2s"
 	c.Hub.RetryMax = "5m"
 	c.Hub.DedupLRU = 65536
+	// SPEC-13 §2.1: the standalone profile is the default and it needs neither
+	// dependency, so every server.redis.*/server.duckbrain.* default below is
+	// inert until the operator selects light-hub. server.redis.url and
+	// server.duckbrain.namespace default to "" on purpose: SPEC-13 §2.1 makes
+	// them REQUIRED for light-hub, and a non-empty default would make that
+	// requirement (and its TROUBLE-HUB-001 refusal) unreachable.
+	c.Server.Profile = "standalone"
+	c.Server.HubID = ""
+	c.Server.Redis.URL = ""
+	c.Server.Redis.PasswordEnv = "TROUBLE_REDIS_PASSWORD"
+	c.Server.Redis.Stream = "trouble:ingest"
+	c.Server.Redis.Group = "ledger-writers"
+	c.Server.Redis.Consumer = ""
+	c.Server.Redis.MaxLen = 1000000
+	c.Server.Redis.DedupPrefix = "trouble:dedup:"
+	c.Server.Redis.DedupTTL = "24h"
+	c.Server.Redis.BatchRecords = 256
+	c.Server.Redis.BatchBytes = 524288
+	c.Server.Redis.BlockMS = 1000
+	c.Server.Redis.ClaimMinIdle = "60s"
+	c.Server.Redis.DialTimeout = "2s"
+	c.Server.Redis.ReadTimeout = "5s"
+	c.Server.Redis.WriteTimeout = "2s"
+	c.Server.Redis.RequireRedis = false
+	c.Server.Redis.RequirePersistence = true
+	c.Server.Redis.CheckPolicy = true
+	c.Server.Redis.FailoverGrace = "30s"
+	c.Server.DuckBrain.Enabled = false
+	c.Server.DuckBrain.Namespace = ""
+	c.Server.DuckBrain.Endpoint = ""
+	c.Server.DuckBrain.ArchiveInterval = "1h"
+	c.Server.DuckBrain.ArchiveBatchFiles = 8
+	c.Server.DuckBrain.KeepLocalGens = 2
+	c.Server.DuckBrain.VerifyAfterWrite = true
+	c.Server.DuckBrain.Gzip = true
 	c.Spool.BudgetBytes = 268435456
 	c.Spool.GapReserveBytes = 2097152
 	c.Spool.Fsync = "group"
@@ -993,6 +1077,119 @@ func registry(c *Config) []keyMeta {
 		{"hub.retry_base", "hub", "retry_base", c.Hub.RetryBase, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryBase = d; return err }},
 		{"hub.retry_max", "hub", "retry_max", c.Hub.RetryMax, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryMax = d; return err }},
 		{"hub.dedup_lru", "hub", "dedup_lru", c.Hub.DedupLRU, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.DedupLRU = i; return err }},
+		// SPEC-13 §2.1/§2.1.1 `[server]` surface. The profile and the two
+		// dependency blocks are registered leaf by leaf, so the profile resolves
+		// with the same precedence, provenance and redaction as every other key
+		// (SPEC-12 §3.7a rule 1) and `trouble config explain` lists each one.
+		{"server.profile", "server", "profile", c.Server.Profile, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.Profile = s; return err }},
+		{"server.hub_id", "server", "hub_id", c.Server.HubID, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.HubID = s; return err }},
+		{"server.redis.url", "server", "url", c.Server.Redis.URL, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.Redis.URL = s; return err }},
+		{"server.redis.password_env", "server", "password_env", c.Server.Redis.PasswordEnv, func(cfg *Config, v any) error {
+			s, err := asString(v)
+			cfg.Server.Redis.PasswordEnv = s
+			return err
+		}},
+		{"server.redis.stream", "server", "stream", c.Server.Redis.Stream, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.Redis.Stream = s; return err }},
+		{"server.redis.group", "server", "group", c.Server.Redis.Group, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.Redis.Group = s; return err }},
+		{"server.redis.consumer", "server", "consumer", c.Server.Redis.Consumer, func(cfg *Config, v any) error { s, err := asString(v); cfg.Server.Redis.Consumer = s; return err }},
+		{"server.redis.maxlen", "server", "maxlen", c.Server.Redis.MaxLen, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Server.Redis.MaxLen = i; return err }},
+		{"server.redis.dedup_prefix", "server", "dedup_prefix", c.Server.Redis.DedupPrefix, func(cfg *Config, v any) error {
+			s, err := asString(v)
+			cfg.Server.Redis.DedupPrefix = s
+			return err
+		}},
+		{"server.redis.dedup_ttl", "server", "dedup_ttl", c.Server.Redis.DedupTTL, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Server.Redis.DedupTTL = d; return err }},
+		{"server.redis.batch_records", "server", "batch_records", c.Server.Redis.BatchRecords, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Server.Redis.BatchRecords = i
+			return err
+		}},
+		{"server.redis.batch_bytes", "server", "batch_bytes", c.Server.Redis.BatchBytes, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Server.Redis.BatchBytes = i; return err }},
+		{"server.redis.block_ms", "server", "block_ms", c.Server.Redis.BlockMS, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Server.Redis.BlockMS = i; return err }},
+		{"server.redis.claim_min_idle", "server", "claim_min_idle", c.Server.Redis.ClaimMinIdle, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.Redis.ClaimMinIdle = d
+			return err
+		}},
+		{"server.redis.dial_timeout", "server", "dial_timeout", c.Server.Redis.DialTimeout, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.Redis.DialTimeout = d
+			return err
+		}},
+		{"server.redis.read_timeout", "server", "read_timeout", c.Server.Redis.ReadTimeout, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.Redis.ReadTimeout = d
+			return err
+		}},
+		{"server.redis.write_timeout", "server", "write_timeout", c.Server.Redis.WriteTimeout, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.Redis.WriteTimeout = d
+			return err
+		}},
+		{"server.redis.require_redis", "server", "require_redis", c.Server.Redis.RequireRedis, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.Redis.RequireRedis = b
+			return err
+		}},
+		{"server.redis.require_persistence", "server", "require_persistence", c.Server.Redis.RequirePersistence, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.Redis.RequirePersistence = b
+			return err
+		}},
+		{"server.redis.check_policy", "server", "check_policy", c.Server.Redis.CheckPolicy, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.Redis.CheckPolicy = b
+			return err
+		}},
+		{"server.redis.failover_grace", "server", "failover_grace", c.Server.Redis.FailoverGrace, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.Redis.FailoverGrace = d
+			return err
+		}},
+		// server.duckbrain.enabled is the operator switch for a standalone host
+		// that wants the archival tier anyway; under profile=light-hub archival
+		// is implied on (SPEC-13 §2.1), which is why the light-hub gate requires
+		// server.duckbrain.namespace regardless of this key.
+		{"server.duckbrain.enabled", "server", "enabled", c.Server.DuckBrain.Enabled, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.DuckBrain.Enabled = b
+			return err
+		}},
+		{"server.duckbrain.namespace", "server", "namespace", c.Server.DuckBrain.Namespace, func(cfg *Config, v any) error {
+			s, err := asString(v)
+			cfg.Server.DuckBrain.Namespace = s
+			return err
+		}},
+		{"server.duckbrain.endpoint", "server", "endpoint", c.Server.DuckBrain.Endpoint, func(cfg *Config, v any) error {
+			s, err := asString(v)
+			cfg.Server.DuckBrain.Endpoint = s
+			return err
+		}},
+		{"server.duckbrain.archive_interval", "server", "archive_interval", c.Server.DuckBrain.ArchiveInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Server.DuckBrain.ArchiveInterval = d
+			return err
+		}},
+		{"server.duckbrain.archive_batch_files", "server", "archive_batch_files", c.Server.DuckBrain.ArchiveBatchFiles, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Server.DuckBrain.ArchiveBatchFiles = i
+			return err
+		}},
+		{"server.duckbrain.keep_local_generations", "server", "keep_local_generations", c.Server.DuckBrain.KeepLocalGens, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Server.DuckBrain.KeepLocalGens = i
+			return err
+		}},
+		{"server.duckbrain.verify_after_write", "server", "verify_after_write", c.Server.DuckBrain.VerifyAfterWrite, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.DuckBrain.VerifyAfterWrite = b
+			return err
+		}},
+		{"server.duckbrain.gzip", "server", "gzip", c.Server.DuckBrain.Gzip, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Server.DuckBrain.Gzip = b
+			return err
+		}},
 		{"spool.budget_bytes", "spool", "budget_bytes", c.Spool.BudgetBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Spool.BudgetBytes = i; return err }},
 		{"spool.gap_reserve_bytes", "spool", "gap_reserve_bytes", c.Spool.GapReserveBytes, func(cfg *Config, v any) error { i, err := asInt64(v); cfg.Spool.GapReserveBytes = i; return err }},
 		{"spool.fsync", "spool", "fsync", c.Spool.Fsync, func(cfg *Config, v any) error { s, err := asString(v); cfg.Spool.Fsync = s; return err }},

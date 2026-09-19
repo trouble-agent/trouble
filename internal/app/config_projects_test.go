@@ -103,7 +103,7 @@ bind = "127.0.0.1:%d"
 			// The refusal is auditable (when the boot got as far as a ledger),
 			// and the ingest port never opened: the whole point of refusing
 			// before the preflight.
-			if c.wantRecord && !scanLedgerForBootRefusal(t, root) {
+			if c.wantRecord && !scanLedgerForBootRefusal(t, root, types.CodeLifecycle001) {
 				t.Errorf("no boot_refused record in the ledger under %s", root)
 			}
 			ln, lerr := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", ingestPort))
@@ -116,9 +116,11 @@ bind = "127.0.0.1:%d"
 }
 
 // scanLedgerForBootRefusal greps the ledger's JSONL for the boot_refused record
-// (the ledger is closed by the refusal, so the file is complete and readable
-// without the index).
-func scanLedgerForBootRefusal(t *testing.T, root string) bool {
+// carrying code (the ledger is closed by the refusal, so the file is complete
+// and readable without the index). The code is a parameter because a refusal is
+// owned by the stage that refused: TROUBLE-LIFECYCLE-001 for a malformed
+// `[[projects]]` declaration, TROUBLE-HUB-001 for an unusable server profile.
+func scanLedgerForBootRefusal(t *testing.T, root string, code types.ErrorCode) bool {
 	t.Helper()
 	dir := filepath.Join(root, "ledger")
 	entries, err := os.ReadDir(dir)
@@ -135,7 +137,7 @@ func scanLedgerForBootRefusal(t *testing.T, root string) bool {
 		}
 		for _, line := range strings.Split(string(b), "\n") {
 			if strings.Contains(line, `"stage":"boot_refused"`) &&
-				strings.Contains(line, string(types.CodeLifecycle001)) {
+				strings.Contains(line, string(code)) {
 				return true
 			}
 		}

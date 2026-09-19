@@ -38,12 +38,13 @@ const childEnvName = "TROUBLED_TEST_CHILD_MODE"
 // are asserted EXACTLY by TestDaemonArgvAddressesEveryRegisteredKey: a new key that
 // cannot be addressed from argv must be named here and in the spec, never skipped.
 var (
-	// Tables: a flag value is a scalar and these three keys are declarations.
-	wantTableRefused = []string{"issues", "projects", "skills"}
+	// Tables: a flag value is a scalar and these four keys are declarations.
+	wantTableRefused = []string{"issues", "llm", "projects", "skills"}
 	// Refused by the argv secret scan (SPEC-12 §3.2): the flag NAME matches the
 	// mandatory cli_flag_secret rule, so the value that follows it — a path, in
-	// practice a token store path — is never accepted on argv. Set from file/env.
-	wantArgvScanRefused = []string{"dashboard.token_file", "hub.token"}
+	// practice a token store path, or an environment-variable NAME in
+	// server.redis.password_env — is never accepted on argv. Set from file/env.
+	wantArgvScanRefused = []string{"dashboard.token_file", "hub.token", "server.redis.password_env"}
 )
 
 func TestMain(m *testing.M) {

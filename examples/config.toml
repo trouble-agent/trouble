@@ -60,6 +60,27 @@ retry_base = "2s"
 retry_max = "5m"
 dedup_lru = 65536
 
+# --- [server] the server profile (SPEC-13) ---------------------------------
+# Default is `standalone`: in-process ingestion, zero external dependency.
+# `light-hub` reads events through a Redis stream + consumer group and archives
+# closed ledger generations to DuckBrain; it declares server.redis.url AND
+# server.duckbrain.namespace or the boot refuses with TROUBLE-HUB-001 before any
+# listener is bound. Every key is ordinary config (`trouble config explain`
+# shows which source won), and the Redis stream/group/dedup/archival behaviour
+# itself is internal/hub's (SPEC-13 §2.3).
+#
+# [server]
+# profile = "light-hub"
+#
+# [server.redis]
+# url = "redis://127.0.0.1:6379/0"
+# require_persistence = true   # appendonly=no becomes a boot refusal (TROUBLE-HUB-016)
+# check_policy = true          # maxmemory-policy must be noeviction (TROUBLE-HUB-015)
+#
+# [server.duckbrain]
+# namespace = "trouble/<host_id>"   # required when profile = light-hub
+# endpoint = ""                     # the duckbrain driver endpoint
+
 [spool]
 budget_bytes = 268435456
 gap_reserve_bytes = 2097152

@@ -1022,8 +1022,17 @@ restart — must be re-proved against this same before/after sequence.
 
 `deploy/container/config.light-hub.toml` carries the wire-up shape for that
 profile (`server.profile = "light-hub"`, `server.redis.url =
-redis://redis:6379/0`). It is **not** the compose default, because the current
-tree has no `[server]` table in the lifecycle registry and unknown file keys are
-fatal — measured: `boot refused err="TROUBLE-LIFECYCLE-001: unknown file key
-"server.redis.appendonly""`. Switch the compose volume source to that file
-once the SPEC-13 config keys exist; do not delete the keys to make it boot.
+redis://redis:6379/0`, `server.duckbrain.namespace`, and the
+`require_persistence`/`check_policy` preflight knobs of SPEC-13 §2.1.1). The
+`[server]` surface is registered as ordinary config keys, so that file RESOLVES
+and the light-hub profile passes the boot gate — measured: `trouble config
+explain --config deploy/container/config.light-hub.toml --json` lists all 29
+`server.*` rows with their source, and a scratch boot of the same file reaches
+`/health.json` with `server.profile=light-hub` recorded in the boot `config`
+record. It is still **not** the compose default, because the profile's runtime
+(the Redis stream + consumer group, the dedup gate and the DuckBrain archival
+tier, SPEC-13 §2.3) is `internal/hub`'s and is not built in this tree: a
+light-hub boot serves on the standalone in-process path (the daemon logs a
+warning saying so) and `/health.json` carries no `hub` stanza. Switch the
+compose volume source to this file when that package lands; do not delete the
+keys to make it boot.

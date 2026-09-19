@@ -54,11 +54,12 @@ config keys (flag > env > file > default, SPEC-12 §3.1):
   the daemon exits 13. A single-dash token that is not -v or -h is refused for the
   same reason: the per-key surface is spelled with two dashes.
 
-  'trouble config explain [--json]' lists every key and the source that won. Five
-  keys cannot ride argv: projects, issues and skills are tables (a flag value is a
-  scalar), and dashboard.token_file and hub.token are refused by the argv secret
-  scan (TROUBLE-LIFECYCLE-013) because the flag NAME matches the mandatory
-  cli_flag_secret rule. Set those from the file or the environment.
+  'trouble config explain [--json]' lists every key and the source that won. Seven
+  keys cannot ride argv: projects, issues, skills and llm are tables (a flag value
+  is a scalar), and dashboard.token_file, hub.token and server.redis.password_env
+  are refused by the argv secret scan (TROUBLE-LIFECYCLE-013) because the flag
+  NAME matches the mandatory cli_flag_secret rule. Set those from the file or the
+  environment.
 
 examples:
   troubled --config ~/.config/trouble/config.toml

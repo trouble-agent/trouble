@@ -210,6 +210,26 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		o.Subsystems.SentinelProjects = declaredProjects
 	}
 
+	// 6c. the server profile gate (SPEC-12 §3.7a rule 2, SPEC-13 §4.1 step 1).
+	// The profile resolves like any other key, and a profile whose required keys
+	// are missing is refused HERE — after the config record, before the bind
+	// preflight holds a listener, so the refusal is worth exactly zero HTTP
+	// responses and the ledger carries one boot_refused record naming the code
+	// (TROUBLE-HUB-001).
+	if err := cfg.CheckServerProfile(); err != nil {
+		d.bootFailure(ctx, types.CodeHub001, err)
+		return nil, err
+	}
+	if profile := cfg.ServerProfile(); profile.Profile == lifecycle.ProfileLightHub {
+		// The profile's plumbing (Redis queue + consumer group + DuckBrain
+		// archival, SPEC-13 §2.3) is internal/hub's, and that package does not
+		// exist in this tree: a validated light-hub config therefore serves on
+		// the standalone in-process path. Say so out loud instead of letting
+		// "profile = light-hub" imply a queue nobody opened.
+		log.Warn("server.profile=light-hub: the hub runtime (SPEC-13 Redis queue + DuckBrain archival) is not built in this tree; ingestion runs on the standalone in-process path",
+			"profile", profile.Profile)
+	}
+
 	// 7. bind preflight (003) — listeners are held, never closed and reopened.
 	probes, err := lifecycle.PreflightBinds(cfg)
 	if err != nil {

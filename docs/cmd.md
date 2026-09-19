@@ -53,14 +53,17 @@ Three behaviours are load-bearing:
    which exits TROUBLE-LIFECYCLE-001 `unknown flag "--no-such-key"`; the daemon
    maps a boot refusal to exit 13. It is never ignored and never read as a
    positional; a one-dash token that is not `-v`/`-h` is a usage error (exit 2).
-2. **Five keys cannot be set from argv.** `projects`, `issues` and `skills` are
-   tables and a flag value is a scalar (refused by name, 001). `dashboard.token_file`
-   and `hub.token` are refused by the argv secret scan at boot
+2. **Seven keys cannot be set from argv.** `projects`, `issues`, `skills` and
+   `llm` are tables and a flag value is a scalar (refused by name, 001).
+   `dashboard.token_file`, `hub.token` and `server.redis.password_env` are
+   refused by the argv secret scan at boot
    (`cli_flag_secret`, TROUBLE-LIFECYCLE-013): their flag NAMES match a mandatory
-   rule, so the token that follows is read as a secret no matter what it holds —
-   a token-store path and a real token are the same shape to that rule. Set both
-   from the file or from `TROUBLE_DASHBOARD_TOKEN_FILE` / `TROUBLE_HUB_TOKEN`,
-   which is what the shipped unit's `EnvironmentFile=` is for.
+   rule, so the value that follows is read as a secret no matter what it holds —
+   a token-store path, a real token and the NAME of an environment variable are
+   the same shape to that rule. Set them from the file or from
+   `TROUBLE_DASHBOARD_TOKEN_FILE` / `TROUBLE_HUB_TOKEN` /
+   `TROUBLE_SERVER_REDIS_PASSWORD_ENV`, which is what the shipped unit's
+   `EnvironmentFile=` is for.
 3. **The daemon's own surface prints its real shape.** `--help` lists its four
    argv forms plus the per-key form and points at `trouble config explain`; it
    never prints Go's flag-package automessage, which could only name the daemon's

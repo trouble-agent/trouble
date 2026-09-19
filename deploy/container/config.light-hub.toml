@@ -11,19 +11,24 @@
 # ============================================================================
 # HONEST STATUS OF THIS FILE — VERIFY BEFORE USE.
 #
-# SPEC-13 (specs/SPEC-13-server-profiles.md) defines the light-hub server
-# profile. As of the current main tree the `[server]` table is NOT in the
-# lifecycle config registry: `internal/lifecycle/config.go` has no `server`,
-# `profile` or `redis` key, and unknown keys in a config file are FATAL
-# (TROUBLE-LIFECYCLE-001). Mounting this file therefore refuses the boot with a
-# key error rather than degrading to Redis-less ingestion — the exact refusal
-# text is recorded in docs/operations.md §14 and in the TRBL-002 report.
+# The `[server]` surface IS registered (SPEC-13 §2.1 and §2.1.1 keys resolve as
+# ordinary config keys and `trouble config explain` lists each with its source),
+# so this file RESOLVES and the light-hub profile passes the boot gate when
+# server.redis.url and server.duckbrain.namespace are both declared. Before that
+# registration this file was refused with TROUBLE-LIFECYCLE-001 (unknown file
+# key) — see TRBL-027 and docs/operations.md §14.
 #
-# The compose default therefore mounts config.toml (standalone), and the redis
-# service in docker-compose.yml runs under the SPEC-13 preflight constraints
-# (appendonly yes, maxmemory-policy noeviction) ready for the profile to land.
-# Switch the compose volume source to this file once SPEC-13's config keys
-# exist; do not paper over the refusal by deleting the keys.
+# The profile's RUNTIME — the Redis stream and consumer group, the dedup gate
+# and the DuckBrain archival tier (SPEC-13 §2.3) — is internal/hub's and is NOT
+# built in this tree. A light-hub boot therefore serves on the standalone
+# in-process path and says so with a startup warning; nothing here queues an
+# event yet, and /health.json carries no `hub` stanza.
+#
+# The compose default still mounts config.toml (standalone) for that reason, and
+# the redis service in docker-compose.yml runs under the SPEC-13 preflight
+# constraints (appendonly yes, maxmemory-policy noeviction) ready for the
+# runtime to land. Switch the compose volume source to this file when it does;
+# do not delete the keys to make a boot pass.
 # ============================================================================
 #
 # SPEC-13 behaviour this file is written to exercise: with Redis unavailable
@@ -43,8 +48,20 @@ profile = "light-hub"
 
 [server.redis]
 url = "redis://redis:6379/0"
-appendonly = true
-maxmemory_policy = "noeviction"
+# The trouble-side declarations of the two Redis settings the SPEC-13 §2.1.1
+# preflight inspects: require_persistence makes appendonly=no a boot refusal
+# (TROUBLE-HUB-016) and check_policy flags a maxmemory-policy other than
+# noeviction (TROUBLE-HUB-015, /health.json redis.policy). The settings
+# themselves belong to the redis service in docker-compose.yml, not to this
+# file: the daemon reads them through INFO and never sets them.
+require_persistence = true
+check_policy = true
+
+[server.duckbrain]
+# Required when profile = light-hub (SPEC-13 §2.1). One namespace per host is
+# the documented default; replace the placeholder with this host's id
+# (trouble/<origin.host_id>) before switching the compose volume source.
+namespace = "trouble/REPLACE-WITH-HOST-ID"
 
 [lifecycle]
 heartbeat_interval = "30s"

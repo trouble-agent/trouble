@@ -114,8 +114,8 @@ injects the resulting `Actor` into the ledger writer constructor (§8).
 `a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b-c`. Env vars are read only with the `TROUBLE_` prefix. A dot
 becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secrets.environment_file` is
 `--secrets-environment_file`, `lifecycle.unit_name` is `--lifecycle-unit_name`. Every registered key of §3.1
-is flag-addressable in that form except the five §2.5a names — three of them are declarations rather than
-scalars, and two cannot cross a command line at all. A flag source beats env, file and default (§3.1).
+is flag-addressable in that form except the seven §2.5a names — four of them are declarations rather than
+scalars, and three cannot cross a command line at all. A flag source beats env, file and default (§3.1).
 
 The shipped unit's `ExecStart` renders exactly one argument pair, `--config <path>`; `RenderUnits` scans every
 argument it renders with the SPEC-02 mandatory rule set and refuses an `ExecStart` that carries secret-shaped
@@ -145,14 +145,14 @@ Rules, pinned:
 - **`--config` is consumed before resolution and nothing else is.** The file is an input to resolution rather
   than a key resolution can already have read. Its mechanical twin `--config_path` selects the file *and*
   stays a resolved row, so `trouble config explain` shows that a flag — not the file — chose the path.
-- **Five keys cannot be set from argv.** Three of them are the tables, whose value is a declaration rather
-  than a scalar: `projects` (§3.1a), `issues` and `skills` (§3.1b) — a scalar value is refused by name with
-  001. The other two are refused by the argv-secret control of §3.2 rule 2 before the daemon can serve:
-  `dashboard.token_file` and `hub.token`. Their flag NAMES match the mandatory `cli_flag_secret` rule
-  (SPEC-02 §3.3 rule 9) and the token that follows the name is taken as its value, so a path and a real token
-  are indistinguishable to that rule. Both are set from the file or the environment
-  (`TROUBLE_DASHBOARD_TOKEN_FILE`, `TROUBLE_HUB_TOKEN`), which is what the shipped unit does with
-  `EnvironmentFile=`.
+- **Seven keys cannot be set from argv.** Four of them are the tables, whose value is a declaration rather
+  than a scalar: `projects` (§3.1a), `issues` and `skills` (§3.1b) and `llm` (§3.1c) — a scalar value is
+  refused by name with 001. The other three are refused by the argv-secret control of §3.2 rule 2 before the
+  daemon can serve: `dashboard.token_file`, `hub.token` and `server.redis.password_env`. Their flag NAMES
+  match the mandatory `cli_flag_secret` rule (SPEC-02 §3.3 rule 9) and the value that follows the name is
+  taken as its value, so a path, a token and an environment-variable name are indistinguishable to that rule.
+  All three are set from the file or the environment (`TROUBLE_DASHBOARD_TOKEN_FILE`, `TROUBLE_HUB_TOKEN`,
+  `TROUBLE_SERVER_REDIS_PASSWORD_ENV`), which is what the shipped unit does with `EnvironmentFile=`.
 
 `internal/app`'s tests reach the flag source through `BootOptions.Args`, which is why §2.5 and this section
 could disagree with `cmd/troubled` for as long as they did; the surface is pinned by the argv tests of
@@ -204,7 +204,7 @@ real, has a default, and appears in the explain dump.
 | `hub.forward_batch_records` / `hub.forward_batch_bytes` | `200` / `524288` | below the 1MB decompressed cap with headroom (SPEC-04 §2) |
 | `hub.retry_base` / `hub.retry_max` | `2s` / `5m` | exponential backoff with ±20% jitter |
 | `hub.dedup_lru` | `65536` | bounded in-memory idempotency-key LRU at the hub; also the degraded fallback for the light-hub Redis gate (SPEC-13 §3.4) |
-| `server.profile` | `standalone` (`standalone`\|`light-hub`) | the server profile (§3.7a); `light-hub` requires `server.redis.url` + `server.duckbrain.namespace` and is refused on a satellite |
+| `server.profile` | `standalone` (`standalone`\|`light-hub`) | the server profile (§3.7a); `light-hub` requires `server.redis.url` + `server.duckbrain.namespace` and is refused on a satellite. The remaining `server.redis.*` and `server.duckbrain.*` keys belong to SPEC-13 §2.1 and are registered here like this one — the profile is ordinary config, not a second key space |
 | `spool.budget_bytes` | `268435456` (256MB) | brief §1.P |
 | `spool.gap_reserve_bytes` | `2097152` (2MB) | drop-oldest never touches this: loss notices must survive |
 | `spool.fsync` / `spool.fsync_window_ms` | `group` / `200` | same group-commit window as the ledger |

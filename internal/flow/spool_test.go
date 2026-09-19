@@ -176,6 +176,29 @@ func TestFlowDoesNotAdoptTheDeskSpool(t *testing.T) {
 	}
 }
 
+// TestFlowDoesNotAdoptATypedNilStore pins the typed-nil trap: a nil *Spool put
+// behind Deps.Spool satisfies the replay assertion (the interface is non-nil)
+// and would panic on the first dispatch. Adopting it is a crash, not durability,
+// so the flow must answer "no queue".
+func TestFlowDoesNotAdoptATypedNilStore(t *testing.T) {
+	fx := newFixture(t, nil)
+	var nilStore *Spool
+	d := fx.flow.deps
+	d.Spool = nilStore
+	fx.flow.SetDeps(d)
+	if fx.flow.SpoolWired() {
+		t.Fatalf("SpoolWired() = true for a typed-nil store")
+	}
+	if _, err := fx.flow.Replay(context.Background(), 0); err == nil {
+		t.Fatalf("Replay with a typed-nil store must refuse, not report success")
+	}
+	// And the refusal path must not panic on the way out.
+	fx.spawn.err = fmt.Errorf("router_spawn refused the connection")
+	if _, err := fx.flow.Spawn(context.Background(), fx.spawnReq("")); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+}
+
 // TestReplayRefusesHonestlyWithNoQueue pins the loop half of the same rule: a
 // drain with no queue is an error naming the coupling, not a silent no-op.
 func TestReplayRefusesHonestlyWithNoQueue(t *testing.T) {

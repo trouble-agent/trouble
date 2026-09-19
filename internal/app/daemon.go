@@ -470,6 +470,9 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		if err := d.Subsystems.Flow.Start(ctx); err != nil {
 			log.Warn("flow start", "err", err)
 		}
+		// The flow's own drain (SPEC-08 §3.9a). Before §3.9a the comment above
+		// claimed this loop while the flow ran neither half of it.
+		go d.Subsystems.Flow.Run(ctx)
 	}
 
 	// 14. heartbeat + watchdog, then READY.

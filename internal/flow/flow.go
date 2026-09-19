@@ -15,6 +15,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
 	"time"
 
@@ -121,15 +122,23 @@ func NewFlowWithBounds(cfg types.FlowConfig, autonomy types.AutonomyGates, b Spo
 
 // SetDeps binds the collaborators (the composition root). A sink that can be
 // replayed is adopted as the flow's own queue; anything else leaves the flow with
-// no durable queue, which every dispatch record then states truthfully.
+// no durable queue, which every dispatch record then states truthfully. A
+// TYPED-nil store is not a queue: adopting it would put a nil pointer behind the
+// interface and panic on the first dispatch.
 func (f *Flow) SetDeps(d Deps) {
 	f.deps = d
 	f.mu.Lock()
 	f.spool = nil
-	if q, ok := d.Spool.(spoolQueue); ok {
+	if q, ok := d.Spool.(spoolQueue); ok && !isNilQueue(q) {
 		f.spool = q
 	}
 	f.mu.Unlock()
+}
+
+// isNilQueue reports whether a queue interface holds a nil pointer.
+func isNilQueue(q spoolQueue) bool {
+	v := reflect.ValueOf(q)
+	return v.Kind() == reflect.Ptr && v.IsNil()
 }
 
 // SpoolWired reports whether the flow owns a replayable durable queue (§3.9a).

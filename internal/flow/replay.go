@@ -36,8 +36,12 @@ type spoolQueue interface {
 const spoolCoupling = "SPEC-08 §3.6/§3.9 × SPEC-09 §3.6/§3.7"
 
 // spoolPath is the §3.9a location, inside the SPEC-12 §3.2 state tree's own
-// `spool/` subtree and in a subdirectory no other subsystem lists.
+// `spool/` subtree and in a subdirectory no other subsystem lists. It is exported
+// because the composition root owns the state root (SPEC-12 §3.1).
 func spoolPath(stateRoot string) string { return stateRoot + "/spool/flow/spawn" }
+
+// SpoolPath is spoolPath for the composition root.
+func SpoolPath(stateRoot string) string { return spoolPath(stateRoot) }
 
 // spoolPut writes one durable spawn entry and reports whether it landed on a
 // queue THIS subsystem replays. It never claims durability it does not have: a

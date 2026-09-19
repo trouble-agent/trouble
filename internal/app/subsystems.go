@@ -389,10 +389,22 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	if opts.FlowCfg != nil {
 		flowCfg = *opts.FlowCfg
 	}
+	// The flow's OWN durable dispatch queue (SPEC-08 §3.9a). It is deliberately
+	// NOT the issue desk's spool: that store's replay walks the configured DRIVER
+	// names, so no loop lists a foreign entry, its decode does not accept the
+	// flow's payload shape, and the desk's shipped posture (`issues.enabled =
+	// false`, SPEC-09 §3.4a) refuses the enqueue outright. A store that cannot be
+	// built is a recorded refusal and leaves the flow with no queue — which every
+	// dispatch record then states (`dispatch_state="unspooled"` + the coupling),
+	// rather than a durability claim nothing backs.
+	flowQueue, qErr := newFlowSpool(d, clock)
+	if qErr != nil {
+		recordSubsystemRefusal(d, subs, ctx, "flow_spool", qErr)
+	}
 	if fl, err := flow.NewFlow(flowCfg, ladderCfgGates(d)); err != nil {
 		recordSubsystemRefusal(d, subs, ctx, "flow", err)
 	} else {
-		fl.SetDeps(flowDeps(d, subs, hostID, actor, clock))
+		fl.SetDeps(flowDeps(d, subs, hostID, actor, clock, flowQueue))
 		subs.Flow = fl
 	}
 
@@ -414,17 +426,30 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	return subs
 }
 
+// newFlowSpool builds the flow's own durable dispatch queue (§3.9a) under the
+// state root. The bounds are the §3.9a defaults, which mirror the numbers the two
+// adjacent contracts already pin; no new registry key is minted here, so the
+// queue's path and limits are composition, not operator configuration.
+func newFlowSpool(d *Daemon, clk Clock) (*flow.Spool, error) {
+	return flow.NewSpool(flow.SpoolPath(d.Cfg.StateRoot), flow.SpoolBounds{},
+		func() time.Time { return clk.Now() })
+}
+
 // flowDeps wires the flow's collaborator set. The spawn seam is the REAL
 // dispatch path: no composition-root test double, no second wire format
 // (SPEC-08 §3.6's payload is produced once, by the router itself).
-func flowDeps(d *Daemon, subs *Subsystems, hostID string, actor types.Actor, clk Clock) flow.Deps {
-	return flow.Deps{
+func flowDeps(d *Daemon, subs *Subsystems, hostID string, actor types.Actor, clk Clock, spool *flow.Spool) flow.Deps {
+	deps := flow.Deps{
 		Recorder: DraftWriter{d.Store},
 		Issues:   deskAdapter{desk: subs.Issues},
 		Spawn:    routerSpawnAdapter{f: subs.Flow},
 		Skills:   flowSkillsSink{d: d, sk: subs.Skills},
-		Spool:    deskSpool{s: subs.Issues, store: d.Store},
-		Clock:    clk,
+		// The flow's OWN store (§3.9a), not the desk's spool: this is the sink
+		// whose replay the flow itself owns and runs via Run. A nil store leaves
+		// Deps.Spool a true nil INTERFACE (never a typed nil): a typed nil would
+		// satisfy the replay assertion behind the interface and panic on the
+		// first dispatch.
+		Clock: clk,
 		Scrub: func(target types.ScrubTarget, b []byte) []byte {
 			return scrubBytesOrDefault(d, target, "", b)
 		},
@@ -455,6 +480,10 @@ func flowDeps(d *Daemon, subs *Subsystems, hostID string, actor types.Actor, clk
 		},
 		Actors: flow.ActorInfo{HostID: hostID, ID: actor.ID},
 	}
+	if spool != nil {
+		deps.Spool = spool
+	}
+	return deps
 }
 
 // buildSentinel constructs the SPEC-04 server on the preflight-held project
@@ -825,19 +854,6 @@ func (a deskAdapter) Comment(ctx context.Context, ref types.IssueRef, body strin
 		return ref, fmt.Errorf("issues desk not wired")
 	}
 	return a.desk.Comment(ctx, ref, "trouble:flow", body)
-}
-
-// deskSpool adapts the issue desk's spool onto flow's spoolSink.
-type deskSpool struct {
-	s     *issues.Desk
-	store *Store
-}
-
-func (s deskSpool) Enqueue(ctx context.Context, e types.SpoolEntry) error {
-	if s.s == nil {
-		return fmt.Errorf("issues desk spool not wired")
-	}
-	return s.s.EnqueueSpool(ctx, e)
 }
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -88,8 +89,15 @@ func TestEscapeRealWorldNames(t *testing.T) {
 // TestResolveManagers: "self" resolves to the daemon's own uid, uid forms are
 // accepted, the system manager is always present, and the list is bounded.
 func TestResolveManagers(t *testing.T) {
+	// The fixture is derived from the RUNNING uid so the test holds on every
+	// host: "self", user:<uid> and uid:<uid> are three spellings of one
+	// identity, and that same-uid collapse must be exercised wherever the
+	// process runs (root containers, service users, CI — not always 1000).
+	self := os.Getuid()
 	h := newHarness(t,
-		types.ConfigValue{Key: "sensors.dbus.user_managers", Value: []string{"self", "user:1000", "uid:1000", "bogus"}},
+		types.ConfigValue{Key: "sensors.dbus.user_managers", Value: []string{
+			"self", fmt.Sprintf("user:%d", self), fmt.Sprintf("uid:%d", self), "bogus",
+		}},
 	)
 	got := h.s.resolveManagers()
 	if got[0] != "system" {
@@ -101,13 +109,40 @@ func TestResolveManagers(t *testing.T) {
 	if !strings.HasPrefix(got[1], "user:") {
 		t.Fatalf("second manager = %q", got[1])
 	}
+	if want := fmt.Sprintf("user:%d", self); got[1] != want {
+		t.Fatalf("self must resolve to the daemon's own uid: managers = %v, want %q", got, want)
+	}
+
+	// The other half of the contract: a uid that is NOT self must survive dedup
+	// even while the duplicate spellings of the self uid collapse, so the
+	// assertion is meaningful on any host and not merely green.
+	other := self + 1
+	h2 := newHarness(t, types.ConfigValue{Key: "sensors.dbus.user_managers", Value: []string{
+		fmt.Sprintf("user:%d", self), fmt.Sprintf("uid:%d", self),
+		fmt.Sprintf("uid:%d", other), fmt.Sprintf("user:%d", other),
+	}})
+	got2 := h2.s.resolveManagers()
+	if len(got2) != 3 {
+		t.Fatalf("managers = %v, want system + self + one distinct other uid", got2)
+	}
+	seen := map[string]bool{}
+	for _, m := range got2 {
+		if seen[m] {
+			t.Fatalf("managers = %v, duplicate entry %q survived dedup", got2, m)
+		}
+		seen[m] = true
+	}
+	if !seen[fmt.Sprintf("user:%d", self)] || !seen[fmt.Sprintf("user:%d", other)] {
+		t.Fatalf("managers = %v, want both user:%d and user:%d", got2, self, other)
+	}
+
 	// Bounded at 16 uids.
 	many := []string{}
 	for i := 0; i < 40; i++ {
 		many = append(many, fmt.Sprintf("uid:%d", 2000+i))
 	}
-	h2 := newHarness(t, types.ConfigValue{Key: "sensors.dbus.user_managers", Value: many})
-	if n := len(h2.s.resolveManagers()); n > dbusMaxUserMgrs+1 {
+	h3 := newHarness(t, types.ConfigValue{Key: "sensors.dbus.user_managers", Value: many})
+	if n := len(h3.s.resolveManagers()); n > dbusMaxUserMgrs+1 {
 		t.Fatalf("resolved %d managers, cap is %d uids + system", n, dbusMaxUserMgrs)
 	}
 }

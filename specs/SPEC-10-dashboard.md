@@ -396,6 +396,46 @@ stops accepting *new* partial polls with **503** + `Retry-After: 5` while still 
 `/health.json` and POSTs. The daemon's own memory pressure is itself a recordable event (SPEC-12 owns the
 record); the dashboard's contribution is to shed poll load, not to die.
 
+### 2.9a How the two RSS rows are measured (amendment)
+
+Both rows above are measurements of a live process, so the spec fixes *how* they are taken. A raw two-sample
+`/proc/self/statm` delta is not the dashboard's contribution: the Go runtime grows the heap arena in chunks
+and the scavenger returns pages on its own schedule, so a build holding no per-render state measurably moved
+**1.58 MB** of retained RSS and **17.80 MB** of churn peak over the same 60 s window — a delta that reads as a
+blown budget without any state to blame. The rows are asserted through three readings on the helper process
+that serves the §7 fixture (`budget_test.go`):
+
+* **Retained heap — the steady row.** `runtime.MemStats.HeapAlloc` after an explicit `runtime.GC()`, sampled
+  after a warmup with `GOGC` pinned for the measurement and restored afterwards: the budget is about what the
+  dashboard retains, not how far the runtime let the live set drift between cycles. `HeapAlloc` (live objects)
+  rather than `HeapInuse`, because the latter also carries the spans the allocator grew to serve render churn,
+  which no dashboard keeps. The window is split into equal batches and each batch contributes its **floor** —
+  the minimum retained reading it settled back to — so a collection landing mid-render cannot inflate the
+  sample; the budget is the growth between the first and last batch floors.
+* **Steady-state slope — a hard failure, deliberately not fenced.** The tail batches' per-batch growth is
+  scaled to the whole window. Retention that is per-render is linear in request count and fails this even when
+  a large one-time transient hides it inside the total; runtime noise does not scale with request count. The
+  sample is allocation-driven (a collection is forced before every reading), so it is not the host's to
+  explain.
+* **Process ceiling and the 100-concurrent row — fenced.** The window's RSS delta, with both ends collected
+  and returned via `GC` + `FreeOSMemory`, is asserted against the steady budget plus the arena/scavenger
+  headroom a process holding the §7 fixture carries; the 100-concurrent row is the live heap held above a
+  post-collection baseline taken immediately before the burst, with no collection while the renders are in
+  flight (a collection would reclaim exactly the transient that row bounds). Both verdicts route through
+  `internal/loadfence`, so a host above the fence's load average reports an explicit **SKIP** rather than a red
+  gate.
+
+The measured window is §7's: 100 rps of `/partials/incidents` for 60 s against the 10,000-group /
+50,000-record fixture, the same rate against a control handler in the same process (which is what keeps the
+request-rate row attributable), then the burst.
+
+Residual, stated rather than implied: the quiet-host requirement is unchanged, so a red retained-heap or
+slope verdict on a host inside the fence is a real finding, but a **bounded** cache that fills during the
+warmup is charged to the baseline and a bounded (non-linear) growth is charged to the total rather than to the
+slope. The readings bound the dashboard's own Go heap; a leak held outside it (an open descriptor, a mapping
+the allocator never returns) is caught by the process-RSS ceiling and by the descriptor assertion of the §7
+row, not by the heap sample.
+
 ## 3. Data model
 
 ### 3.1 Local (package-private) types
@@ -665,7 +705,7 @@ All tests are `internal/dashboard` package tests plus one end-to-end test that s
 | `partials_test.go` | each of the 7 partials returns its exact root `id`, carries `data-seq`/`data-rendered-ts`/`data-stall-s`, contains no `<html>`/`<body>`/`<script>`, and is ≤8 KB with 200 rows of fixtures; the whitelist rejects an unknown name (008) | 7/7 exact; 0 inline scripts |
 | `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML; first-paint budget: the server-rendered panel's `incidents open`/`groups open` equal the page's own header counters and its byte/rate/version rows equal what `/partials/budget` serves; the footer stamp on all seven pages equals the `version`/`git_sha` **`/health.json` reports** | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates; 0 zero-valued first-paint rows; footer stamp identical to the health surface |
 | `live_test.go` | **AC-19 timing**: trigger a fixture incident, poll `/partials/incidents?since=` at the real intervals, record `ts_response − ts_trigger` of the first fragment containing the ID; 20 iterations; assert p100 ≤2000 ms and p50 ≤1100 ms; assert the strip-accelerator-off variant still passes p95 ≤2000 ms; assert the stall banner appears when the writer is paused ≥`stall_alert_s` | p100 ≤2000 ms (**AC-19**), p95 ≤2000 ms without the accelerator |
-| `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; RSS delta sampled every 250 ms; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB), p99 render ≤20 ms, 0 ledger file opens |
+| `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; retained heap (`HeapAlloc` after a forced GC, GC percent pinned) sampled every 250 ms and batched into a steady-state slope (§2.9a); a control handler driven at the same rate in the same process; the 100-concurrent-render burst measured against a post-collection baseline with no collection in flight; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB, §2.9a), p99 render ≤20 ms, 0 ledger file opens |
 | `integration/e2e_dashboard_test.go` | start the daemon, ack/close/autonomy against the mock ladder + lifecycle, assert the recorded `Actor{kind:human, id:<token label>}` and the ledger record kind; `read`-scope token can hit every GET and partial and gets 003 on all three POSTs; `/health.json` parsed into `HealthResponse` with `ledger_last_seq` advancing | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |
 | `pagination_test.go` | **AC-30** (dashboard half): `/incidents` and `/groups` walked with `page_token` + `page_size` over a 10,000-incident fixture index — page-size stability, no row repeated, no row skipped, `next_page_token` empty exactly at the end; a token minted before a simulated generation drop renders the reset banner with **200**; every render opens 0 ledger files (§2.9) | every row exactly once per walk; the drop case is 200 + banner, never 500; 0 file opens |
 

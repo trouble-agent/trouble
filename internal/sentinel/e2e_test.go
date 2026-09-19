@@ -40,6 +40,14 @@ type e2eChain struct {
 	root string
 }
 
+// e2eLedgerNow is the e2e chain's ledger clock. The ledger is the side that
+// stamps record timestamps (ledger.Options.Now, rendered through
+// types.TsLayout = millisecond), so a test that compares a ledger-stamped
+// timestamp against a boot instant pins this clock (see pinLedgerClock) and
+// reads both sides from it, instead of comparing its millisecond output
+// against a nanosecond time.Now.
+var e2eLedgerNow = time.Now
+
 // newE2EChain opens the real chain. It is the only test that uses the real
 // ledger, so the JSONL on disk is asserted directly.
 func newE2EChain(t *testing.T, mut func(*Config)) *e2eChain {
@@ -69,7 +77,7 @@ func newE2EChain(t *testing.T, mut func(*Config)) *e2eChain {
 		Index:          ledger.DefaultIndexOptions(),
 		Writer:         cfg.Actor,
 		MaxSchema:      1,
-		Now:            time.Now,
+		Now:            e2eLedgerNow,
 		HostID:         cfg.HostID,
 		Zone:           "loopback",
 		AssertScrubbed: true,

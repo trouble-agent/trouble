@@ -114,7 +114,7 @@ injects the resulting `Actor` into the ledger writer constructor (§8).
 `a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b-c`. Env vars are read only with the `TROUBLE_` prefix. A dot
 becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secrets.environment_file` is
 `--secrets-environment_file`, `lifecycle.unit_name` is `--lifecycle-unit_name`. Every registered key of §3.1
-is flag-addressable in that form except the seven §2.5a names — four of them are declarations rather than
+is flag-addressable in that form except the eight §2.5a names — five of them are declarations rather than
 scalars, and three cannot cross a command line at all. A flag source beats env, file and default (§3.1).
 
 The shipped unit's `ExecStart` renders exactly one argument pair, `--config <path>`; `RenderUnits` scans every
@@ -145,14 +145,17 @@ Rules, pinned:
 - **`--config` is consumed before resolution and nothing else is.** The file is an input to resolution rather
   than a key resolution can already have read. Its mechanical twin `--config_path` selects the file *and*
   stays a resolved row, so `trouble config explain` shows that a flag — not the file — chose the path.
-- **Seven keys cannot be set from argv.** Four of them are the tables, whose value is a declaration rather
-  than a scalar: `projects` (§3.1a), `issues` and `skills` (§3.1b) and `llm` (§3.1c) — a scalar value is
-  refused by name with 001. The other three are refused by the argv-secret control of §3.2 rule 2 before the
-  daemon can serve: `dashboard.token_file`, `hub.token` and `server.redis.password_env`. Their flag NAMES
-  match the mandatory `cli_flag_secret` rule (SPEC-02 §3.3 rule 9) and the value that follows the name is
-  taken as its value, so a path, a token and an environment-variable name are indistinguishable to that rule.
-  All three are set from the file or the environment (`TROUBLE_DASHBOARD_TOKEN_FILE`, `TROUBLE_HUB_TOKEN`,
-  `TROUBLE_SERVER_REDIS_PASSWORD_ENV`), which is what the shipped unit does with `EnvironmentFile=`.
+- **Eight keys cannot be set from argv.** Five of them are declarations rather than scalars: the four
+  tables — `projects` (§3.1a), `issues` and `skills` (§3.1b) and `llm` (§3.1c) — plus the one list of
+  tables on the SPEC-03 §4 sensor surface, `sensors.inotify.paths` (§3.1e), whose rows carry the
+  `path`/`mask`/`recursive`/`max_depth`/`rule` of each watched path. A scalar value for any of the five
+  is refused by name with 001. The other three are refused by the argv-secret control of §3.2 rule 2
+  before the daemon can serve: `dashboard.token_file`, `hub.token` and `server.redis.password_env`.
+  Their flag NAMES match the mandatory `cli_flag_secret` rule (SPEC-02 §3.3 rule 9) and the value that
+  follows the name is taken as its value, so a path, a token and an environment-variable name are
+  indistinguishable to that rule. All three are set from the file or the environment
+  (`TROUBLE_DASHBOARD_TOKEN_FILE`, `TROUBLE_HUB_TOKEN`, `TROUBLE_SERVER_REDIS_PASSWORD_ENV`), which is
+  what the shipped unit does with `EnvironmentFile=`.
 
 `internal/app`'s tests reach the flag source through `BootOptions.Args`, which is why §2.5 and this section
 could disagree with `cmd/troubled` for as long as they did; the surface is pinned by the argv tests of
@@ -218,6 +221,7 @@ real, has a default, and appears in the explain dump.
 | `escalate.timeout` | `10s` per channel | |
 | `fs.forbidden_state_roots` | `/tmp`, `/var/tmp` | prefix control, §3.2 |
 | `fs.remote_types` | `nfs,nfs4,cifs,smb,sshfs,fuse.sshfs` | a remote state root is refused (004) |
+| `sensors.*` (the whole SPEC-03 §4 detection plane) | the plane's own compiled defaults, enumerated key by key in §3.1e | the surface is registered leaf by leaf, so each key resolves with ordinary precedence and gets its own explain row; before §3.1e only `sensors.sample_fold_window` was registered and any other `sensors.*` file key was an unknown file key (TROUBLE-LIFECYCLE-001) |
 
 `ConfigValue` rows (JSON, the exact `trouble config explain --json` shape):
 
@@ -395,6 +399,99 @@ Rules, pinned:
   store (`flow.NewSpool`) and onto the flow itself (`flow.NewFlowWithBounds`) — so the queue's limits and
   the loop that drains it read the same resolved bound, and no path runs on the compiled constants while an
   operator's key sits unread.
+
+### 3.1e The `[sensors]` table: the SPEC-03 §4 detection-plane surface
+
+The detection plane owns 33 configuration keys (SPEC-03 §4). Each one is registered here as its own leaf, so
+each resolves with the ordinary precedence (flag > env > file > default), carries its own provenance and has
+its own `trouble config explain` row: `--sensors-psi-sample_interval`,
+`TROUBLE_SENSORS_JOURNALD_QUEUE`, `sensors.disk.mounts`, and so on. There is no `[sensors]`-level row and no
+second resolution path: the table is a spelling of the flat key space, never a key of its own.
+
+```toml
+[sensors]
+sample_fold_window = "5m"   # §3.8a; `0` = one record per observation
+merge_window = "5s"         # §3.6 merge rule
+
+[sensors.psi]
+enabled = true
+sample_interval = "2s"
+window = "2s"
+
+[sensors.journald]
+enabled = true
+units = []                  # entry units; empty follows the configured scope
+follow_all = false
+follow_all_max_entries = 2000000
+queue = 8192
+queue_bytes = 33554432
+max_entry = 65536
+probe_interval = "30s"
+
+[sensors.dbus]
+enabled = true
+user_managers = ["self"]
+ping_interval = "30s"
+reconcile_interval = "300s"
+oomd_probe_interval = "10m"
+
+[sensors.disk]
+enabled = true
+mounts = ["/"]
+interval = "60s"
+
+[sensors.timers]
+enabled = true
+interval = "60s"
+
+[sensors.inotify]
+enabled = true
+recheck_interval = "900s"
+max_depth = 8
+
+[sensors.rules]
+reload_debounce = "500ms"   # `dir` defaults to <state_root>/../config/rules.d
+
+[sensors.limits]
+rule_per_min = 120
+source_per_min = 600
+global_per_min = 1200
+incidents_per_5m = 25
+```
+
+`[[sensors.inotify.paths]]` is the one key written as a list of tables, one row per watched path:
+
+```toml
+[[sensors.inotify.paths]]
+path = "/etc"
+recursive = false
+max_depth = 8
+# mask = "IN_MODIFY"   (the collector's mask when omitted)
+# rule = "svc"         (the path's own label when omitted)
+```
+
+Rules, pinned:
+
+- **Every key of the plane's own switch is registered, and the two lists cannot drift.** The keys are the
+  `case` labels of `internal/sensors`' config decoder; `internal/lifecycle/sensors_registry_test.go` derives
+  the key list from that source and compares it with the registry in BOTH directions, so a key the plane
+  reads but the registry does not know is a test failure — that is exactly the state TRBL-036 was filed
+  against, where `sensors.psi.enabled` in a file was an unknown file key at exit 13.
+- **The defaults here are the plane's compiled defaults.** A host that declares no `[sensors]` table runs the
+  posture SPEC-03 §4 states; the same numbers are pinned on both sides, so a drift fails one of the two
+  tests instead of silently changing what a stock boot does.
+- **Validation stays the plane's.** These entries carry values, not verdicts: bounds, ranges and the
+  `sensors.inotify.paths` row shape are checked when the plane decodes the resolved set, and an unknown
+  `sensors.*` key is still the plane's own loud failure.
+- **`sensors.inotify.paths` is a declaration.** Its value is a list of tables, so a scalar source — a flag or
+  an environment variable — cannot express it and is refused by name with **001** (§2.5a), exactly like the
+  four registered tables. The file is the source that sets it.
+- **`sensors.rules.dir` follows the resolved state root.** Its default is `<state_root>/../config/rules.d`
+  (SPEC-03 §3.7), derived after resolution like `lifecycle.heartbeat_path`, and an explicit
+  `sensors.rules.dir` beats the derivation.
+- **The values reach the plane.** The composition root hands the resolved `ConfigValue` set straight to
+  `sensors.New`, side by side with the entries it already reads; `internal/app/sensors_config_test.go`
+  asserts that a configured key changes what the plane loads rather than being accepted and ignored.
 
 ### 3.2 State root, secret-file modes, bind preflight
 
@@ -1087,7 +1184,10 @@ Files and pass thresholds (all numbers normative regressions):
 |---|---|---|
 | `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0) |
 | `internal/lifecycle/flow_bounds_test.go` | the §3.1d `flow.*` keys: the five defaults with NO file, env or flag (256 / 72h / 5 / 5s / 100, each `source=default`/`builtin`); a `[flow]` table resolves and a HALF-specified one leaves the other four at those defaults; flag > env > file > default with the winning `source`/`source_ref` on each row; all five present exactly once in the explain dump (plus the `--key` filter form); a zero, a negative, a `0s`, an empty and an unparsable duration refused through all three sources | 5 defaults + 1 file/1 half-table resolve + 3 precedence rows + 5 explain rows + 16 refusal cases; every refusal 001 AND naming the key; 0 cases resolving to a non-positive bound |
-| `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the five non-addressable keys asserted by name and reason (three tables, two refused by the argv scan); a secret-shaped flag value driven through a real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a secret-shaped flag value still exits 13 with 013, and a control value passes the same scan |
+| `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the eight non-addressable keys asserted by name and reason (five declarations, three refused by the argv scan); a secret-shaped flag value driven through a real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a secret-shaped flag value still exits 13 with 013, and a control value passes the same scan |
+| `internal/lifecycle/sensors_registry_test.go` | the §3.1e sensor surface as registered keys: the key list DERIVED from `internal/sensors`' own decoder `case` labels and compared with the registry in both directions (a key the plane reads but the registry does not know fails, and so does a registered key the plane never reads); every default pinned to the plane's compiled posture; flag > env > file > default with the winning `source`/`source_ref` on duration, integer, bool, list, string and depth keys plus the 002 conflict row; every sensor key present exactly once in the explain dump (and the `--key` filter form); the resolved row TYPES the decoder's readers accept; a file that sets the WHOLE surface (generated from the key list) resolving with no refusal; `sensors.rules.dir` following the resolved state root; `sensors.inotify.paths` refused by name from a flag and from the environment while its file form resolves | every key covered in both directions, 0 unregistered keys the plane reads; 6 precedence cases × 4 sources asserted with provenance; 0 refusals from a file that sets all 33 keys; 0 sensor keys missing from the dump; both scalar refusals 001 AND naming the key |
+| `internal/sensors/config_test.go` | the decoder's side of the same handoff: the compiled defaults field by field, and every reader driven with BOTH forms a resolved `ConfigValue` can carry — `types.Duration` (a default row) beside the duration string, `bool` beside `"true"`, `int`/`int64` beside the decimal string, `[]string`/`[]any` beside the comma-separated string, and the array-of-tables form of `sensors.inotify.paths` (`[]map[string]any`, which `[[sensors.inotify.paths]]` parses into) beside the untyped `[]any` carrier and every empty spelling; a path-less table and a scalar refused by name | every default asserted; every reader accepts both forms; 0 accepted scalar for the list-of-tables key; the empty forms all mean "no configured path" |
+| `internal/app/sensors_config_test.go` | the composition root's resolution→plane path (§3.1e): the resolved set is handed to `sensors.New` exactly as `daemon.go` does, and the CONFIGURED `sensors.rules.dir` is what the plane loads (the control arm with no such key loads the shipped defaults, so the first assertion is evidence); the shipped `examples/config.toml` resolves with its `[sensors]` keys sourced from the FILE and reaches the typed config; a row of a type no reader accepts is refused, so the green arm is not vacuous | every case asserted; the control arm loads 0 configured rules; 0 rows accepted without a reader; the shipped example's sensor rows all `source=file` |
 | `internal/lifecycle/subsystem_test.go` | the §3.1b tables as registered keys: a documented `[issues]`/`[skills]` opt-in resolves, carries the table text verbatim and the declared key names, and produces ONE `ConfigValue` per table (no per-sub-key row); a root-level dotted key declares the table; an absent table resolves to the `builtin` default `not declared`; the file-sourced row keeps `file` provenance and carries no value of the table (a declared `api_key_file` path appears zero times in the marshalled dump); a top-level typo, an unregistered sibling table and a repeated table are 001 (the last naming the repeated header); a scalar source (`TROUBLE_ISSUES`, `--skills`) is refused by name | every case asserted; 100 % of the table's declared keys named in the row; 0 values of a table anywhere in the explain dump |
 | `internal/app/subsystems_config_test.go` | the composition root's file→subsystem path: a valid `[issues]` opt-in builds a desk whose configured driver is the one that answers the boot probe, and a valid `[skills]` opt-in builds a loop holding the configured source; an invalid file (desk on with no enabled driver, loop on with no source) boots BOTH refused, each row carrying its own code and a reason naming the key, `status` not `ok`, one `subsystem_not_built` record per row; an unknown key inside a table is refused by name; the shipped example with its own documented opt-in applied to its own bytes boots `ok` | 12 table-driven resolver rows + 3 boots; 0 subsystems built from a refused declaration; 0 silent defaults |
 | `internal/lifecycle/stateroot_test.go` | 0700/0755/0700-wrong-owner matrix; forbidden-root refusal; remote-fs refusal; missing dir; read-only dir | 004/005 selected exactly; every offender reported in one pass |

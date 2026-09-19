@@ -94,6 +94,56 @@ zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"
 channels = []
 timeout = "10s"
 
+# --- [sensors] the SPEC-03 §4 detection plane (SPEC-12 §3.1e) ----------------
+# Every key of the plane's own config switch is a REGISTERED key: each one
+# resolves with flag > env > file > default and has its own
+# `bin/trouble config explain` row (`--sensors-psi-sample_interval`,
+# `TROUBLE_SENSORS_JOURNALD_QUEUE`, ...). Without a table here the plane runs its
+# compiled defaults; the values below are those same numbers, spelled out so the
+# stock posture is visible in the file and gated by the boot tests.
+#
+#   [sensors.psi]      enabled, sample_interval, window
+#   [sensors.journald] enabled, units, follow_all, follow_all_max_entries,
+#                      queue, queue_bytes, max_entry, probe_interval
+#   [sensors.dbus]     enabled, user_managers, ping_interval,
+#                      reconcile_interval, oomd_probe_interval
+#   [sensors.disk]     enabled, mounts, interval
+#   [sensors.timers]   enabled, interval
+#   [sensors.inotify]  enabled, recheck_interval, max_depth
+#   [sensors.rules]    dir (default `<state_root>/../config/rules.d`),
+#                      reload_debounce
+#   sensors.merge_window; sensors.sample_fold_window (`0` turns the §3.8a fold
+#                      off and reproduces one record per observation)
+#   [sensors.limits]   rule_per_min, source_per_min, global_per_min,
+#                      incidents_per_5m
+#
+# ONE key of the surface is a DECLARATION rather than a scalar — the watched
+# paths, one table per path (set it from the file only: a flag or an environment
+# variable is a scalar and is refused by name, and every row is validated when
+# the plane decodes it):
+#
+#   [[sensors.inotify.paths]]
+#   path = "/etc"
+#   recursive = false
+#   max_depth = 8
+#   # mask = "IN_MODIFY"   (default: the collector's mask)
+#   # rule = "svc"         (default: the path's own label)
+
+[sensors]
+sample_fold_window = "5m"
+merge_window = "5s"
+
+[sensors.psi]
+enabled = true
+sample_interval = "2s"
+window = "2s"
+
+[sensors.limits]
+rule_per_min = 120
+source_per_min = 600
+global_per_min = 1200
+incidents_per_5m = 25
+
 [origin]
 host_id = ""
 hub_id = ""

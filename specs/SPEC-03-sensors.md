@@ -597,7 +597,8 @@ for.
   identical sampled observations the record stands for, `first_ts` / `last_ts` = the window they fall
   in, `fold = true`, and `fold_window_s`. `detail` is carried verbatim from the first observation, so
   the detail shape a consumer already reads does not change.
-- **Config.** `sensors.sample_fold_window` (a registered key, SPEC-12 §3.1), default `5m`. `0`
+- **Config.** `sensors.sample_fold_window` (a registered key, SPEC-12 §3.1e, like every other key of the
+  surface §4 lists), default `5m`. `0`
   disables the fold and reproduces the per-cycle posture exactly: one record per observation, no fold
   fields. A negative window is refused when the configuration is decoded (§2's loud-failure rule). The
   default equals the per-rule cooldown default (§3.5), so a continuing condition persists records no
@@ -699,14 +700,38 @@ type foldEntry struct { key string; sensor types.SensorKind; draft types.RecordD
 | consumed by | `internal/ladder` (event/gap/canary records via the ledger index; `Breakers()` for the gate), `internal/dashboard` (reads `Health()`, `Liveness()`, `Breakers()`, `Rules()`), `internal/lifecycle` (heartbeat file, `/health`) |
 | never | sensors never call the registry, never hold a module handle, never spawn a process other than `journalctl` |
 
-Config keys (all with defaults; no host-specific value is compiled in anywhere): `sensors.psi.enabled`,
-`…psi.sample_interval`, `…psi.window`, `…journald.enabled`, `…journald.units[]`, `…journald.follow_all`,
-`…journald.queue`, `…journald.max_entry`, `…journald.probe_interval`, `…dbus.enabled`,
-`…dbus.user_managers[]`, `…dbus.ping_interval`, `…dbus.reconcile_interval`, `…disk.enabled`,
-`…disk.mounts[]`, `…disk.interval`, `…timers.enabled`, `…timers.interval`, `…inotify.enabled`,
-`…inotify.paths[].{path,mask,recursive,max_depth,rule}`, `…rules.dir`, `…rules.reload_debounce`,
-`…limits.{rule_per_min,source_per_min,global_per_min,incidents_per_5m}`, `…merge_window`,
-`…sample_fold_window` (§3.8a; `0` = off).
+Config keys. Every key below is a REGISTERED key of SPEC-12 §3.1 — the sensor
+surface is enumerated key by key in SPEC-12 §3.1e — so each one resolves with the
+ordinary precedence (flag > env > file > default), carries its own provenance and
+appears in `trouble config explain`. The registry mirrors the `case` labels of
+`internal/sensors`' own config switch, and a test derives the key list from that
+switch, so this list, the registry and the decoder cannot drift apart. All keys
+have defaults and no host-specific value is compiled in anywhere:
+
+`…psi.enabled`, `…psi.sample_interval`, `…psi.window`, `…journald.enabled`,
+`…journald.units[]`, `…journald.follow_all`, `…journald.follow_all_max_entries`,
+`…journald.queue`, `…journald.queue_bytes`, `…journald.max_entry`,
+`…journald.probe_interval`, `…dbus.enabled`, `…dbus.user_managers[]`,
+`…dbus.ping_interval`, `…dbus.reconcile_interval`, `…dbus.oomd_probe_interval`,
+`…disk.enabled`, `…disk.mounts[]`, `…disk.interval`, `…timers.enabled`,
+`…timers.interval`, `…inotify.enabled`,
+`…inotify.paths[].{path,mask,recursive,max_depth,rule}`, `…inotify.recheck_interval`,
+`…inotify.max_depth`, `…rules.dir`, `…rules.reload_debounce`,
+`…limits.{rule_per_min,source_per_min,global_per_min,incidents_per_5m}`,
+`…merge_window`, `…sample_fold_window` (§3.8a; `0` = off).
+
+Two properties of that surface are pinned by SPEC-12 §3.1e and are part of this
+section's contract, because they decide what a config file may say:
+
+- **`sensors.inotify.paths` is a declaration, not a scalar.** Its value is a list
+  of tables, one per watched path, written `[[sensors.inotify.paths]]`; the file
+  is the source that sets it, and a flag or an environment variable — a scalar —
+  is refused by name (TROUBLE-LIFECYCLE-001) rather than flattened into a second
+  syntax. The rows are validated here, by §4's own startup step 1: a row without
+  a `path` fails the decode.
+- **`sensors.rules.dir` defaults to `<state_root>/../config/rules.d`** and is
+  derived from the RESOLVED state root, so moving the state root moves the
+  directory this plane watches and reloads (§3.7).
 
 Startup order (each step's failure degrades only its own sensor): (1) decode `sensorConfig` from
 `ConfigValue`s and fail loudly on an unknown `sensors.*` key; (2) `Probe` — kernel floor, PSI arm

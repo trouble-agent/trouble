@@ -38,8 +38,12 @@ const childEnvName = "TROUBLED_TEST_CHILD_MODE"
 // are asserted EXACTLY by TestDaemonArgvAddressesEveryRegisteredKey: a new key that
 // cannot be addressed from argv must be named here and in the spec, never skipped.
 var (
-	// Tables: a flag value is a scalar and these four keys are declarations.
-	wantTableRefused = []string{"issues", "llm", "projects", "skills"}
+	// Declarations: a flag value is a scalar, and these five keys are
+	// declarations rather than scalars — the four tables (projects, issues,
+	// skills, llm) and the one list of tables on the SPEC-03 §4 sensor surface,
+	// `sensors.inotify.paths` (SPEC-12 §3.1e: one `[[sensors.inotify.paths]]`
+	// table per watched path).
+	wantTableRefused = []string{"issues", "llm", "projects", "sensors.inotify.paths", "skills"}
 	// Refused by the argv secret scan (SPEC-12 §3.2): the flag NAME matches the
 	// mandatory cli_flag_secret rule, so the value that follows it — a path, in
 	// practice a token store path, or an environment-variable NAME in

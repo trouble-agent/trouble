@@ -526,12 +526,34 @@ func asStringSlice(v types.ConfigValue) ([]string, error) {
 	}
 }
 
+// asInotifyPaths accepts every form the resolved config can hand this decoder
+// (SPEC-12 §3.1e): the array-of-tables reader's own type (`[]map[string]any`,
+// which is what `[[sensors.inotify.paths]]` parses into), a `[]any` of tables
+// (the same document reached through an untyped carrier), and the empty forms
+// (`nil` / an empty slice / the empty string) that mean "no configured path".
+// An EMPTY set is not a guess: it is the compiled default, and a table that
+// carries no path is refused below, by name.
 func asInotifyPaths(v types.ConfigValue) ([]inotifyPathConf, error) {
-	list, ok := v.Value.([]any)
-	if !ok {
-		if s, ok := v.Value.(string); ok && strings.TrimSpace(s) == "" {
+	var list []any
+	switch t := v.Value.(type) {
+	case nil:
+		return []inotifyPathConf{}, nil
+	case []map[string]any:
+		if len(t) == 0 {
 			return []inotifyPathConf{}, nil
 		}
+		list = make([]any, 0, len(t))
+		for _, e := range t {
+			list = append(list, e)
+		}
+	case []any:
+		list = t
+	case string:
+		if strings.TrimSpace(t) == "" {
+			return []inotifyPathConf{}, nil
+		}
+		return nil, fmt.Errorf("expected a list of tables, got %q", t)
+	default:
 		return nil, fmt.Errorf("expected a list of tables, got %T", v.Value)
 	}
 	out := make([]inotifyPathConf, 0, len(list))

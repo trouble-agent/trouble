@@ -87,14 +87,77 @@ type Config struct {
 
 	Dashboard DashboardConfig `toml:"dashboard"`
 
-	// Sensors is the SPEC-03 §4 sensor surface this registry resolves. The
-	// sampled-event fold's window is the key registered so far: without a
-	// registry entry a `sensors.*` file key is an unknown file key
-	// (TROUBLE-LIFECYCLE-001), which would make the fold impossible to turn off
-	// from a config file. The other keys of the §4 surface are still
-	// unregistered — a gap that is named, never assumed away.
+	// Sensors is the SPEC-03 §4 detection-plane surface, resolved here key by
+	// key (SPEC-12 §3.1e). Every scalar key of internal/sensors' config switch
+	// is a registered leaf: before that, a `sensors.*` file key was an unknown
+	// file key (TROUBLE-LIFECYCLE-001), so the whole plane — PSI intervals,
+	// journald units/queue, D-Bus managers, disk mounts, timers, inotify
+	// paths/depth, rules dir/debounce, rate limits — was untunable from a
+	// config file, unreachable from the flag surface and invisible in
+	// `trouble config explain` (TRBL-036).
+	//
+	// The defaults below are internal/sensors' own compiled defaults, pinned on
+	// both sides so a host with no `[sensors]` table runs the documented
+	// posture (SPEC-03 §4, §3.8a). Validation stays the sensors package's:
+	// these fields carry the resolved values, and the sensor decoder is the
+	// only judge of what a value may be.
 	Sensors struct {
 		SampleFoldWindow types.Duration `toml:"sample_fold_window"`
+		MergeWindow      types.Duration `toml:"merge_window"`
+		PSI              struct {
+			Enabled        bool           `toml:"enabled"`
+			SampleInterval types.Duration `toml:"sample_interval"`
+			Window         types.Duration `toml:"window"`
+		} `toml:"psi"`
+		Journald struct {
+			Enabled             bool           `toml:"enabled"`
+			Units               []string       `toml:"units"`
+			FollowAll           bool           `toml:"follow_all"`
+			FollowAllMaxEntries int            `toml:"follow_all_max_entries"`
+			Queue               int            `toml:"queue"`
+			QueueBytes          int            `toml:"queue_bytes"`
+			MaxEntry            int            `toml:"max_entry"`
+			ProbeInterval       types.Duration `toml:"probe_interval"`
+		} `toml:"journald"`
+		DBus struct {
+			Enabled           bool           `toml:"enabled"`
+			UserManagers      []string       `toml:"user_managers"`
+			PingInterval      types.Duration `toml:"ping_interval"`
+			ReconcileInterval types.Duration `toml:"reconcile_interval"`
+			OomdProbeInterval types.Duration `toml:"oomd_probe_interval"`
+		} `toml:"dbus"`
+		Disk struct {
+			Enabled  bool           `toml:"enabled"`
+			Mounts   []string       `toml:"mounts"`
+			Interval types.Duration `toml:"interval"`
+		} `toml:"disk"`
+		Timers struct {
+			Enabled  bool           `toml:"enabled"`
+			Interval types.Duration `toml:"interval"`
+		} `toml:"timers"`
+		Inotify struct {
+			Enabled         bool           `toml:"enabled"`
+			RecheckInterval types.Duration `toml:"recheck_interval"`
+			MaxDepth        int            `toml:"max_depth"`
+			// Paths is the ONE key of the §4 surface whose value is a
+			// declaration rather than a scalar: a list of tables, one per
+			// watched path, written as `[[sensors.inotify.paths]]` with
+			// path/mask/recursive/max_depth/rule. It is carried here verbatim —
+			// internal/sensors validates every row — and it is refused by name
+			// from a scalar source (a flag or an environment variable), exactly
+			// like the four registered tables (SPEC-12 §2.5a).
+			Paths []map[string]any `toml:"paths"`
+		} `toml:"inotify"`
+		Rules struct {
+			Dir            string         `toml:"dir"`
+			ReloadDebounce types.Duration `toml:"reload_debounce"`
+		} `toml:"rules"`
+		Limits struct {
+			RulePerMin     int `toml:"rule_per_min"`
+			SourcePerMin   int `toml:"source_per_min"`
+			GlobalPerMin   int `toml:"global_per_min"`
+			IncidentsPer5m int `toml:"incidents_per_5m"`
+		} `toml:"limits"`
 	} `toml:"sensors"`
 
 	// HealthURL is the health surface the stall checker and the upgrade READY
@@ -454,6 +517,45 @@ func defaults() *Config {
 	// than the ladder can act on them. This default MUST match internal/sensors'
 	// own compiled default — both sides pin it ("5m") so a drift is caught.
 	c.Sensors.SampleFoldWindow = "5m"
+	// SPEC-03 §4/§3.1e: the rest of the detection plane's defaults, copied from
+	// internal/sensors' own compiled defaults (its defaultConfig()). The two
+	// sides are pinned by tests in both packages, so a host that declares no
+	// `[sensors]` table runs exactly the documented posture and a drift is
+	// caught on whichever side moved. `sensors.rules.dir` is deliberately left
+	// empty here: it is derived from the RESOLVED state root in postResolve,
+	// so an operator's `state_root` moves the rules directory with it.
+	c.Sensors.MergeWindow = "5s"
+	c.Sensors.PSI.Enabled = true
+	c.Sensors.PSI.SampleInterval = "2s"
+	c.Sensors.PSI.Window = "2s"
+	c.Sensors.Journald.Enabled = true
+	c.Sensors.Journald.Units = []string{}
+	c.Sensors.Journald.FollowAll = false
+	c.Sensors.Journald.FollowAllMaxEntries = 2000000
+	c.Sensors.Journald.Queue = 8192
+	c.Sensors.Journald.QueueBytes = 32 << 20
+	c.Sensors.Journald.MaxEntry = 65536
+	c.Sensors.Journald.ProbeInterval = "30s"
+	c.Sensors.DBus.Enabled = true
+	c.Sensors.DBus.UserManagers = []string{"self"}
+	c.Sensors.DBus.PingInterval = "30s"
+	c.Sensors.DBus.ReconcileInterval = "300s"
+	c.Sensors.DBus.OomdProbeInterval = "10m"
+	c.Sensors.Disk.Enabled = true
+	c.Sensors.Disk.Mounts = []string{"/"}
+	c.Sensors.Disk.Interval = "60s"
+	c.Sensors.Timers.Enabled = true
+	c.Sensors.Timers.Interval = "60s"
+	c.Sensors.Inotify.Enabled = true
+	c.Sensors.Inotify.Paths = []map[string]any{}
+	c.Sensors.Inotify.RecheckInterval = "900s"
+	c.Sensors.Inotify.MaxDepth = 8
+	c.Sensors.Rules.Dir = ""
+	c.Sensors.Rules.ReloadDebounce = "500ms"
+	c.Sensors.Limits.RulePerMin = 120
+	c.Sensors.Limits.SourcePerMin = 600
+	c.Sensors.Limits.GlobalPerMin = 1200
+	c.Sensors.Limits.IncidentsPer5m = 25
 	c.Dashboard.Bind = "127.0.0.1:7644"
 	c.Dashboard.Port = 7644
 	c.Dashboard.Auth.Transport = "cookie"
@@ -640,6 +742,39 @@ func asStringSlice(v any) ([]string, error) {
 		return nil, nil
 	default:
 		return nil, fmt.Errorf("expected array, got %T", v)
+	}
+}
+
+// asInotifyPathRows is the `sensors.inotify.paths` declaration: the list of
+// tables written as `[[sensors.inotify.paths]]`, each carrying
+// path/mask/recursive/max_depth/rule (SPEC-03 §4). The value is a DECLARATION,
+// not a scalar, so a flag or an environment variable cannot express it and the
+// scalar forms are refused by name — the same rule the four registered tables
+// follow (SPEC-12 §2.5a). What a row must contain is internal/sensors' own
+// check: this reader only carries the rows.
+func asInotifyPathRows(v any) ([]map[string]any, error) {
+	switch x := v.(type) {
+	case nil:
+		return nil, nil
+	case []map[string]any:
+		// The array-of-tables reader's own type: `[[sensors.inotify.paths]]`
+		// parses into exactly this, and a nil slice is the empty set.
+		return x, nil
+	case []any:
+		if len(x) == 0 {
+			return nil, nil
+		}
+		rows := make([]map[string]any, 0, len(x))
+		for _, e := range x {
+			row, ok := e.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("expected a list of tables, got an element of type %T", e)
+			}
+			rows = append(rows, row)
+		}
+		return rows, nil
+	default:
+		return nil, fmt.Errorf("is a list of tables: declare one [[sensors.inotify.paths]] table per watched path (path/mask/recursive/max_depth/rule) in the config file — a scalar value cannot express it")
 	}
 }
 
@@ -1106,12 +1241,143 @@ func registry(c *Config) []keyMeta {
 		{"issues", "", "issues", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.IssuesTable, "issues", v) }},
 		{"skills", "", "skills", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.SkillsTable, "skills", v) }},
 		{"llm", "", "llm", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.LLMTable, "llm", v) }},
-		// SPEC-03 §3.8a: the sampled-event fold's window, registered leaf-by-leaf
-		// like every other scalar key so it resolves with ordinary precedence and
-		// provenance. The rest of the SPEC-03 §4 surface is not registered yet.
+		// ---- the SPEC-03 §4 detection-plane surface (SPEC-12 §3.1e) ----
+		// Every key of internal/sensors' own config switch is registered
+		// leaf-by-leaf, so each resolves with ordinary precedence (flag > env >
+		// file > default), carries provenance and gets its own `trouble config
+		// explain` row. Before this only the fold window was registered: any
+		// other `sensors.*` file key was refused as an unknown file key
+		// (TROUBLE-LIFECYCLE-001), which made the whole plane untunable from a
+		// config file (TRBL-036). The defaults here are the sensors package's
+		// own, and its decoder remains the only validator of these values.
 		{"sensors.sample_fold_window", "sensors", "sample_fold_window", c.Sensors.SampleFoldWindow, func(cfg *Config, v any) error {
 			d, err := asDuration(v)
 			cfg.Sensors.SampleFoldWindow = d
+			return err
+		}},
+		{"sensors.merge_window", "sensors", "merge_window", c.Sensors.MergeWindow, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Sensors.MergeWindow = d; return err }},
+		{"sensors.psi.enabled", "sensors", "enabled", c.Sensors.PSI.Enabled, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Sensors.PSI.Enabled = b; return err }},
+		{"sensors.psi.sample_interval", "sensors", "sample_interval", c.Sensors.PSI.SampleInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.PSI.SampleInterval = d
+			return err
+		}},
+		{"sensors.psi.window", "sensors", "window", c.Sensors.PSI.Window, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Sensors.PSI.Window = d; return err }},
+		{"sensors.journald.enabled", "sensors", "enabled", c.Sensors.Journald.Enabled, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Sensors.Journald.Enabled = b; return err }},
+		{"sensors.journald.units", "sensors", "units", c.Sensors.Journald.Units, func(cfg *Config, v any) error {
+			ss, err := asStringSlice(v)
+			cfg.Sensors.Journald.Units = ss
+			return err
+		}},
+		{"sensors.journald.follow_all", "sensors", "follow_all", c.Sensors.Journald.FollowAll, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Sensors.Journald.FollowAll = b
+			return err
+		}},
+		{"sensors.journald.follow_all_max_entries", "sensors", "follow_all_max_entries", c.Sensors.Journald.FollowAllMaxEntries, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Journald.FollowAllMaxEntries = i
+			return err
+		}},
+		{"sensors.journald.queue", "sensors", "queue", c.Sensors.Journald.Queue, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Sensors.Journald.Queue = i; return err }},
+		{"sensors.journald.queue_bytes", "sensors", "queue_bytes", c.Sensors.Journald.QueueBytes, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Journald.QueueBytes = i
+			return err
+		}},
+		{"sensors.journald.max_entry", "sensors", "max_entry", c.Sensors.Journald.MaxEntry, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Journald.MaxEntry = i
+			return err
+		}},
+		{"sensors.journald.probe_interval", "sensors", "probe_interval", c.Sensors.Journald.ProbeInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.Journald.ProbeInterval = d
+			return err
+		}},
+		{"sensors.dbus.enabled", "sensors", "enabled", c.Sensors.DBus.Enabled, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Sensors.DBus.Enabled = b; return err }},
+		{"sensors.dbus.user_managers", "sensors", "user_managers", c.Sensors.DBus.UserManagers, func(cfg *Config, v any) error {
+			ss, err := asStringSlice(v)
+			cfg.Sensors.DBus.UserManagers = ss
+			return err
+		}},
+		{"sensors.dbus.ping_interval", "sensors", "ping_interval", c.Sensors.DBus.PingInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.DBus.PingInterval = d
+			return err
+		}},
+		{"sensors.dbus.reconcile_interval", "sensors", "reconcile_interval", c.Sensors.DBus.ReconcileInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.DBus.ReconcileInterval = d
+			return err
+		}},
+		{"sensors.dbus.oomd_probe_interval", "sensors", "oomd_probe_interval", c.Sensors.DBus.OomdProbeInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.DBus.OomdProbeInterval = d
+			return err
+		}},
+		{"sensors.disk.enabled", "sensors", "enabled", c.Sensors.Disk.Enabled, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Sensors.Disk.Enabled = b; return err }},
+		{"sensors.disk.mounts", "sensors", "mounts", c.Sensors.Disk.Mounts, func(cfg *Config, v any) error {
+			ss, err := asStringSlice(v)
+			cfg.Sensors.Disk.Mounts = ss
+			return err
+		}},
+		{"sensors.disk.interval", "sensors", "interval", c.Sensors.Disk.Interval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Sensors.Disk.Interval = d; return err }},
+		{"sensors.timers.enabled", "sensors", "enabled", c.Sensors.Timers.Enabled, func(cfg *Config, v any) error { b, err := asBool(v); cfg.Sensors.Timers.Enabled = b; return err }},
+		{"sensors.timers.interval", "sensors", "interval", c.Sensors.Timers.Interval, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Sensors.Timers.Interval = d; return err }},
+		{"sensors.inotify.enabled", "sensors", "enabled", c.Sensors.Inotify.Enabled, func(cfg *Config, v any) error {
+			b, err := asBool(v)
+			cfg.Sensors.Inotify.Enabled = b
+			return err
+		}},
+		// The one declaration-valued key of the §4 surface: a list of tables,
+		// one per watched path. A scalar source cannot express it, so a flag or
+		// an environment value is refused by name (SPEC-12 §2.5a) instead of
+		// being flattened into a second, invented syntax, and the file is the
+		// source that sets it (SPEC-12 §3.1e). internal/sensors validates every
+		// row: a table without a path is TROUBLE-SENSORS-* at decode time.
+		{"sensors.inotify.paths", "sensors", "paths", c.Sensors.Inotify.Paths, func(cfg *Config, v any) error {
+			rows, err := asInotifyPathRows(v)
+			if err != nil {
+				return err
+			}
+			cfg.Sensors.Inotify.Paths = rows
+			return nil
+		}},
+		{"sensors.inotify.recheck_interval", "sensors", "recheck_interval", c.Sensors.Inotify.RecheckInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.Inotify.RecheckInterval = d
+			return err
+		}},
+		{"sensors.inotify.max_depth", "sensors", "max_depth", c.Sensors.Inotify.MaxDepth, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Inotify.MaxDepth = i
+			return err
+		}},
+		{"sensors.rules.dir", "sensors", "dir", c.Sensors.Rules.Dir, func(cfg *Config, v any) error { s, err := asString(v); cfg.Sensors.Rules.Dir = s; return err }},
+		{"sensors.rules.reload_debounce", "sensors", "reload_debounce", c.Sensors.Rules.ReloadDebounce, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.Rules.ReloadDebounce = d
+			return err
+		}},
+		{"sensors.limits.rule_per_min", "sensors", "rule_per_min", c.Sensors.Limits.RulePerMin, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Limits.RulePerMin = i
+			return err
+		}},
+		{"sensors.limits.source_per_min", "sensors", "source_per_min", c.Sensors.Limits.SourcePerMin, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Limits.SourcePerMin = i
+			return err
+		}},
+		{"sensors.limits.global_per_min", "sensors", "global_per_min", c.Sensors.Limits.GlobalPerMin, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Limits.GlobalPerMin = i
+			return err
+		}},
+		{"sensors.limits.incidents_per_5m", "sensors", "incidents_per_5m", c.Sensors.Limits.IncidentsPer5m, func(cfg *Config, v any) error {
+			i, err := asInt(v)
+			cfg.Sensors.Limits.IncidentsPer5m = i
 			return err
 		}},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
@@ -1517,6 +1783,12 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			cv.Value = resolved.Config.Checker.StateFile
 		case "checker.alarm_file":
 			cv.Value = resolved.Config.Checker.AlarmFile
+		case "sensors.rules.dir":
+			// Same shape as the two checker paths above: the default is derived
+			// from the resolved state root, so the row must carry the derived
+			// path (what the sensors package will watch), never the empty
+			// marker the registry started from.
+			cv.Value = resolved.Config.Sensors.Rules.Dir
 		case "projects":
 			// The `projects` row is the one config value whose SOURCE shape is a
 			// table carrying credentials, and the explain dump plus the boot
@@ -1590,6 +1862,13 @@ func redacted(key string) bool {
 func postResolve(c Config) Config {
 	if c.Lifecycle.HeartbeatPath == "" {
 		c.Lifecycle.HeartbeatPath = filepath.Join(c.StateRoot, "heartbeat.json")
+	}
+	// SPEC-03 §4/§3.1e: the rules directory is derived from the RESOLVED state
+	// root (internal/sensors does the same: `<state_root>/../config/rules.d`),
+	// so an operator who moves the state root moves the watched rules with it.
+	// An explicitly configured `sensors.rules.dir` is non-empty here and wins.
+	if c.Sensors.Rules.Dir == "" {
+		c.Sensors.Rules.Dir = filepath.Join(filepath.Dir(c.StateRoot), "config", "rules.d")
 	}
 	if c.Checker.StateFile == "" {
 		c.Checker.StateFile = filepath.Join(c.StateRoot, "checker.state.json")

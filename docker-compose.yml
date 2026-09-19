@@ -1,0 +1,72 @@
+# trouble — container stack (TRBL-002 part B).
+#
+#   docker compose up -d          # trouble + redis
+#   docker compose ps             # both healthy?
+#   docker compose stop redis     # SPEC-13: the daemon must keep serving
+#
+# Everything binds to loopback on the host. Ports 7643 (ingest) and 7644
+# (dashboard) are the only ones published; this stack never touches 3000,
+# 8642/8643 (Hermes gateway) or 9090 (coding-hermes scheduler).
+name: trouble
+
+services:
+  trouble:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # The sha is stamped into lifecycle.GitSHA. Supplied from the shell
+      # (`GIT_SHA=$(git rev-parse --short=7 HEAD) docker compose build`) or
+      # derived from the build context's .git when empty.
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+    image: trouble:local
+    container_name: trouble
+    command: ["--config", "/etc/trouble/config.toml"]
+    ports:
+      - "127.0.0.1:7643:7643"
+      - "127.0.0.1:7644:7644"
+    volumes:
+      # State (ledger, spool, heartbeat, checker state). The image ships /data
+      # as 0700 owned by uid 65532, which a fresh named volume inherits.
+      - trouble-state:/data
+      - ./deploy/container/config.toml:/etc/trouble/config.toml:ro
+      # dashboard.token_file and secrets.environment_file are /data/state/*
+      # INSIDE this volume, deliberately: the daemon runs as uid 65532, refuses a
+      # token file with any group/other bit (TROUBLE-LIFECYCLE-013 "token file
+      # mode not 0600"), and cannot read a host bind mount owned by the invoking
+      # user (uid 1000 -> "token store unstatable"). A fresh volume root is
+      # root:root 0755 and therefore also unwritable by 65532 — but /data/state
+      # ships in the image as 0700 + 65532, so that is where the secrets go.
+      # A compose `secrets:` entry is the third trap: it mounts 0444 root-owned.
+      # Seed once, as documented in docs/operations.md §14.
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:7-alpine
+    container_name: trouble-redis
+    # SPEC-13 preflight refuses cluster mode and any eviction policy other than
+    # noeviction: the hub's dedup window is a correctness surface, not a cache,
+    # so an evicted key is a lost event. appendonly yes keeps the window across
+    # a Redis restart. Cluster mode is never enabled here.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  trouble-state:
+  redis-data:

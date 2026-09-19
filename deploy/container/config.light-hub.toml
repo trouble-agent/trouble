@@ -1,0 +1,144 @@
+# trouble — container configuration, LIGHT-HUB profile (TRBL-002 part B).
+#
+# Identical to deploy/container/config.toml except for the SPEC-13 server
+# profile stanza:
+#
+#   [server]
+#   profile = "light-hub"
+#   [server.redis]
+#   url = "redis://redis:6379/0"
+#
+# ============================================================================
+# HONEST STATUS OF THIS FILE — VERIFY BEFORE USE.
+#
+# SPEC-13 (specs/SPEC-13-server-profiles.md) defines the light-hub server
+# profile. As of the current main tree the `[server]` table is NOT in the
+# lifecycle config registry: `internal/lifecycle/config.go` has no `server`,
+# `profile` or `redis` key, and unknown keys in a config file are FATAL
+# (TROUBLE-LIFECYCLE-001). Mounting this file therefore refuses the boot with a
+# key error rather than degrading to Redis-less ingestion — the exact refusal
+# text is recorded in docs/operations.md §14 and in the TRBL-002 report.
+#
+# The compose default therefore mounts config.toml (standalone), and the redis
+# service in docker-compose.yml runs under the SPEC-13 preflight constraints
+# (appendonly yes, maxmemory-policy noeviction) ready for the profile to land.
+# Switch the compose volume source to this file once SPEC-13's config keys
+# exist; do not paper over the refusal by deleting the keys.
+# ============================================================================
+#
+# SPEC-13 behaviour this file is written to exercise: with Redis unavailable
+# the hub degrades to standalone ingestion and the daemon keeps serving — no
+# event loss, no restart.
+
+state_root = "/data/state"
+config_path = "/etc/trouble/config.light-hub.toml"
+
+[secrets]
+# Same reason as token_file below: the container's uid (65532) can only write
+# inside the state volume, so both secret files live there at 0600.
+environment_file = "/data/state/trouble.env"
+
+[server]
+profile = "light-hub"
+
+[server.redis]
+url = "redis://redis:6379/0"
+appendonly = true
+maxmemory_policy = "noeviction"
+
+[lifecycle]
+heartbeat_interval = "30s"
+heartbeat_stale_after = "90s"
+idle_heartbeat_interval = "60s"
+watchdog_sec = "60s"
+drain_timeout = "30s"
+upgrade_ready_timeout = "30s"
+rollback_depth = 2
+self_rss_warn = "80MB"
+clock_skew_tolerance = "5s"
+
+[stall]
+max_seq_age = "300s"
+
+[checker]
+interval = "60s"
+confirm_runs = 2
+alarm_command = []
+
+[ingest]
+bind = "0.0.0.0:7643"
+advertised_host = "trouble.example.net"
+
+# A container binds 0.0.0.0 so the published port can reach it, and the SPEC-12
+# bind matrix refuses a public ingest.bind whose nonloopback_mode is not
+# "proxy" while public_require_proxy is on (TROUBLE-LIFECYCLE-003: `public
+# ingest.bind "0.0.0.0:7643" requires proxy mode`). The docker port mapping IS
+# the ingress proxy here — the socket is only reachable through
+# 127.0.0.1:7643 on the host — so the declaration is proxy, not token.
+[ingest.auth]
+loopback_dsn = true
+nonloopback_mode = "proxy"
+public_require_proxy = true
+
+[dashboard]
+bind = "0.0.0.0:7644"
+# A fresh docker volume is created root:root 0755, so uid 65532 cannot create
+# files at the volume ROOT; /data/state ships in the image as 0700 + 65532 and
+# is writable. A compose `secrets:` entry cannot be used at all - it mounts
+# 0444 root-owned, which trips this file's 0600 check (TROUBLE-LIFECYCLE-013).
+token_file = "/data/state/dashboard.token"
+# Off loopback the dashboard requires a declared trust mandate
+# (TROUBLE-DASHBOARD-006 mandate_required): the container's only ingress is the
+# published port on the host's loopback, i.e. a proxy. "tailnet" is the other
+# accepted value.
+mandate = "proxy"
+# TROUBLE-LIFECYCLE-001 (public_origin_required): a non-loopback dashboard bind
+# must declare the origin users reach it on. Replace the placeholder host.
+public_origin = "https://trouble.example.net"
+
+[dashboard.auth]
+transport = "cookie"
+identity_provider = ""
+session_ttl = "24h"
+
+[hub]
+mode = "hub"
+url = ""
+forward_project_id = ""
+token = ""
+protocol_version = 1
+forward_batch_records = 200
+forward_batch_bytes = 524288
+retry_base = "2s"
+retry_max = "5m"
+dedup_lru = 65536
+
+[spool]
+budget_bytes = 268435456
+gap_reserve_bytes = 2097152
+fsync = "group"
+fsync_window_ms = 200
+
+[verify]
+zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"
+
+[escalate]
+channels = []
+timeout = "10s"
+
+[origin]
+host_id = ""
+hub_id = ""
+
+[[projects]]
+id = "1"
+slug = "trouble-dev"
+public_key = "0123456789abcdef0123456789abcdef"
+quota_epm = 600
+enabled = true
+
+[issues]
+enabled = false
+
+[skills]
+enabled = false

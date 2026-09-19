@@ -1,0 +1,132 @@
+# trouble — container configuration, STANDALONE profile (TRBL-002).
+#
+# Derived from examples/config.toml with only the keys a container needs:
+#   * state_root      -> the mounted volume path (/data)
+#   * config_path     -> the path this file is mounted at
+#   * ingest.bind     -> 0.0.0.0:7643  (the container's port must be published)
+#   * dashboard.bind  -> 0.0.0.0:7644  (ditto)
+#   * dashboard.token_file -> the mounted token file
+#
+# Off loopback the dashboard bind matrix requires a token even for
+# /health.json, so a container that binds 0.0.0.0 needs dashboard.token_file.
+# Everything else is the shipped example's value, including the
+# hostile-placeholder project key: replace it before anything reports here.
+
+state_root = "/data/state"
+config_path = "/etc/trouble/config.toml"
+
+[secrets]
+# Holds TROUBLE_DASHBOARD_TOKEN for the CLI healthcheck (`trouble check-stall`)
+# and any subsystem credentials. Must be 0600 — the daemon reports every
+# secret-bearing file that is wider than 0600.
+# Same reason as token_file below: the container's uid (65532) can only write
+# inside the state volume, so both secret files live there at 0600.
+environment_file = "/data/state/trouble.env"
+
+[lifecycle]
+heartbeat_interval = "30s"
+heartbeat_stale_after = "90s"
+idle_heartbeat_interval = "60s"
+watchdog_sec = "60s"
+drain_timeout = "30s"
+upgrade_ready_timeout = "30s"
+rollback_depth = 2
+self_rss_warn = "80MB"
+clock_skew_tolerance = "5s"
+
+[stall]
+max_seq_age = "300s"
+
+[checker]
+interval = "60s"
+confirm_runs = 2
+alarm_command = []
+
+[ingest]
+bind = "0.0.0.0:7643"
+# A NAME the reporting apps resolve — never an IP literal, never "localhost"
+# (SPEC-04 §2.2). Replace this placeholder with your host.
+advertised_host = "trouble.example.net"
+
+# A container binds 0.0.0.0 so the published port can reach it, and the SPEC-12
+# bind matrix refuses a public ingest.bind whose nonloopback_mode is not
+# "proxy" while public_require_proxy is on (TROUBLE-LIFECYCLE-003: `public
+# ingest.bind "0.0.0.0:7643" requires proxy mode`). The docker port mapping IS
+# the ingress proxy here — the socket is only reachable through
+# 127.0.0.1:7643 on the host — so the declaration is proxy, not token.
+[ingest.auth]
+loopback_dsn = true
+nonloopback_mode = "proxy"
+public_require_proxy = true
+
+[dashboard]
+bind = "0.0.0.0:7644"
+# Holds the JSON token store written by
+# `trouble dashboard token create --label ... --scopes read`.
+# MODE MATTERS: any group/other bit is a boot refusal
+# (TROUBLE-LIFECYCLE-013 "token file mode not 0600"), which is why compose
+# bind-mounts this file instead of using a compose `secrets:` entry (a compose
+# secret mounts 0444 root-owned).
+# A fresh docker volume is created root:root 0755, so uid 65532 cannot create
+# files at the volume ROOT; /data/state ships in the image as 0700 + 65532 and
+# is writable. A compose `secrets:` entry cannot be used at all - it mounts
+# 0444 root-owned, which trips this file's 0600 check (TROUBLE-LIFECYCLE-013).
+token_file = "/data/state/dashboard.token"
+# Off loopback the dashboard requires a declared trust mandate
+# (TROUBLE-DASHBOARD-006 mandate_required): the container's only ingress is the
+# published port on the host's loopback, i.e. a proxy. "tailnet" is the other
+# accepted value.
+mandate = "proxy"
+# TROUBLE-LIFECYCLE-001 (public_origin_required): a non-loopback dashboard bind
+# must declare the origin users reach it on. Replace the placeholder host.
+public_origin = "https://trouble.example.net"
+
+[dashboard.auth]
+transport = "cookie"
+identity_provider = ""
+session_ttl = "24h"
+
+[hub]
+mode = "hub"
+url = ""
+forward_project_id = ""
+token = ""
+protocol_version = 1
+forward_batch_records = 200
+forward_batch_bytes = 524288
+retry_base = "2s"
+retry_max = "5m"
+dedup_lru = 65536
+
+[spool]
+budget_bytes = 268435456
+gap_reserve_bytes = 2097152
+fsync = "group"
+fsync_window_ms = 200
+
+[verify]
+zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"
+
+[escalate]
+channels = []
+timeout = "10s"
+
+[origin]
+host_id = ""
+hub_id = ""
+
+# The sentinel's project set (SPEC-12 §3.1a): the ingest listener is only built
+# when at least one project is declared. The key is the shipped hostile
+# placeholder — valid in shape, useless as a credential.
+[[projects]]
+id = "1"
+slug = "trouble-dev"
+public_key = "0123456789abcdef0123456789abcdef"
+quota_epm = 600
+enabled = true
+
+[issues]
+enabled = false
+
+[skills]
+enabled = false

@@ -21,6 +21,14 @@ config_path = "/etc/trouble/config.toml"
 # secret-bearing file that is wider than 0600.
 # Same reason as token_file below: the container's uid (65532) can only write
 # inside the state volume, so both secret files live there at 0600.
+# HOW IT GETS THERE: the distroless image has no shell and no editor, and every
+# path that writes this file from OUTSIDE fails a shipped mode/ownership rule
+# (docker cp -> host uid; host bind mount -> host uid; compose secrets -> 0444).
+# The mint writes the line itself — seed with
+#   trouble dashboard token create --label compose --scopes read \
+#     --output-env /data/state/trouble.env
+# (docs/operations.md §14 walks the whole sequence; --output-env replaces the
+# TROUBLE_DASHBOARD_TOKEN line and preserves every other line).
 environment_file = "/data/state/trouble.env"
 
 [lifecycle]

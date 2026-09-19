@@ -940,29 +940,43 @@ dedup window is a correctness surface, not a cache: an evicted key is a lost eve
 
 ```
 docker compose up -d                 # build + start trouble and redis
-docker compose ps                    # both healthy?
-docker compose logs -f trouble
-docker compose stop redis            # SPEC-13 degradation check (see below)
-docker compose down                  # stop, keep volumes; `-v` also drops state
+docker compose logs -f trouble       # "dashboard listening" = the boot gate passed
 ```
 
-One-time token seed — the dashboard mints tokens exactly once, to the file the
-daemon reads, so the seed runs in the image against the same volume:
+The healthcheck authenticates against `/health.json` (off loopback there is no
+exemption), so a first boot reports `health: starting` and then `unhealthy`
+until the token seed below exists — that is the expected order, not a daemon
+fault. Seed next; `--output-env` makes the mint write the 0600 env file itself,
+inside the volume, as the container's own uid. This is load-bearing on the
+distroless image: there is no shell to author the file with, and every path
+that writes it from outside fails a shipped mode/ownership rule (trap 4 below,
+measured):
 
 ```
 docker compose run --rm \
   -e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token \
   -e TROUBLE_STATE_ROOT=/data/state \
   --entrypoint /usr/local/bin/trouble trouble \
-  dashboard token create --label compose --scopes read
+  dashboard token create --label compose --scopes read \
+  --output-env /data/state/trouble.env
 ```
 
-That prints the plaintext once. Put it in `/data/state/trouble.env` as
-`TROUBLE_DASHBOARD_TOKEN=<plaintext>` (mode 0600) so `trouble check-stall` — the
-container `HEALTHCHECK` and the external stall checker — can authenticate:
+That prints the plaintext once and writes it into the env file (replacing any
+previous `TROUBLE_DASHBOARD_TOKEN` line; other lines are preserved). The
+container `HEALTHCHECK` — `trouble check-stall`, the SPEC-05 external checker —
+reads the token from `[secrets] environment_file` on its next run:
 
 ```
-curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7644/health.json
+docker compose ps                    # trouble: healthy once the checker exits 0
+curl -s -H "Authorization: Bearer <printed plaintext>" http://127.0.0.1:7644/health.json
+```
+
+Day-2 commands:
+
+```
+docker compose logs -f trouble
+docker compose stop redis            # SPEC-13 degradation check (see below)
+docker compose down                  # stop, keep volumes; `-v` also drops state
 ```
 
 **Ports.** `7643` ingest, `7644` dashboard; both published on `127.0.0.1` only
@@ -983,6 +997,15 @@ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7644/health.json
    token store unstatable`.
 3. A compose `secrets:` entry mounts `0444` root-owned and trips the store's own
    check → `TROUBLE-LIFECYCLE-013: token file mode not 0600`.
+4. The env file cannot be authored from outside the container at all. `docker
+   cp` lands the file owned by the HOST uid (1000 on a typical workstation), so
+   the container uid 65532 cannot read it and the healthcheck stays exit 8
+   (`TROUBLE-LIFECYCLE-008`) against a serving daemon — measured, live. A host
+   bind mount of a `0600` file keeps the invoking uid and cannot even be read
+   for seeding; a compose `secrets:` entry is trap 3. The distroless image has
+   no shell, so the file cannot be authored inside either. The mint therefore
+   writes the env file itself: `dashboard token create --output-env
+   /data/state/trouble.env` (the one step the compose quickstart adds).
 
 Secrets therefore live inside the state volume, which is the one place the daemon
 can both read and write at the mode it enforces.
@@ -1038,3 +1061,42 @@ light-hub boot serves on the standalone in-process path (the daemon logs a
 warning saying so) and `/health.json` carries no `hub` stanza. Switch the
 compose volume source to this file when that package lands; do not delete the
 keys to make it boot.
+
+**Building from a git worktree.** A worktree checkout's `.git` is a one-line
+gitfile pointing at the main clone's `.git/worktrees/<name>` — not a directory
+— so the build context carries a 14-byte pointer while the object store it
+points at never rides along: the Dockerfile's `git rev-parse --short=7 HEAD`
+fails inside the builder and the image stamps the literal `nogit00` (measured:
+`trouble --version` in the image printed `nogit00 …` for a worktree build with
+no `GIT_SHA`, while the same context built with
+`GIT_SHA=$(git rev-parse --short=7 HEAD)` printed the worktree's own sha).
+That is degraded by design, not a failure, and the build prints a loud WARN
+when it falls back — but pass the sha explicitly and the stamp is identical to
+a main-clone build:
+
+```
+GIT_SHA=$(git rev-parse --short=7 HEAD) docker compose build
+```
+
+`nogit00` is the honest placeholder — never confuse it with `unknown`, which is
+the sentinel `/health.json` reports as `status="degraded"
+detail.reason="unstamped_build"` and `trouble install` refuses without
+`--force`. An image stamped `nogit00` serves stamped values; treat it as
+"built from a context without git history", not as an unstamped build.
+
+**Seed cheat-sheet.** The quickstart above in one block — build, seed, watch it
+go healthy. `--output-env` is what makes this a copy-edit path on a distroless
+image (no shell to author the env file with; see trap 4):
+
+```
+GIT_SHA=$(git rev-parse --short=7 HEAD) docker compose build
+docker compose up -d                        # trouble starts "unhealthy": the token seed below is still missing
+docker compose run --rm \
+  -e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token \
+  -e TROUBLE_STATE_ROOT=/data/state \
+  --entrypoint /usr/local/bin/trouble trouble \
+  dashboard token create --label compose --scopes read \
+  --output-env /data/state/trouble.env      # prints the plaintext once; writes the 0600 env file itself
+docker compose ps                           # trouble turns healthy on the checker's next run (interval 30s)
+docker compose down                         # tear down; `-v` also drops the state volume
+```

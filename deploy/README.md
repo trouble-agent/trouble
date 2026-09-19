@@ -92,6 +92,70 @@ Cleanly stop the foreground daemon with `Ctrl-C`. `troubled` handles `SIGINT`
 and `SIGTERM` by draining: it stops new work, flushes the ledger and spool, closes
 listeners, and exits.
 
+## Container quickstart (compose)
+
+The same two binaries also ship as a distroless image with a compose stack
+(trouble + redis). This is the copy-edit path for a container host; the measured
+refusals each step avoids are documented in `docs/operations.md` §14.
+
+Prerequisites: Docker with the compose plugin. No ports are touched besides
+7643/7644 published on `127.0.0.1` only.
+
+1. Edit the shipped container config — compose bind-mounts it read-only, so the
+   shipped file IS the file the stack runs; the three placeholder values are
+   the only edits:
+
+   ```sh
+   $EDITOR deploy/container/config.toml
+   ```
+
+   Set `ingest.advertised_host` to a NAME reporting apps resolve (never an IP
+   literal or `localhost`), and set `dashboard.public_origin` to the origin
+   users reach the dashboard on. The other off-loopback keys the container
+   needs are already in the file, each with the boot refusal it answers:
+   `0.0.0.0` binds (published ports), `[ingest.auth] nonloopback_mode =
+   "proxy"` (TROUBLE-LIFECYCLE-003), `dashboard.mandate = "proxy"`
+   (TROUBLE-DASHBOARD-006). The token and env files must live in the state
+   volume (`/data/state/…`): every location outside it is refused
+   (TROUBLE-LIFECYCLE-005/013), and the shipped comment in the file's
+   `[secrets]` table shows how the env file gets there.
+
+   Reporters OUTSIDE this host need one more line on their project: a
+   `secret_key` (32 lowercase hex) plus `X-Sentry-Auth` — off loopback the
+   bind matrix refuses a bare public key (`query-string key refused on a
+   non-loopback request`, then `off-loopback requests require the project
+   ingest token`), both measured live.
+
+2. Build, boot, seed, verify — in order; the container starts `unhealthy` by
+   design until the seed exists:
+
+   ```sh
+   GIT_SHA=$(git rev-parse --short=7 HEAD) docker compose build
+   docker compose up -d
+   docker compose run --rm \
+     -e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token \
+     -e TROUBLE_STATE_ROOT=/data/state \
+     --entrypoint /usr/local/bin/trouble trouble \
+     dashboard token create --label compose --scopes read \
+     --output-env /data/state/trouble.env
+   docker compose ps      # trouble: healthy once the checker can authenticate
+   curl -s -H "Authorization: Bearer <plaintext from the seed>" \
+     http://127.0.0.1:7644/health.json | jq '{status, git_sha, ledger_last_seq}'
+   ```
+
+   The seed's `--output-env` flag is load-bearing, not sugar: the image is
+   distroless (no shell, no editor), and every way of writing the env file from
+   outside lands the wrong uid or mode — the mint writes the 0600 file itself,
+   as the container's own uid, inside the volume (measured: trap 4 in
+   `docs/operations.md` §14).
+
+3. Tear down: `docker compose down` keeps the state volume; `-v` drops it.
+
+Builds from a git **worktree** stamp `nogit00` unless `GIT_SHA` is passed as in
+step 2 — the worktree's `.git` is a pointer file the build context cannot
+resolve. `nogit00` is a placeholder, not the unstamped sentinel (`unknown`);
+§14 explains the difference.
+
 ## systemd units
 
 `internal/lifecycle` embeds four unit templates:

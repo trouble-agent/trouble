@@ -37,7 +37,8 @@ usage:
   trouble check-stall [--health-url URL] [--state-root DIR] [--json]
   trouble escalate --unit NAME
   trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
-  trouble dashboard token rotate --label LABEL
+            [--output-env ENVFILE]
+  trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
   trouble dashboard token revoke --label LABEL
   trouble dashboard token list [--json]
   trouble --version
@@ -90,6 +91,104 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2
 	}
+}
+
+// defaultTokenPath mirrors the dashboard.token_file default (SPEC-10 §3.4).
+func defaultTokenPath() string {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".config")
+	}
+	return filepath.Join(dir, "trouble", "dashboard-tokens.json")
+}
+
+// writeTokenEnv places TROUBLE_DASHBOARD_TOKEN=<plaintext> into the env file
+// the daemon reads via [secrets] environment_file, replacing the variable's
+// line (and any duplicate of it) when one is already present. It backs the
+// --output-env flag of `trouble dashboard token create|rotate`.
+//
+// Why this exists: the TRBL-002 container image is distroless — no shell, no
+// editor, no cp — so the operator has no way to author the 0600 env file
+// inside the state volume, and every path that authors it from OUTSIDE fails
+// a shipped rule (a bind mount keeps the invoking uid; docker cp lands the
+// host uid; a compose secret mounts 0444). The mint is already the only code
+// path that may handle token plaintext (SPEC-10 §3.2), so the mint writes the
+// line itself: same uid, same act, file born 0600.
+//
+// File contract: a missing file is created (temp in the same directory, chmod
+// 0600 BEFORE any content is written, fsync, rename — the token store's
+// writeFile contract); an existing file must be a regular file no wider than
+// 0600 or the write is refused (TROUBLE-LIFECYCLE-013's mode rule); an empty
+// plaintext is refused outright.
+func writeTokenEnv(path, plaintext string) error {
+	if plaintext == "" {
+		return fmt.Errorf("refusing to write an empty token into %s", path)
+	}
+	var old []byte
+	if fi, err := os.Stat(path); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("env file %s is not a regular file", path)
+		}
+		if mode := fi.Mode().Perm(); mode&0o077 != 0 {
+			return fmt.Errorf("env file %s mode is %04o, want 0600", path, mode)
+		}
+		old, err = os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read %s: %v", path, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %v", path, err)
+	}
+	line := "TROUBLE_DASHBOARD_TOKEN=" + plaintext
+	var out []string
+	replaced := false
+	for _, l := range strings.Split(string(old), "\n") {
+		if strings.HasPrefix(l, "TROUBLE_DASHBOARD_TOKEN=") {
+			if !replaced {
+				out = append(out, line)
+				replaced = true
+			}
+			continue
+		}
+		out = append(out, l)
+	}
+	if !replaced {
+		out = append(out, line)
+	}
+	if len(out) > 0 && out[0] == "" {
+		out = out[1:] // a fresh file's leading "" from splitting ""
+	}
+	body := strings.Join(out, "\n")
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("env file dir %s: %v", dir, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".trouble-env-*.tmp")
+	if err != nil {
+		return fmt.Errorf("temp in %s: %v", dir, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp: %v", err)
+	}
+	if _, err := tmp.WriteString(body); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp: %v", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp: %v", err)
+	}
+	return os.Rename(tmpName, path)
 }
 
 // defaultConfigPath mirrors the config_path default (SPEC-12 §3.1): the resolved
@@ -354,6 +453,12 @@ func cmdDashboard(args []string) int {
 	label := fs.String("label", "", "token label (becomes Actor.ID on writes, e.g. dash-write@laptop)")
 	scopes := fs.String("scopes", "", "comma-separated: read,write,autonomy")
 	asJSON := fs.Bool("json", false, "machine-readable output (list only)")
+	// outputEnv exists for shell-less images (distroless TRBL-002 image): the
+	// mint writes TROUBLE_DASHBOARD_TOKEN=<plaintext> into the 0600 env file
+	// itself, so no operator step has to edit a file the container uid cannot
+	// have produced on a filesystem with no shell, editor or cp. Empty keeps
+	// the v0.1 contract: stdout only, the operator places the line.
+	outputEnv := fs.String("output-env", "", "also write TROUBLE_DASHBOARD_TOKEN=<plaintext> into this 0600 env file (the daemon's [secrets] environment_file)")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
@@ -406,6 +511,13 @@ func cmdDashboard(args []string) int {
 			fmt.Fprintf(os.Stderr, "dashboard token create: %v\n", err)
 			return 13
 		}
+		if *outputEnv != "" {
+			if err := writeTokenEnv(*outputEnv, plaintext); err != nil {
+				fmt.Fprintf(os.Stderr, "dashboard token create: %v\n", err)
+				return 13
+			}
+			fmt.Fprintf(os.Stderr, "wrote TROUBLE_DASHBOARD_TOKEN to %s (0600)\n", *outputEnv)
+		}
 		fmt.Println(plaintext)
 		fmt.Fprintf(os.Stderr, "token %q created with scopes %v; the plaintext above is shown once and is not recoverable\n", tok.ID, scopeStrings(tok.Scopes))
 		return 0
@@ -422,6 +534,13 @@ func cmdDashboard(args []string) int {
 		if err := store.Save(); err != nil {
 			fmt.Fprintf(os.Stderr, "dashboard token rotate: %v\n", err)
 			return 13
+		}
+		if *outputEnv != "" {
+			if err := writeTokenEnv(*outputEnv, plaintext); err != nil {
+				fmt.Fprintf(os.Stderr, "dashboard token rotate: %v\n", err)
+				return 13
+			}
+			fmt.Fprintf(os.Stderr, "wrote TROUBLE_DASHBOARD_TOKEN to %s (0600)\n", *outputEnv)
 		}
 		fmt.Println(plaintext)
 		fmt.Fprintf(os.Stderr, "%q revoked, %q minted (no grace window)\n", *label, tok.ID)
@@ -480,15 +599,6 @@ func listTokens(path string, asJSON bool) int {
 		fmt.Printf("%-28s %-22s %-9s created=%s last_used=%s\n", t.ID, strings.Join(scopeStrings(t.Scopes), ","), state, t.CreatedTS, t.LastUsedTS)
 	}
 	return 0
-}
-
-func defaultTokenPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "trouble", "dashboard-tokens.json")
 }
 
 func parseScopes(in string) ([]types.Scope, error) {

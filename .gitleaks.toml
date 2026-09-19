@@ -1,0 +1,107 @@
+# .gitleaks.toml — the Tier 1 `secrets` scan surface for the trouble repo.
+#
+# WHY THIS FILE EXISTS
+#
+# The GitReins Tier 1 `secrets` step runs `gitleaks detect --no-git`, i.e. it
+# walks the WORKING TREE and does NOT honour .gitignore. On this repo that made
+# the step structurally RED — the dogfood run of 2026-09-17 counted 292
+# gitleaks findings, none of them a credential:
+#
+#   * the great majority inside `.worktrees/` — a kanban-era artifact tree that
+#     is gitignored (see .gitignore) and never part of a commit or a release;
+#   * the rest inside tracked corpus files that must contain secret-SHAPED text
+#     by construction: the scrub rule table itself, SPEC-02's marker/vector
+#     examples, the scrub test vectors, and SPEC-08/SPEC-TYPES idempotency-key
+#     examples. A scrubber's test corpus is made of things that look exactly
+#     like secrets — that is the point of it.
+#
+# Because the scan surface was RED for reasons unrelated to any diff, EVERY
+# judge run reported `tier1 FAIL` and the step detected nothing: the signal was
+# gone. This file narrows the scan surface so the step once again reports on
+# what a commit actually introduces.
+#
+# SCOPE RULES (do not widen without the same evidence)
+#
+#   * Every entry is an EXPLICIT FILE PATH or the one gitignored tree. No
+#     directory globs (`internal/` is deliberately NOT allowlisted), no generic
+#     regexes.
+#   * `.worktrees/` is allowlisted because it is gitignored build output. If a
+#     real secret were ever written there it would not be committed, and this
+#     guard's job is to grade the commit, not scratch space.
+#   * The remaining entries are the exact files that carry secret-SHAPED
+#     fixtures. They are exhaustively enumerated: adding a NEW fixture file
+#     means adding a NEW line here, in review, on purpose.
+#   * The file list is a floor, not a licence: a real credential committed to a
+#     NOT-listed path is still caught (see the planted-secret proof in
+#     docs/operations.md §9).
+#
+# HOW THE TIER 1 STEP PICKS THIS UP
+#
+# GitReins renders its own temp config that does `[extend] path = <this file>`
+# and adds its harness-state allowlist (`.gitreins/**`) on top; gitleaks merges
+# both allowlists. The built-in cross-check that runs beside gitleaks
+# (engine/guard_manager.py::_load_gitleaks_allowlist) reads the triple-quoted
+# path patterns in this file too, so both scanners are scoped by the same
+# decision. Keep every triple-quoted string in this file a PATH pattern — that
+# scraper treats each one as a path regex.
+#
+# `useDefault = true` is required, not optional: gitleaks rejects
+# `extend.path` together with `extend.useDefault`, so the ruleset that is being
+# extended FROM has to carry the default rules itself.
+
+title = "trouble"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "gitignored kanban-era artifact tree (.worktrees/ in .gitignore) — scratch checkouts, never committed"
+paths = [
+  '''(^|/)\.worktrees/.*''',
+]
+
+[[allowlists]]
+description = "scrub corpus: the scrubber's own rule table and its test vectors. These MUST contain secret-shaped literals — that is what a scrubber matches on."
+paths = [
+  '''(^|/)internal/scrub/rules\.go$''',
+  '''(^|/)internal/scrub/testdata/vectors/vectors\.txt$''',
+  '''(^|/)internal/scrub/ac_test\.go$''',
+  '''(^|/)internal/scrub/conformance_test\.go$''',
+  '''(^|/)internal/scrub/dsn_test\.go$''',
+  '''(^|/)internal/scrub/e2e_ledger_test\.go$''',
+  '''(^|/)internal/scrub/flagvalue_test\.go$''',
+  '''(^|/)internal/scrub/helpers_test\.go$''',
+  '''(^|/)internal/scrub/shield_test\.go$''',
+  '''(^|/)internal/scrub/vectors_test\.go$''',
+]
+
+[[allowlists]]
+description = "tracked tests whose fixtures are secret-shaped by construction (ledger scrub boundary, sentinel/flow idempotency keys, lifecycle config/project keys, dashboard auth key, issue idempotency keys, CLI flag fixture)"
+paths = [
+  '''(^|/)internal/app/flow_spool_wiring_test\.go$''',
+  '''(^|/)internal/dashboard/auth_test\.go$''',
+  '''(^|/)internal/flow/spool_test\.go$''',
+  '''(^|/)internal/issues/github_driver_test\.go$''',
+  '''(^|/)internal/ledger/scrub_boundary_test\.go$''',
+  '''(^|/)internal/lifecycle/config_test\.go$''',
+  '''(^|/)internal/lifecycle/projects_test\.go$''',
+  '''(^|/)internal/sentinel/helpers_test\.go$''',
+  '''(^|/)cmd/troubled/main_test\.go$''',
+]
+
+[[allowlists]]
+description = "spec and generated-doc examples that quote the scrubber's own markers and vectors verbatim (SPEC-02 marker/vector tables, SPEC-08 + SPEC-TYPES idempotency keys, the generated specs review page)"
+paths = [
+  '''(^|/)specs/SPEC-02-scrubbing\.md$''',
+  '''(^|/)specs/SPEC-08-flow\.md$''',
+  '''(^|/)specs/SPEC-TYPES\.md$''',
+  '''(^|/)docs/specs-review\.html$''',
+]
+
+[[allowlists]]
+description = "gitleaks generic-api-key false positive on Redis INFO fixture text in a fake-stream test; no credential is present, so the exemption is scoped to the matching LINE as well as the path"
+paths = [
+  '''(^|/)internal/hub/redis_test\.go$''',
+]
+regexTarget = "line"
+regexes = ["evicted_keys"]

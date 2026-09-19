@@ -311,6 +311,28 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	d.Registry = reg
 	_ = reg
 
+	// 10a. the local SKILL.md library (SPEC-11 §2b): built after the registry so a
+	// step runs through the same play engine the ladder uses. A declared library
+	// that cannot be built is a boot refusal (SPEC-12 §3.1c), never a silent
+	// fall back to "off".
+	library, err := buildSkillLibrary(d, hostID, NewClock(started), o.Subsystems)
+	if err != nil {
+		d.bootFailure(ctx, types.CodeLifecycle001, err)
+		return nil, err
+	}
+	d.Subsystems.Library = library
+
+	// 10b. the agent stage's LLM port (SPEC-05 §2a/§4.3a): built only from a
+	// declared `[llm]` table, so a host that declares no chain has no port (and the
+	// agent stage refuses with TROUBLE-LADDER-021 rather than fabricating a model).
+	// A declared table that cannot be built is a config refusal, recorded with
+	// TROUBLE-LIFECYCLE-001 (SPEC-12 §3.1c).
+	agentPort, err := llmAgentPort(d)
+	if err != nil {
+		d.bootFailure(ctx, types.CodeLifecycle001, err)
+		return nil, err
+	}
+
 	d.Ladder, err = ladder.New(ladder.Deps{
 		Ledger:   d.Store,
 		Index:    d.Store,
@@ -324,6 +346,8 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		Rules:    d.ruleLookup,
 		PlayFor:  d.playLookup,
 		PIDAlive: pidAlive,
+		Agent:    agentPort,
+		Skills:   ladderSkillPort(d.Subsystems),
 	})
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)

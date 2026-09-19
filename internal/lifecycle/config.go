@@ -78,6 +78,11 @@ type Config struct {
 	// compiled default (SPEC-09 §3.4a / SPEC-11 §2a).
 	IssuesTable SubsystemTable `toml:"-"`
 	SkillsTable SubsystemTable `toml:"-"`
+	// LLMTable is the agent stage's `[llm]` table (SPEC-05 §4.3a, declared per
+	// SPEC-12 §3.1c). It is registered exactly like the two subsystem tables and
+	// decoded by internal/llm's own strict decoder; unlike them it is core config,
+	// so a declaration that cannot be built is a file-key refusal.
+	LLMTable SubsystemTable `toml:"-"`
 
 	Dashboard DashboardConfig `toml:"dashboard"`
 
@@ -938,6 +943,7 @@ func registry(c *Config) []keyMeta {
 		{"projects", "", "projects", "", setProjects},
 		{"issues", "", "issues", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.IssuesTable, "issues", v) }},
 		{"skills", "", "skills", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.SkillsTable, "skills", v) }},
+		{"llm", "", "llm", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.LLMTable, "llm", v) }},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
 		{"dashboard.port", "dashboard", "port", c.Dashboard.Port, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Port = i; return err }},
 		{"dashboard.mandate", "dashboard", "mandate", c.Dashboard.Mandate, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Mandate = s; return err }},
@@ -1209,6 +1215,10 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			cv.Value = resolved.Config.IssuesTable.Summary()
 		case "skills":
 			cv.Value = resolved.Config.SkillsTable.Summary()
+		case "llm":
+			// Same rule as the two subsystem tables: the row names the declared
+			// keys and never a value — a base_url or a key_ref is a value.
+			cv.Value = resolved.Config.LLMTable.Summary()
 		}
 	}
 

@@ -41,6 +41,10 @@ type Subsystems struct {
 	Flow     *flow.Flow
 	Issues   *issues.Desk
 	Skills   *skills.Skills
+	// Library is the local SKILL.md library (SPEC-11 §2b), built after the
+	// registry so a step runs through the same play engine the ladder uses. Nil
+	// when the library is off (the shipped default) or the registry is absent.
+	Library *skills.Library
 
 	// refusals holds one row per subsystem the boot refused, in build order.
 	// It is the SAME truth the lifecycle record carries, held in memory so the
@@ -398,24 +402,7 @@ func buildSubsystems(d *Daemon, hostID string, opts SubsystemOptions) *Subsystem
 	// the compiled default.
 	skCfg, skErr := skillsLoopConfig(d, opts)
 	v, _, _, _ := lifecycle.VersionInfo()
-	skDeps := skills.Deps{
-		Ledger:        DraftWriter{d.Store},
-		Clock:         clock,
-		HostID:        hostID,
-		Actor:         actor,
-		StateRoot:     d.Cfg.StateRoot,
-		DaemonVersion: v,
-		Registered: func() []string {
-			if d.Registry == nil {
-				return nil
-			}
-			names := make([]string, 0, 16)
-			for name := range d.Registry.Modules() {
-				names = append(names, name)
-			}
-			return names
-		},
-	}
+	skDeps := skillsCollaborators(d, hostID, actor, clock, v)
 	if skErr != nil {
 		recordSubsystemRefusal(d, subs, ctx, "skills", skErr)
 	} else if sk, err := skills.New(skCfg, skDeps); err != nil {
@@ -1017,4 +1004,53 @@ func scrubBytesOrDefault(d *Daemon, target types.ScrubTarget, projectID string, 
 // the gate refuses rather than guessing.
 func freeDiskBytes(path string) (int64, error) {
 	return freeDiskBytesPlatform(path)
+}
+
+// skillsCollaborators builds the skills package's collaborator set once, so the pull
+// loop (buildSubsystems) and the local SKILL.md library (daemon.go, after the
+// registry exists) can never disagree about the ledger, the clock or the descriptor
+// list.
+func skillsCollaborators(d *Daemon, hostID string, actor types.Actor, clock Clock, version string) skills.Deps {
+	return skills.Deps{
+		Ledger:        DraftWriter{d.Store},
+		Clock:         clock,
+		HostID:        hostID,
+		Actor:         actor,
+		StateRoot:     d.Cfg.StateRoot,
+		DaemonVersion: version,
+		Registered: func() []string {
+			if d.Registry == nil {
+				return nil
+			}
+			names := make([]string, 0, 16)
+			for name := range d.Registry.Modules() {
+				names = append(names, name)
+			}
+			return names
+		},
+	}
+}
+
+// buildSkillLibrary constructs the local SKILL.md library (SPEC-11 §2b) with the
+// play engine as its runner: a library step is a typed registry tool call, so it
+// goes through the same six stages a play does. A declared-but-unbuildable library
+// is a boot refusal naming its own reason, never a silent fall back to "off" — the
+// operator asked for it. With the library off (the shipped default) nothing is read
+// and the returned library is a no-op.
+func buildSkillLibrary(d *Daemon, hostID string, clock Clock, opts SubsystemOptions) (*skills.Library, error) {
+	v, _, _, _ := lifecycle.VersionInfo()
+	actor := lifecycle.Actor(types.ActorDaemon, "troubled")
+	cfg, err := skillsLoopConfig(d, opts)
+	if err != nil {
+		// buildSubsystems already recorded a declared [skills] parse/refusal and
+		// deliberately keeps the subsystem nil. The local library is an additive
+		// surface on that subsystem, so it must not turn the same refusal into a
+		// whole-daemon boot failure or duplicate the ledger record.
+		return nil, nil
+	}
+	var runner skills.StepRunner
+	if d.Registry != nil {
+		runner = NewPlayEngine(d.Registry)
+	}
+	return skills.NewLibrary(cfg, skillsCollaborators(d, hostID, actor, clock, v), runner)
 }

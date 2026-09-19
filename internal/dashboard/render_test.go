@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -394,6 +395,140 @@ func assertContainsAll(t *testing.T, haystack string, needles []string) {
 	for _, n := range needles {
 		if !strings.Contains(haystack, n) {
 			t.Errorf("rendered output is missing %q", n)
+		}
+	}
+}
+
+// dlPair matches one <dt>key</dt><dd>value</dd> row of the budget panel and
+// counterPair one <li><span>name</span><strong>value</strong></li> row of the
+// overview counters.
+var (
+	dlPair      = regexp.MustCompile(`<dt>([^<]*)</dt><dd>([^<]*)</dd>`)
+	counterPair = regexp.MustCompile(`<li><span>([^<]*)</span><strong>([^<]*)</strong></li>`)
+)
+
+// budgetPairs reads the key/value rows of the budget panel a document carries.
+func budgetPairs(t *testing.T, doc string) map[string]string {
+	t.Helper()
+	start := strings.Index(doc, `id="budget-panel"`)
+	if start < 0 {
+		t.Fatal("document carries no budget panel")
+	}
+	rest := doc[start:]
+	if end := strings.Index(rest, "</div>"); end >= 0 {
+		rest = rest[:end]
+	}
+	out := map[string]string{}
+	for _, m := range dlPair.FindAllStringSubmatch(rest, -1) {
+		out[m[1]] = m[2]
+	}
+	return out
+}
+
+// counterPairs reads the overview counter rows (incidents/groups open).
+func counterPairs(t *testing.T, doc string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for _, m := range counterPair.FindAllStringSubmatch(doc, -1) {
+		out[m[1]] = m[2]
+	}
+	if len(out) == 0 {
+		t.Fatal("document carries no counters block")
+	}
+	return out
+}
+
+// footerLine returns the footer paragraph of a rendered page.
+func footerLine(t *testing.T, doc string) string {
+	t.Helper()
+	i := strings.Index(doc, `<footer class="app-footer">`)
+	if i < 0 {
+		return ""
+	}
+	rest := doc[i:]
+	j := strings.Index(rest, "<p>")
+	if j < 0 {
+		return ""
+	}
+	rest = rest[j+len("<p>"):]
+	k := strings.Index(rest, "</p>")
+	if k < 0 {
+		return ""
+	}
+	return rest[:k]
+}
+
+// TestFirstPaintBudgetMatchesCounters is TRBL-010 defect 2: the budget panel a
+// page server-renders on the FIRST paint carries the numbers the page's own
+// header counters show — the numbers are already available at render time —
+// and the numbers /partials/budget later serves from the same source, instead
+// of the zeroes the first poll used to contradict.
+func TestFirstPaintBudgetMatchesCounters(t *testing.T) {
+	env := newEnv(t, envOptions{cfg: unlimitedRates})
+	resp, page := env.get("/", env.readPlain)
+	wantStatus(t, resp, page, http.StatusOK)
+
+	counters := counterPairs(t, page)
+	budget := budgetPairs(t, page)
+
+	for _, key := range []string{"incidents open", "groups open"} {
+		if budget[key] == "" || budget[key] == "0" {
+			t.Errorf("first paint: budget %s = %q — the panel rendered empty while the header counted %q", key, budget[key], counters[key])
+			continue
+		}
+		if budget[key] != counters[key] {
+			t.Errorf("first paint contradicts itself: budget %s = %q, header counter = %q", key, budget[key], counters[key])
+		}
+	}
+	for _, key := range []string{"binary", "rss", "ledger", "events"} {
+		if budget[key] == "" {
+			t.Errorf("first paint: budget %s is blank", key)
+		}
+	}
+
+	// The fragment the poller fetches is the same source: the first paint must
+	// already agree with it.
+	fresp, frag := env.get("/partials/budget", env.readPlain)
+	wantStatus(t, fresp, frag, http.StatusOK)
+	served := budgetPairs(t, frag)
+	for _, key := range []string{"binary", "rss", "ledger", "spool", "events", "groups open", "incidents open", "worktrees", "version"} {
+		if budget[key] != served[key] {
+			t.Errorf("first paint %s = %q but /partials/budget serves %q", key, budget[key], served[key])
+		}
+	}
+}
+
+// TestFooterVersionMatchesHealth is TRBL-010 defect 1: every page footer renders
+// the build stamp the health surface reports (the same accessor), so the stamp
+// an operator reads on a page can never be an unpopulated template field while
+// /health.json carries the real sha.
+func TestFooterVersionMatchesHealth(t *testing.T) {
+	env := newEnv(t, envOptions{cfg: unlimitedRates})
+
+	resp, body := env.get("/health.json", "")
+	wantStatus(t, resp, body, http.StatusOK)
+	var hr types.HealthResponse
+	if err := json.Unmarshal([]byte(body), &hr); err != nil {
+		t.Fatalf("health.json is not a HealthResponse: %v", err)
+	}
+	if hr.Version == "" || hr.GitSHA == "" {
+		t.Fatalf("health surface reports an empty stamp (%+v) — the fixture is wrong, not the page", hr)
+	}
+	want := "trouble v" + hr.Version + " (" + hr.GitSHA + ")"
+
+	pages := []string{
+		"/", "/incidents", "/incidents/" + validIncidentID(),
+		"/groups", "/groups/" + validGroupID(), "/rules", "/breakers",
+	}
+	for _, path := range pages {
+		_, page := env.get(path, env.readPlain)
+		line := footerLine(t, page)
+		if line == "" {
+			t.Errorf("%s: no footer paragraph", path)
+			continue
+		}
+		if !strings.Contains(line, want) {
+			t.Errorf("%s: footer = %q, want it to carry %q", path, line, want)
 		}
 	}
 }

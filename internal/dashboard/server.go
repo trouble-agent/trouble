@@ -97,7 +97,7 @@ type server struct {
 	partials map[string]templateEntry
 	csrf     *csrfEngine
 	limiter  *limiter
-	throttle *ipThrottle
+	throttle *authThrottle
 	identity identityProvider
 	shed     *memShedder
 

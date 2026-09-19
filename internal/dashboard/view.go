@@ -655,15 +655,12 @@ func (s *server) budgetData() budgetPanel {
 	if s.deps.Autonomy != nil {
 		gates = s.deps.Autonomy.Gates()
 	}
-	version, gitSHA := "", ""
-	if s.deps.Version != nil {
-		version, gitSHA, _, _ = s.deps.Version()
-	}
+	version, gitSHA := s.versionFields()
 	return budgetPanel{
 		RW:        rw,
 		Autonomy:  gates,
-		Version:   clean(version),
-		GitSHA:    clean(gitSHA),
+		Version:   version,
+		GitSHA:    gitSHA,
 		Binary:    fmtLen(rw.BinaryBytes),
 		RSS:       fmtLen(rw.RSSBytes),
 		Ledger:    fmtLen(rw.LedgerBytes),
@@ -671,6 +668,21 @@ func (s *server) budgetData() budgetPanel {
 		Events:    fmtRate(rw.EventsPerMin),
 		Worktrees: rw.Worktrees,
 	}
+}
+
+// versionFields reads the build stamp from the one accessor the health surface
+// uses (Deps.Version — the composition root hands over lifecycle.VersionInfo,
+// the same source /health.json reports as version/git_sha). The footer and the
+// budget panel render these values, so the stamp an operator sees on a page is
+// the stamp the health surface reports: an empty one means the build is
+// genuinely unstamped, never that a template field went unpopulated (TRBL-010
+// defect 1).
+func (s *server) versionFields() (version, gitSHA string) {
+	if s.deps.Version == nil {
+		return "", ""
+	}
+	v, sha, _, _ := s.deps.Version()
+	return clean(v), clean(sha)
 }
 
 // stripData assembles the accelerator strip (row 12) from the injected health

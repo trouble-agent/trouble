@@ -331,9 +331,11 @@ expands once at token load. Under-scoped requests answer **403 + `TROUBLE-DASHBO
 `X-Trouble-Required-Scope`, so a UI can explain the refusal without a second round trip. A
 read-scope session still renders every control — disabled, with `data-requires` and an inline reason,
 never hidden — and the server re-checks every POST, so a forged request from a read session is still
-refused. Ten auth failures from one client IP inside 60 s throttle that IP for 60 s (**429 +
-`Retry-After`**); the read bucket is keyed by token *and* client IP (20/s, burst 60) and the write
-bucket by token (5/s, burst 10).
+refused. Ten auth failures for one presented credential inside 60 s throttle that credential for 60 s
+(**429 + `Retry-After`**) — a request that presents no grammar-valid credential is counted and throttled per
+client IP instead, so a mistyped or rotated token never locks out a valid one on the same phone or behind
+the same NAT (SPEC-10 §2.8a); the read bucket is keyed by token *and* client IP (20/s, burst 60) and the
+write bucket by token (5/s, burst 10).
 
 **CSRF on every POST, four checks in order** (§2.3): a Bearer *and* cookie mixture is refused
 outright; `Origin` must byte-equal `dashboard.public_origin` (or, on loopback, the request's own

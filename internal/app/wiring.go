@@ -51,7 +51,30 @@ func NewStore(l *ledger.Ledger, actor types.Actor, hostID string) *Store {
 // types.RecordDraft and hand back the written record). Two shapes exist because
 // the ladder's writer is kind/sig/inc/payload while the ledger's own API is a
 // draft; one adapter is cheaper than either package learning the other's shape.
+//
+// It also carries the ledger watermark seam (Seq/LastRecordTS): lifecycle's
+// heartbeat reads ledger_last_seq/ledger_last_ts through an optional type
+// assertion on the writer, and without these two methods every heartbeat — the
+// periodic one and the shutdown one — wrote zeroes on a live instance with
+// records (TRBL-010).
 type DraftWriter struct{ S *Store }
+
+// Seq is the newest ledger sequence number, 0 when there is no store to ask.
+func (w DraftWriter) Seq() uint64 {
+	if w.S == nil {
+		return 0
+	}
+	return w.S.Seq()
+}
+
+// LastRecordTS is the newest record's stamp, "" when there is no store or the
+// index knows of none.
+func (w DraftWriter) LastRecordTS() string {
+	if w.S == nil {
+		return ""
+	}
+	return w.S.LastRecordTS()
+}
 
 // Append writes one draft.
 func (w DraftWriter) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) {
@@ -228,6 +251,11 @@ func (s *Store) GapsInWindow(ctx context.Context, from, to string) ([]types.GapR
 
 // Seq is the newest sequence number (SPEC-05's monotonic anchor).
 func (s *Store) Seq() uint64 { return s.L.DashReader().LastSeq() }
+
+// LastRecordTS is the wall-clock stamp of the newest record, "" when the index
+// knows of none. It is the second half of the ledger watermark seam the
+// heartbeat and the shutdown heartbeat read (SPEC-12 §3.3/§4.2).
+func (s *Store) LastRecordTS() string { return s.L.DashReader().LastRecordTS() }
 
 func isOpen(st types.LadderState) bool {
 	switch st {

@@ -594,10 +594,16 @@ func newEnv(t *testing.T, opt envOptions) *testEnv {
 			}
 		},
 		Watermarks: func() types.RuntimeWatermarks {
+			// The open counters come from the same index the page's header
+			// counters read, exactly as the composition root's watermarks()
+			// does (internal/app/dashdeps.go): a fixture that disagreed with
+			// the index would hide the first-paint defect TRBL-010 fixed
+			// rather than reproduce it.
+			inc, groups, perMin := idx.Counters(clock.Now())
 			return types.RuntimeWatermarks{
 				BinaryBytes: 10 << 20, RSSBytes: 41 << 20, MemHighBytes: 192 << 20,
-				LedgerBytes: 30 << 20, SpoolBytes: 0, EventsPerMin: 18.4,
-				GroupsOpen: 7, IncidentsOpen: 2, Worktrees: 1,
+				LedgerBytes: 30 << 20, SpoolBytes: 0, EventsPerMin: perMin,
+				GroupsOpen: groups, IncidentsOpen: inc, Worktrees: 1,
 			}
 		},
 		Version: func() (string, string, string, bool) {

@@ -25,3 +25,8 @@ dist/
 
 # Container secret material (mounted at run time, never committed).
 deploy/container/secrets/
+
+# Local runtime scratch that must never be swept into a commit:
+# DuckBrain write staging (nested repo with its own .git) and GitReins run logs.
+namespaces/
+.gitreins/logs/

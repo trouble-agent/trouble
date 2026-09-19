@@ -16,9 +16,14 @@ import (
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
 
-// pending is one queued record awaiting the group commit.
+// pending is one queued record awaiting the group commit. A group carries
+// EITHER one single record (`rec`, from Append and every ledger-authored
+// path) OR a batch (`batch`, from AppendBatch, §3.5a): the writer treats both
+// shapes as one queue entry, so a batch is one write and one fdatasync and is
+// acked when the batch is durable.
 type pending struct {
 	rec   types.Record
+	batch []types.Record
 	done  chan error // nil for ledger-authored housekeeping records
 	house bool       // written to the trail, nobody waits
 }
@@ -502,6 +507,69 @@ func (w *writer) enqueue(ctx context.Context, rec types.Record) (types.Record, e
 	}
 }
 
+// enqueueBatch submits a batch of prepared records as ONE queue entry and
+// waits for the batch's durable ack (§3.5a: durable-on-return per BATCH).
+// Either every record is durable (nil error) or the batch failed (the error,
+// plus a hole for the seq range the batch would have occupied); a partial
+// landing is impossible because the records share one write and one fdatasync.
+func (w *writer) enqueueBatch(ctx context.Context, recs []types.Record) ([]types.Record, error) {
+	w.enqMu.Lock()
+	if w.closing {
+		w.enqMu.Unlock()
+		return recs, ledgerErr(types.CodeLedger001, ReasonWrite, "ledger is closing", nil)
+	}
+	w.enqMu.Unlock()
+	// §3.5a clamp: the writer's own batch cap is a flush boundary, so a batch
+	// larger than the remaining space in ledger.max_batch_records would span
+	// two commits — exactly what the contract forbids. The reconcile clamps
+	// first (AppendBatchLedger), and this is the backstop for a direct caller:
+	// the remainder is re-enqueued as its own group (one extra window, never a
+	// second boundary inside one).
+	if cap := w.l.opts.Rotation.MaxBatchRecords; cap > 0 && len(recs) > cap {
+		first, err := w.enqueueBatch(ctx, recs[:cap])
+		if err != nil {
+			return first, err
+		}
+		rest, err := w.enqueueBatch(ctx, recs[cap:])
+		return append(first, rest...), err
+	}
+	p := &pending{batch: recs, done: make(chan error, 1)}
+	w.depth.Add(1)
+	select {
+	case w.ch <- p:
+		w.depth.Add(-1)
+	default:
+		w.depth.Add(-1)
+		wait := w.l.opts.Rotation.MaxEnqueueWait
+		d, err := time.ParseDuration(wait)
+		if err != nil {
+			d = 5 * time.Second
+		}
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case w.ch <- p:
+		case <-t.C:
+			w.backpressure.Add(1)
+			return recs, ledgerErr(types.CodeLedger001, ReasonBackpressure,
+				fmt.Sprintf("queue cap %d reached and max_enqueue_wait %s expired",
+					w.l.opts.Rotation.QueueCapRecords, wait), nil)
+		case <-ctx.Done():
+			return recs, ctx.Err()
+		}
+	}
+	select {
+	case err := <-p.done:
+		if err != nil {
+			return recs, err
+		}
+		return recs, nil
+	case <-ctx.Done():
+		// The batch may still land; report the caller's cancellation.
+		return recs, ctx.Err()
+	}
+}
+
 // stop drains the queue, flushes and closes the current file.
 func (w *writer) stop() error {
 	w.enqMu.Lock()
@@ -571,13 +639,35 @@ func (w *writer) requestRotate(now time.Time) (int, error) {
 
 // flushBatch is the group commit: allocate seqs, serialize, write once,
 // fdatasync once, then publish LastSeq and ack every record (SPEC-01 §3.5).
+// The queue holds groups; an AppendBatch group contributes all of its records
+// to one write and one fdatasync, which is what makes the batch path's
+// durable-on-return-per-batch contract a property of the same code the single
+// path has always used (§3.5a).
 func (w *writer) flushBatch(batch []*pending) {
 	if len(batch) == 0 {
 		return
 	}
 	if w.l.opts.PerLineFsync {
 		for _, p := range batch {
-			w.writeOne(p)
+			if len(p.batch) == 0 {
+				w.writeOne(p)
+				continue
+			}
+			// Per-line mode is the test-only §7 diagnostic (one fdatasync per
+			// record), so an AppendBatch group degrades to exactly that: every
+			// record pays its own sync, and the group is acked ONCE — on the
+			// first new failure, or after the last record lands. (done is
+			// buffered; a per-record ack would deadlock the writer on the
+			// second send.)
+			errBefore := w.err()
+			for i := range p.batch {
+				w.writeOne(&pending{rec: p.batch[i]})
+			}
+			if err := w.err(); err != nil && err != errBefore {
+				p.done <- err
+			} else {
+				p.done <- nil
+			}
 		}
 		return
 	}
@@ -594,15 +684,28 @@ func (w *writer) flushBatch(batch []*pending) {
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	recs := make([]types.Record, 0, len(batch))
-	for i, p := range batch {
-		p.rec.Seq = w.pendingSeq.Add(1)
-		if err := enc.Encode(&p.rec); err != nil {
-			to := p.rec.Seq
-			w.failBatch(batch[i:], ledgerErr(types.CodeLedger001, ReasonWrite,
-				fmt.Sprintf("cannot serialize record seq %d", p.rec.Seq), err), from, to)
-			return
+	for _, p := range batch {
+		for i := range p.batch {
+			rec := &p.batch[i]
+			rec.Seq = w.pendingSeq.Add(1)
+			if err := enc.Encode(rec); err != nil {
+				to := rec.Seq
+				w.failBatch(batch, ledgerErr(types.CodeLedger001, ReasonWrite,
+					fmt.Sprintf("cannot serialize record seq %d", rec.Seq), err), from, to)
+				return
+			}
+			recs = append(recs, *rec)
 		}
-		recs = append(recs, p.rec)
+		if len(p.batch) == 0 {
+			p.rec.Seq = w.pendingSeq.Add(1)
+			if err := enc.Encode(&p.rec); err != nil {
+				to := p.rec.Seq
+				w.failBatch(batch, ledgerErr(types.CodeLedger001, ReasonWrite,
+					fmt.Sprintf("cannot serialize record seq %d", p.rec.Seq), err), from, to)
+				return
+			}
+			recs = append(recs, p.rec)
+		}
 	}
 	n, err := w.cur.file.Write(buf.Bytes())
 	if err == nil && n < buf.Len() {
@@ -618,7 +721,7 @@ func (w *writer) flushBatch(batch []*pending) {
 	}
 	w.fsyncCalls.Add(1)
 	w.cur.bytes += int64(buf.Len())
-	w.cur.records += int64(len(batch))
+	w.cur.records += int64(len(recs))
 	last := recs[len(recs)-1]
 	w.lastSeq.Store(last.Seq)
 	w.mu.Lock()

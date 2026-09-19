@@ -4,20 +4,18 @@ package app
 // SPEC-12 §7b).
 //
 // §7a's READY budget only ever BOUNDS "still booting"; it never said where the
-// boot's time goes. TRBL-025 measured that, and the answer is not descheduling:
-// the boot is a sequence of ~25 phases, all but one of which settle in well
-// under a millisecond, and one of which (sensors_start — the SPEC-03 §4 startup
-// reconcile of the D-Bus failure set) writes one ledger record per failed
-// systemd unit. Every one of those records costs its own group-commit window
-// (SPEC-01 §3.5), so the boot's READY latency is linear in the number of ledger
-// records it writes, at one `ledger.fsync_window_ms` (200 ms default) apiece.
+// boot's time goes. TRBL-025 measured that, and the answer was a sequence of
+// ~25 phases, all but one settling under a millisecond, plus one phase
+// (sensors_start — the SPEC-03 §4 startup reconcile) whose ledger records each
+// paid their own group-commit window: READY latency was linear in the records
+// the boot wrote, at one ledger.fsync_window_ms apiece.
 //
-// This test is the tripwire for that shape. It asserts the phase table is
-// COMPLETE and ORDERED (an unattributed boot is exactly what TRBL-025 was filed
-// against) and, on a host whose boot really does write that many records, that
-// the cost localizes in the one phase that can produce it. The causal assertion
-// is gated on the measured record count because a host with a clean unit set
-// has no such phase and would red for a reason that is not a regression.
+// TRBL-044 changed that cost model on purpose (§3.3a batch reconcile + §3.5a
+// batch append): the reconcile's records now land in ONE durable batch, so the
+// boot's durability term is windows × latency, not records × latency. This
+// test still asserts the phase table is COMPLETE and ORDERED (an
+// unattributed boot is exactly what TRBL-025 was filed against) and now
+// asserts the batching is engaged on a boot that writes enough records.
 
 import (
 	"runtime"
@@ -118,28 +116,34 @@ func TestBootPhaseTableAttributesTheReadyLatency(t *testing.T) {
 	t.Logf("ledger: %d records on the READY path in %d durable commits (%.2f commits/record, loss window %dms)",
 		st.Records, st.FsyncCalls, st.FsyncPerRecord, st.LossWindowMS)
 
-	// (4) The measured cause: on a host whose boot writes enough ledger records
-	// for the durability term to dominate, that cost must sit in the one phase
-	// that emits them — SPEC-03 §4's startup reconcile — and nowhere else. On a
-	// host with almost no failed units the boot writes a handful of records and
-	// this assertion would be measuring nothing, so it is skipped and said so.
+	// (4) The measured cause: TRBL-044 (§3.3a batch reconcile + §3.5a batch
+	// append) collapsed the reconcile's N sequential durable commits into
+	// ceil(N/K) batch commits, so the boot's cost model changed: the durability
+	// term is no longer records × (window + device sync latency) but roughly
+	// windows × (window + latency), with windows ≈ durable commits. The table
+	// still attributes every phase, and on a boot that writes enough records
+	// the ledger accounting is asserted: commits must be well below the record
+	// count on a boot whose reconcile found failed units (the batching IS the
+	// fix), with the measured numbers logged for the §7b table. On a host with
+	// almost no failed units the causal half is skipped and said so.
 	const recordsForTheCausalClaim = 20
 	if st.Records < recordsForTheCausalClaim {
 		t.Logf("only %d ledger records on this boot: the durability term is too small to localize, so the "+
-			"causal assertion is skipped (SPEC-12 §7b explains why the boot's cost is linear in this count)",
+			"causal assertion is skipped (SPEC-12 §7b explains the boot's cost model)",
 			st.Records)
 		return
 	}
-	if widestName != "sensors_start" {
-		t.Fatalf("the widest phase is %q (%s), want sensors_start: the boot's cost is the SPEC-03 §4 startup "+
-			"reconcile's ledger appends, so a phase other than sensors_start dominating means a new wait entered "+
-			"the READY path (SPEC-12 §7b)", widestName, widest.Round(time.Millisecond))
+	if st.FsyncCalls >= st.Records {
+		t.Fatalf("%d records cost %d durable commits — the batch reconcile (§3.3a) is not engaged: "+
+			"a boot whose reconcile writes failed-unit records must batch them (TRBL-044), or it pays one "+
+			"group-commit window per record again", st.Records, st.FsyncCalls)
 	}
 	ratio := 0.0
 	if second > 0 {
 		ratio = float64(widest) / float64(second)
 	}
-	t.Logf("localized: sensors_start %s is the widest phase, %.1fx the next (%s %s) — %d records at one "+
-		"group-commit window each is this boot's cost model",
-		widest.Round(time.Millisecond), ratio, secondName, second.Round(time.Millisecond), st.Records)
+	t.Logf("batched: %d records in %d durable commits (%.2f commits/record) — the §3.3a batch reconcile "+
+		"collapsed the READY-path cost model; widest phase %s %s, %.1fx the next (%s %s)",
+		st.Records, st.FsyncCalls, st.FsyncPerRecord,
+		widestName, widest.Round(time.Millisecond), ratio, secondName, second.Round(time.Millisecond))
 }

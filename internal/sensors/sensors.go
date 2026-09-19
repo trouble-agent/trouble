@@ -94,6 +94,15 @@ type Sensors struct {
 	// sampled observations.
 	fold *eventFold
 
+	// writeBatch is the §3.3a batch write boundary (an EmitBatchFunc over
+	// Ledger.AppendBatch). nil means the composition root did not install one
+	// and every write is the per-record emit — the §3.8 shape, unchanged.
+	writeBatch EmitBatchFunc
+
+	// bridge is the ladder admission half of the emit bridge (SetLadderBridge;
+	// §3.3a's batch path admits firing events after their batch is durable).
+	bridge LadderBridgeFunc
+
 	suppressed  atomic.Uint64
 	evaluations atomic.Uint64
 	fired       atomic.Uint64
@@ -1051,9 +1060,56 @@ func (s *Sensors) emitGapNow(ctx context.Context, sensor, scope, cause, detail s
 // whether any rule's match held. Every event is recorded either way; only a
 // match that completed its stabilization and passed the breaker gate tells the
 // ladder to act (payload.fire = true).
+//
+// The whole rule pipeline lives in evaluateEvent: handleEvent is its
+// emit-per-event shape, and evaluateAndDraft is the draft-only shape the
+// startup reconcile's batch path uses (§3.3a). The two must stay one
+// implementation or the reconcile's records would be decided by a second,
+// drifting copy of the rules.
 func (s *Sensors) handleEvent(ctx context.Context, ev types.SensorEvent) bool {
+	payload := s.evaluateEvent(ctx, ev)
+	draft := s.draftFor(ev, payload)
 	if rt := s.rt[ev.Sensor]; rt != nil {
 		rt.events.Add(1)
+		now := s.now()
+		rt.lastEvent.Store(now.UnixNano())
+		rt.lastOK.Store(now.UnixNano())
+	}
+	if s.fold.enabled() {
+		// A fold whose window has passed is written now, whoever the arrival is
+		// for: a signature that stopped repeating must not hold its record open.
+		s.fold.closeElapsed(ctx, s.emit, s.now())
+		if foldableObservation(ev, draft) {
+			s.fold.observe(ctx, s.emit, draft, ev.Sensor, s.now())
+			return payloadMatched(payload)
+		}
+		// This record is not foldable (it fires, or it is a wake, or the sampler
+		// did not produce it): the fold for its signature is written first so the
+		// ledger keeps the chronology.
+		s.fold.closeSig(ctx, s.emit, draft.Sig)
+	}
+	if _, err := s.emit(ctx, draft); err != nil {
+		if rt := s.rt[ev.Sensor]; rt != nil {
+			rt.drops.Add(1)
+		}
+	}
+	return payloadMatched(payload)
+}
+
+// payloadMatched reads the matched-any flag a payload carries. The key is
+// written by draftPayload for every evaluated observation.
+func payloadMatched(payload map[string]any) bool {
+	m, _ := payload["matched"].(bool)
+	return m
+}
+
+// evaluateEvent runs the FULL §3.4/§3.5/§3.8 pipeline for one observation —
+// counters, rules, stabilization, cooldowns, breakers, firing, the spurious
+// counter — and returns the payload. It writes nothing; the caller decides
+// whether the payload becomes one immediate record (handleEvent), one fold
+// (handleEvent), or one batch member (§3.3a).
+func (s *Sensors) evaluateEvent(ctx context.Context, ev types.SensorEvent) map[string]any {
+	if rt := s.rt[ev.Sensor]; rt != nil {
 		now := s.now()
 		rt.lastEvent.Store(now.UnixNano())
 		// An observation is proof the sensor just read its source successfully:
@@ -1153,7 +1209,34 @@ func (s *Sensors) handleEvent(ctx context.Context, ev types.SensorEvent) bool {
 		payload["fire"] = false
 		payload["suppressed"] = matchedAny
 	}
-	d := types.RecordDraft{
+	payload["matched"] = matchedAny
+	return payload
+}
+
+// EmitBatchFunc is the §3.3a write boundary: K drafts in one durable group,
+// returning the durable records (rec_id included, which the ladder bridge
+// needs) or an error. Declared next to the Sensors surface it belongs to; the
+// D-Bus reconcile is its only caller (§3.3a).
+type EmitBatchFunc func(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error)
+
+// LadderBridgeFunc admits one already-durable firing event into the ladder.
+// The DAEMON owns the record→observation derivation (it owns the ladder
+// seam); sensors hands it the durable record and its payload untouched.
+type LadderBridgeFunc func(ctx context.Context, rec types.Record, payload map[string]any) error
+
+// SetBatchWriter installs the §3.3a batch write boundary. The composition
+// root calls this before Start so the startup reconcile's failed-unit records
+// land in ONE durable group; without it every write stays per-record.
+func (s *Sensors) SetBatchWriter(fn EmitBatchFunc) { s.writeBatch = fn }
+
+// SetLadderBridge installs the ladder admission half of the emit bridge. The
+// per-record path gets it for free through daemon.emit; §3.3a's batch path
+// bypasses that closure, so the boot re-arms it here.
+func (s *Sensors) SetLadderBridge(fn LadderBridgeFunc) { s.bridge = fn }
+
+// draftFor builds the RecordDraft a payload will be persisted as.
+func (s *Sensors) draftFor(ev types.SensorEvent, payload map[string]any) types.RecordDraft {
+	return types.RecordDraft{
 		Kind:       types.KEvent,
 		Sig:        ev.Sig.String(),
 		Origin:     types.Origin{HostID: s.hostID, HubID: s.cfg.hubID, Source: string(ev.Sensor.SigSource())},
@@ -1161,30 +1244,25 @@ func (s *Sensors) handleEvent(ctx context.Context, ev types.SensorEvent) bool {
 		Redactions: redactionCount(ev.Detail),
 		Payload:    payload,
 	}
-	// SPEC-03 §3.8a: a repeated identical sampled observation is FOLDED, not
-	// re-persisted. Everything that decides anything already happened above, per
-	// observation: the rules evaluated it, the stabilization and the breakers saw
-	// it. Only the record is deferred, and the record that replaces the run
-	// carries the count of what it stands for.
-	if s.fold.enabled() {
-		// A fold whose window has passed is written now, whoever the arrival is
-		// for: a signature that stopped repeating must not hold its record open.
-		s.fold.closeElapsed(ctx, s.emit, now)
-		if foldableObservation(ev, d) {
-			s.fold.observe(ctx, s.emit, d, ev.Sensor, now)
-			return matchedAny
-		}
-		// This record is not foldable (it fires, or it is a wake, or the sampler
-		// did not produce it): the fold for its signature is written first so the
-		// ledger keeps the chronology.
-		s.fold.closeSig(ctx, s.emit, d.Sig)
+}
+
+// bridgeLadder is the sensors→ladder half of the emit bridge (daemon.emit's
+// post-Append half), for records the batch path wrote already durable. A
+// firing event whose batch landed opens (or folds into) its incident exactly
+// as the per-record path would have — with the record's REAL rec_id, because
+// the batch boundary returns the durable records; refusals are recorded by
+// the ladder itself.
+func (s *Sensors) bridgeLadder(ctx context.Context, rec types.Record) {
+	if s.bridge == nil || rec.Kind != types.KEvent {
+		return
 	}
-	if _, err := s.emit(ctx, d); err != nil {
-		if rt := s.rt[ev.Sensor]; rt != nil {
-			rt.drops.Add(1)
-		}
+	fire, _ := rec.Payload["fire"].(bool)
+	if !fire {
+		return
 	}
-	return matchedAny
+	if err := s.bridge(ctx, rec, rec.Payload); err != nil {
+		s.recError(types.SenDBus, types.CodeSensors015, fmt.Sprintf("admit refused: sig=%s err=%v", rec.Sig, err))
+	}
 }
 
 type firingRule struct {

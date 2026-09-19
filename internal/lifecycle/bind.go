@@ -22,6 +22,28 @@ type bindProbe struct {
 	Listener net.Listener
 }
 
+// bindHolder describes the process that owns a listening TCP socket
+// (TRBL-042). The type is portable; only the /proc lookup is Linux-only.
+type bindHolder struct {
+	PID     int    // owning pid
+	Comm    string // /proc/<pid>/comm (the 15-char kernel name)
+	Cmdline string // /proc/<pid>/cmdline, NULs joined with spaces
+	Started string // human-readable wall-clock start time, or tick fallback
+}
+
+// describe renders the holder's identity: the cmdline when one exists
+// (truncated — it is a diagnostic, not a log), otherwise the comm name.
+func (h bindHolder) describe() string {
+	s := h.Cmdline
+	if s == "" {
+		s = h.Comm
+	}
+	if len(s) > 120 {
+		s = s[:117] + "..."
+	}
+	return s
+}
+
 // AuthForm names the ingestion auth surface (SPEC-12 §3.7).
 type AuthForm string
 
@@ -33,6 +55,15 @@ const (
 
 // PreflightBinds resolves both listeners, validates the bind matrix, and keeps
 // the listeners open (SPEC-12 §3.2). Returns TROUBLE-LIFECYCLE-003 on refusal.
+//
+// When a port is already held, the refusal names the holder: pid, name and
+// start time read from /proc. A bare `bind: address already in use` reads like
+// a defect in the code under test, but the usual holder is a scratch daemon a
+// finished tick (or an earlier quickstart) never killed — a testing-hygiene
+// condition, not a code path (TRBL-042). The diagnostic must separate the two
+// so the operator kills the right thing: `ss` finds a pid, the message should
+// already carry it. The holder lookup is best-effort and never gates the bind:
+// on any /proc read failure the error keeps the original hint.
 func PreflightBinds(cfg Config) ([]bindProbe, error) {
 	declared := []struct {
 		name   string
@@ -72,11 +103,25 @@ func PreflightBinds(cfg Config) ([]bindProbe, error) {
 		lc := net.ListenConfig{}
 		ln, err := lc.Listen(context.Background(), "tcp", d.bind)
 		if err != nil {
-			return nil, fmt.Errorf("%w: cannot bind %s %q: %v (hint: ss -tlnp | grep %d)", types.CodeLifecycle003, d.name, d.bind, err, port)
+			errText := fmt.Sprintf("cannot bind %s %q: %v (hint: ss -tlnp | grep %d)",
+				d.name, d.bind, err, port)
+			if h, ok := findBindHolder(host, portStr); ok {
+				errText += "\n" + bindHolderHint(h, d.bind)
+			}
+			return nil, fmt.Errorf("%w: %s", types.CodeLifecycle003, errText)
 		}
 		probes = append(probes, bindProbe{Name: d.name, Bind: d.bind, Host: host, Port: port, Listener: ln})
 	}
 	return probes, nil
+}
+
+// bindHolderHint renders one scratch-daemon-style diagnostic naming the
+// process that already owns the address: pid, name, start time, the exact
+// kill command and the condition's error code so suites and operators stop
+// reading a foreign holder as a defect in the code under test (TRBL-042).
+func bindHolderHint(h bindHolder, bind string) string {
+	return fmt.Sprintf("TROUBLE-SCRATCH-DAEMON: stale scratch daemon holds %s — pid %d (%s), started %s; kill it by exact PID (`kill %d`), then retry; never bind 7643/7644 outside a scratch HOME + scratch state root",
+		bind, h.PID, h.describe(), h.Started, h.PID)
 }
 
 // isLoopbackHost reports whether host is a loopback name or address.

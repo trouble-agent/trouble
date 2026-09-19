@@ -150,7 +150,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 |---|---|
 | event, canary | SPEC-03, SPEC-04 |
 | group | SPEC-04 |
-| incident, verify, breaker | SPEC-05 |
+| `incident`, `verify`, `breaker`, `agent_run` | SPEC-05 |
 | play_run, tool_call | SPEC-06 |
 | research | SPEC-07 |
 | flow, spawn | SPEC-08 |
@@ -168,7 +168,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | TROUBLE-SCRUB-0NN | SPEC-02 | 001–008 |
 | TROUBLE-SENSORS-0NN | SPEC-03 | 001–025 |
 | TROUBLE-SENTINEL-0NN | SPEC-04 | 001–023 |
-| TROUBLE-LADDER-0NN | SPEC-05 | 001–020 |
+| TROUBLE-LADDER-0NN | SPEC-05 | 001–021 |
 | TROUBLE-REGISTRY-0NN | SPEC-06 | 001–018 |
 | TROUBLE-RESEARCH-0NN | SPEC-07 | 001–010 |
 | TROUBLE-FLOW-0NN | SPEC-08 | 001–019 |

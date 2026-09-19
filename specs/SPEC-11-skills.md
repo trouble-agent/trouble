@@ -4,7 +4,7 @@ Spec: SPEC-11
 Area prefix: TROUBLE-SKILLS
 Package: internal/skills
 Consumed types: Skill, SkillGuards, Provenance, SkillStats, SkillCandidate, Play, PlayTask, Descriptor, Incident, ResearchOutcome, Evidence, Record, Actor, Origin, Duration, SkillsConfig, SkillSigner, SkillsStatus, SkillRow
-Local types: skillArtifact, canonicalProjection, localIndex, installRow, canaryRecord, holdEntry, matchResult, pullReport, authorizer
+Local types: skillArtifact, canonicalProjection, localIndex, installRow, canaryRecord, holdEntry, matchResult, pullReport, authorizer, Library, LibraryConfig, LocalSkill, SkillStep, StepRunner
 ACs: AC-24 (partial — see SPEC-INDEX §6.1), AC-25, AC-26
 PRD: §06c, §12
 
@@ -124,6 +124,12 @@ max_hold              = "30m"
 demote_after_failures = 2
 state_dir             = ""                          # default: <state root>/skills-local
 git_binary            = "git"
+local_enabled         = false                      # §2b — the local SKILL.md library, off by default
+local_dir             = ""                         # §2b — one <name>/SKILL.md per skill
+local_max_bytes       = 1048576
+local_max_skills      = 64
+local_max_steps       = 16
+local_step_timeout    = "60s"
 
 [[signers]]
 key_id     = "skills-2026"
@@ -159,6 +165,138 @@ Both keys at once, or neither while `enabled = true`, stays a boot rejection (`T
 other §4.1 and §4.3 rule — a credential-bearing URL, an unknown `ref_mode` or `approve`, a
 `require_signature = false` loop that is not a review-policy local channel — applies unchanged the moment the
 loop is on.
+
+### 2b The local skill library — `SKILL.md` + frontmatter (v0.1.1b)
+
+The brief's other half of the skill story is authoring: a remote agent writes a skill in the Claude-skill
+format (`SKILL.md` with YAML frontmatter), the daemon reads the directory, and a skill step runs against
+the runner. That is a **local authoring surface**, not a distribution channel, and the distinction is the
+whole security argument for this section:
+
+* the **signed** `SKILL.toml` artifact of §3.1 stays the only form that crosses a host boundary (pull,
+  canary, approve, floor, conflict). Nothing in this section is pulled, merged, signed or version-negotiated;
+* a library step therefore has exactly a locally-authored play's authority — the same descriptor
+  allowlist, the same `authorize → validate → dry_run → apply → verify → audit` stages, the same
+  autonomy gate (SPEC-05 §3.11). It can never exceed what a rule's play already can do;
+* the library is **off** unless `local_enabled = true` and `local_dir` names a directory. Nothing is
+  read, nothing is executed, and no directory is created when it is off.
+
+Configuration (added to the `[skills]` table as six keys; the parser that reads them is the same strict
+decoder as §2):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `local_enabled` | `false` | read `local_dir` at all |
+| `local_dir` | `""` | the library root: one `<name>/SKILL.md` per skill (absolute; no `..`, no URL) |
+| `local_max_bytes` | `1048576` | per-file cap; a larger `SKILL.md` is refused, never truncated |
+| `local_max_skills` | `64` | scan cap; more files than this is a refusal naming the cap |
+| `local_max_steps` | `16` | per-skill step cap |
+| `local_step_timeout` | `60s` | the wall clock of one step (passed to the runner's own deadline) |
+
+The loader's contract:
+
+```go
+// Library is the local SKILL.md library (SPEC-11 §2b). It reads a directory and
+// runs a step through the runner — both actions typed, neither parameterisable
+// with code.
+type Library struct{ /* cfg, deps, runner, clock */ }
+
+type LibraryConfig struct {                 // the local_* keys, resolved
+    Enabled     bool
+    Dir         string
+    MaxBytes    int64
+    MaxSkills   int
+    MaxSteps    int
+    StepTimeout types.Duration
+}
+
+type LocalSkill struct {                    // one <name>/SKILL.md, parsed
+    Name        string
+    Description string
+    Version     int
+    Dir         string                      // <local_dir>/<name>
+    File        string                      // <dir>/SKILL.md
+    Digest      string                      // hex64(sha256(SKILL.md bytes))
+    Frontmatter map[string]string           // every scalar the file declared, for reporting
+    Steps       []SkillStep
+}
+
+type SkillStep struct {                     // one typed step from the frontmatter
+    Index  int
+    Title  string
+    Module string                          // an exact registry descriptor name
+    Args   map[string]any                   // literals only
+}
+
+// StepRunner is the typed execution view of SPEC-06's registry; *registry.Runner
+// satisfies it, and so does the ladder's PlayRunner adapter. There is no method
+// that takes a command line, a script, a template or an interpreter.
+type StepRunner interface {
+    Check(ctx context.Context, tool string, args map[string]any) (types.Diff, types.ToolCall, error)
+    Apply(ctx context.Context, tool string, args map[string]any) (types.Result, types.ToolCall, error)
+}
+
+func NewLibrary(cfg types.SkillsConfig, deps Deps, runner StepRunner) (*Library, error) // -001 on a malformed config
+func (l *Library) Scan(ctx context.Context) ([]LocalSkill, error)                        // read-only, name order
+func (l *Library) Get(name string) (LocalSkill, bool)
+func (l *Library) Plays(ctx context.Context) ([]types.Play, error)                        // SPEC-05 §2b's read side
+func (l *Library) RunStep(ctx context.Context, inc types.Incident, name string, step int, mode string) (types.ToolCall, error)
+```
+
+The library file is `<local_dir>/<name>/SKILL.md`, whose frontmatter carries the standard skill keys
+(`name`, `description`, `version`, plus any other scalar an author wants) and, optionally, a namespaced
+step list:
+
+```markdown
+---
+name: payment-worker-queue-wedge
+description: >-
+  The payment worker's queue wedges when the socket backlog fills; check the
+  connection count, then reload the unit.
+version: 1
+trouble:
+  steps:
+    - title: count the workers' sockets
+      module: proc.connections
+      args:
+        pid: 4242
+    - title: reload the unit
+      module: service.reload
+      args_json: '{"unit":"payment-worker.service"}'
+---
+
+Body: the prose a human (or an agent) reads. It is NEVER executed, never parsed
+for commands, and never interpreted as tool calls.
+```
+
+Rules, each of which a §7 test falsifies:
+
+1. **A step is typed or it does not exist.** `module` must be an exact descriptor name (no globs, no
+   `pkg.*`), and `args` are literals: scalars in a `args:` block, or one strict JSON object in
+   `args_json:`. A key named `shell`, `exec`, `cmd`, `command`, `script`, `eval`, `run` or `interpreter`
+   anywhere under `trouble:` is **TROUBLE-SKILLS-001** (`reason=unknown_key`) — that is the "never
+   arbitrary code" half of the contract, and it is a schema refusal, not a convention.
+2. **The body is data.** A fenced command block in the markdown body is never run, never extracted and
+   never passed to a runner: `RunStep` takes a step INDEX and reads it from the parsed frontmatter.
+3. **The parse is a documented subset, and unsupported syntax FAILS LOUD.** Supported: flat `key:`
+   scalars, one level of nesting (the `trouble:` block), `- ` list items with scalar keys, block
+   scalars (`>`, `>-`, `|`, `|-`) for multi-line values, and `#` comments. Unsupported (a deeper nesting, a list of
+   lists, a tab indent, a duplicate key, a `[[…]]` header, a value that runs past the frontmatter
+   delimiter) is refused with the file, line and key named. A hand-rolled subset that silently ignores
+   what it cannot read is how a step disappears from a reviewed skill.
+4. **Per-file isolation.** One malformed `SKILL.md` is refused (a `refused` record with the reason) and
+   the rest of the directory still loads: a broken draft must not blind the whole library.
+5. **The directory must not be a local privilege escalation.** A `local_dir` (or any ancestor up to the
+   state root) that is group- or world-writable is refused (`reason=dir_writable`): a library whose
+   files another user can replace is a capability handed to that user.
+6. **Enable-time, not call-time, detection of a missing directory**: `local_enabled = true` with a
+   `local_dir` that does not exist or is not a directory is a construction refusal
+   (`reason=dir_missing`), the same posture §2a takes for a declared loop with no channel.
+
+`Plays` compiles each skill to the shape the runner already consumes: `name`, `version`,
+`source = "skill-local:<name>@<version>"`, and one `PlayTask` per step (`tool` = the module, `args` =
+the literals). That is what makes "the ladder reads the library" a read of typed plays rather than a
+new execution language.
 
 ## 3. Data model
 
@@ -587,6 +725,40 @@ Refusal records are deduplicated on `(name, version, phase, error_code, reason)`
 the record is re-emitted at most once per 24 h with the accumulated count, so a permanently refused artifact on
 every pull interval cannot flood the ledger — and no refusal is ever dropped.
 
+### 4.7a Reading and executing a library step (v0.1.1b)
+
+Wiring, one hop each way:
+
+| Direction | Call | Notes |
+|---|---|---|
+| composition root → library | `skills.NewLibrary(cfg, deps, runner)` | `runner` is the registry adapter (`*registry.Runner` or the ladder's `PlayRunner` adapter) — the strictest available one, so a step passes the six stages |
+| ladder → library | `SkillLibrary.Plays` / `RunStep` (SPEC-05 §2b) | the ladder is the only caller; it owns the gate decision and passes the `mode` |
+| library → runner | `StepRunner.Check` / `StepRunner.Apply` | `check_mode` under `shadow`, `apply` only when the gate granted the module |
+| library → ledger | one `skill` record per scan and per step | phases below |
+
+Ledger records (kind `skill`, `origin.source="skills"`; the §4.7 dedup rule applies to the refusal row):
+
+| `payload.phase` | Emitted when | Required payload fields |
+|---|---|---|
+| `library_loaded` | a scan completed | `dir, digest, skills, refused, steps, max_skills` |
+| `library_refused` | one `SKILL.md` was refused | `dir, file, reason, line, error_code` |
+| `step_executed` | one step finished against the runner | `name, version, step, module, mode, changed, tool_call, error_code` |
+
+`RunStep` refuses rather than guesses:
+
+* an unknown skill name, a step index outside the skill's steps, or a `mode` that is not `check_mode`/
+  `apply` → TROUBLE-SKILLS-013 (`reason=unknown_skill` / `unknown_step` / `bad_mode`), no runner call;
+* a step whose module is not an exact registered descriptor name → TROUBLE-SKILLS-013
+  (`reason=missing_module`), no runner call — the same rule §4.6 applies to a play;
+* a runner refusal (do-not-touch, ungranted scope, kill-switch) is passed through with the runner's own
+  code and class: this package never re-mints another area's code;
+* with `local_enabled = false` (the shipped default) every method is a no-op: `Plays` returns an empty
+  list, `RunStep` refuses, and nothing on disk is read.
+
+Authority, stated once: the library is local and unsigned, so it is exactly as powerful as a play a rule
+already carries — no more. It cannot pull, cannot cross a host boundary, cannot mint a capability the
+build does not register, and cannot express anything except typed tool calls (§2b rule 1).
+
 ## 5. Errors
 
 | Code | Class | Fires when | Record / effect |
@@ -639,6 +811,14 @@ every pull interval cannot flood the ledger — and no refusal is ever dropped.
 10. `stats_test.go` — increments, flush within 5 s, atomic rename, 014 on a read-only directory with the play still succeeding; an artifact containing `[stats]` is rejected so stats can never round-trip into the channel.
 11. `boot_reverify_test.go` — a tampered installed artifact is quarantined at boot (002 + refusal record) and never applied; the process stays green on `/health` while `SkillsStatus.degraded` reports skills.
 12. Integration (`test/skills_e2e_test.go`) — 200-artifact pull: install ≤ 2 s wall (excluding the fetch), RSS delta ≤ 8 MiB (steady RSS budget ≤ 80 MB per SPEC-TYPES §6.1), ledger records appended through the group-commit writer with no per-record fsync (regression: 512 rec/s per-line vs ≈ 515k rec/s amortized), and `pulled` count equals `installed + pending_review + refused` exactly.
+13. `library_test.go` (§2b / §4.7a, v0.1.1b) — a fixture library under `t.TempDir()` with two valid skills and one malformed file:
+    - the valid pair parses to their frontmatter values (name, description, version) and their steps in order; `Plays` returns them in name order with `source = "skill-local:<name>@<version>"` and one task per step;
+    - the malformed file is refused with the file, line and reason while the other two still load (per-file isolation), and the refusal is one `library_refused` record;
+    - the subset is falsified: a tab indent, a duplicate key, a deeper nesting, a `[[…]]` header, a list-of-lists and an unterminated frontmatter each yield **TROUBLE-SKILLS-001**, never a silently shorter step list (assert the parsed step count is 0 for the refused file);
+    - the never-arbitrary-code rule: a step key named `shell`/`exec`/`cmd`/`command`/`script`/`eval`/`run`/`interpreter` is **001** with `reason=unknown_key`, and a body carrying a fenced `bash` block executes nothing (a fake runner records zero calls);
+    - `RunStep` under `check_mode` calls the fake runner's `Check` exactly once and `Apply` zero times; under `apply` it calls `Apply` once; an unknown name/step/mode and a module outside the registered set refuse with **TROUBLE-SKILLS-013** and zero runner calls;
+    - `local_enabled = false` (the shipped default) reads nothing: zero `skill` records, zero runner calls, empty `Plays`;
+    - a group- or world-writable `local_dir` refuses at construction with `reason=dir_writable`; a missing dir with `local_enabled = true` refuses with `reason=dir_missing`.
 
 ## 8. hilo impact
 
@@ -653,6 +833,7 @@ Packages/files created (all new, `github.com/totalwindupflightsystems/trouble`):
 | `internal/skills/resolve.go` | `Resolver` (`Match`, `Hold`, `RecordRun`), `conflict`/`hold` records, demotion |
 | `internal/skills/authorize.go` | `authorizer` — the registry hook, implementing SPEC-06's `Authorizer` seam |
 | `internal/skills/store.go` | `localIndex`, `installRow`, `canaryRecord`, `Stats`, `Status`, atomic persistence |
+| `internal/skills/library.go` | `Library` (§2b), `LibraryConfig`, `LocalSkill`, `SkillStep`, `StepRunner`, the frontmatter subset parser, `Plays`, `RunStep` |
 | `cmd/trouble/skills.go` | the `trouble skills …` CLI |
 | `test/skills_e2e_test.go` | AC-24 / AC-26 end-to-end fixtures |
 

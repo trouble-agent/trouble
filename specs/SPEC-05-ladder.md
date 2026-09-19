@@ -3,8 +3,8 @@
 Spec: SPEC-05
 Area prefix: TROUBLE-LADDER
 Package: internal/ladder
-Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort, CodeplaneContext
-Local types: Ladder, Deps, Config, Observation, AdmitResult, Transition, Window, ParkReason, ParkReport, ReAdoptReport, PendingItem, PlayRunner, RuleEvaluator, LedgerWriter, IndexReader, Outlet, Notifier, Clock, RunSummary, StabilizationState, SourcePath
+Consumed types: Rule, Condition, SensorHealth, SourceLiveness, Record, RecordKind, Sig, SigSource, Actor, Duration, Incident, LadderState, Rung, Severity, Evidence, VerifyResultKind, GapRecord, Breaker, AutonomyGates, AutonomyMode, Play, PlayTask, Diff, DiffEntry, Result, ToolCall, ResearchOutcome, ParkRecord, AgentLease, BudgetState, Subject, ResearchPort, CodeplaneContext, LLMUsage, LLMAttempt, LLMCompaction, AgentOutcome
+Local types: Ladder, Deps, Config, Observation, AdmitResult, Transition, Window, ParkReason, ParkReport, ReAdoptReport, PendingItem, PlayRunner, RuleEvaluator, LedgerWriter, IndexReader, Outlet, Notifier, Clock, RunSummary, StabilizationState, SourcePath, AgentPort, SkillLibrary
 ACs: AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31
 PRD: §05, §06b, §11, §12
 
@@ -170,6 +170,8 @@ type Deps struct {
     Clock    Clock
     Eval     RuleEvaluator // default implementation: internal/sensors
     Cfg      Config
+    Agent    AgentPort     // the agent stage's LLM port (§2a); nil = the stage refuses, never fabricates
+    Skills   SkillLibrary  // the local SKILL.md library (§2b); nil = no library is read
 }
 type Observation struct { // the admission input; scrubbed and sig-keyed before it reaches here
     EventID       string
@@ -194,6 +196,87 @@ type ParkReport struct { Records []ParkRecord; FlushedSeq uint64; ElapsedMS int 
 type ReAdoptReport struct { Resumed, Failed, Orphaned []string }
 type PendingItem struct { Inc string; From, To LadderState; SinceTS string; Reason string }
 ```
+
+### 2a The agent stage's LLM port (v0.1.1b)
+
+The agent rung's model work is one buffered completion per stage, and this spec owns the port that
+performs it. The port is an interface here rather than a dependency: `internal/llm` implements it
+(`RunAgent`) and imports `internal/types` only, so the one-way dependency direction of §4.2 is
+unchanged — the ladder never imports the client, and the client never imports the ladder.
+
+```go
+// AgentPort is the agent stage's only path to a model. One buffered
+// request/response per call; a stream is not expressible (SPEC-05 §3.7a).
+type AgentPort interface {
+    // RunAgent performs one buffered completion and reports which chain entry
+    // served it (types.AgentOutcome, SPEC-TYPES §3.15.12a). The outcome is returned
+    // WITH the error: it is the ledger-facing report even when no candidate
+    // served, so the stage record never depends on an error string.
+    RunAgent(ctx context.Context, prompt string) (AgentOutcome, error)
+}
+
+// RunAgentStage runs one agent-stage completion for an incident that is in
+// `agent:running` and records it as an `agent_run` record (§3.12a). It is the
+// ladder's only caller of Deps.Agent and the only writer of the outcome.
+//
+// The stage is gated exactly like every other stage entry (§3.11, §3.4): the
+// kill-switch refuses it with TROUBLE-LADDER-010 and records it as pending, and
+// the per-day agent budget (§3.7) is checked before the port is reached. The
+// per-call caps — the hard token cap and the wall-clock cap — belong to the port's
+// configuration (§3.7a) and are enforced there, before and during the call.
+//
+// A run that fails is recorded with `outcome:"failed"` and the port's
+// `failure_class`, and the incident's `AgentResult` carries that class so T28's
+// guard (`no usable result`) is satisfied by evidence rather than by a timestamp.
+func (l *Ladder) RunAgentStage(ctx context.Context, incID, prompt string) (AgentOutcome, error)
+```
+
+`AgentOutcome` is a shared type (SPEC-TYPES §3.15.12a) because both packages name it. Nothing in it can
+carry a credential: `Endpoint` is the credential-free host, and a key is named by a `key_ref` (§4.3a).
+
+Refusal contract: with no `Deps.Agent` wired, `RunAgentStage` returns **TROUBLE-LADDER-021**
+(`reason=no_agent_port`) and records nothing that looks like a run — a stage that cannot call a model
+must say so, never return an empty diagnosis as if a model had answered.
+
+### 2b The local skill library port (v0.1.1b)
+
+The skills stage reads a **local** skill library in the `SKILL.md` + frontmatter format (SPEC-11 §2b)
+and can run one of its steps against the runner. The ladder's view is two methods, both typed:
+
+```go
+// SkillLibrary is the ladder's read-and-execute view of the local skill library
+// (SPEC-11 §2b). Both methods are typed: a step is a PlayTask — a registry module
+// name plus literal args — and execution returns the audit record of one typed
+// tool call. There is no shell, interpreter, template or script in this path, and
+// no method here accepts one.
+type SkillLibrary interface {
+    // Plays lists the library's skills, each compiled to the play shape the
+    // runner already consumes (name, version, tasks[{tool, args}]). Read-only.
+    Plays(ctx context.Context) ([]Play, error)
+    // RunStep executes step `step` of library skill `name` against the runner:
+    // check_mode under the shadow gate, apply only when the gate grants the
+    // module. It writes the `skill`-kind step record (SPEC-11 §4.7a) and returns
+    // the tool call's audit record.
+    RunStep(ctx context.Context, inc Incident, name string, step int, mode string) (ToolCall, error)
+}
+
+// SkillPlays is `trouble`'s read surface for the library: the ladder answers with
+// the compiled plays, or with an empty list when no library is wired.
+func (l *Ladder) SkillPlays(ctx context.Context) ([]Play, error)
+
+// RunSkillStep is the skills stage entry: gate check (§3.11), kill-switch check
+// (§3.4) and then one typed step against the runner. Under `shadow` the step runs
+// in check_mode and mutates nothing; under `assisted` a mutating step needs the
+// module grant (`<rule>|<module>`) the play path already uses; under `full` the
+// registry's own six stages still bind. A refused entry is recorded as pending
+// with TROUBLE-LADDER-010 or -011 and no step runs.
+func (l *Ladder) RunSkillStep(ctx context.Context, incID, name string, step int) (ToolCall, error)
+```
+
+The library is an authoring surface, not a distribution channel: nothing here is pulled, merged or
+signed, and a step therefore has exactly a locally-authored play's authority — same modules, same
+autonomy gate, same authorize stages. SPEC-11 §2b owns the format, the loader's refusals and the
+"never a shell" argument; this section owns the two ladder calls.
 
 ## 3. Data model
 
@@ -429,6 +512,50 @@ instead of running** (AC-5): the stage is never entered, the outlets still fire 
 A rollover mid-run never aborts the run: the run's cost is charged to the day it started, and the next
 admission is evaluated against the new day.
 
+### 3.7a The agent stage's per-call budgets and context compaction (v0.1.1b)
+
+§3.7 counts a day's runs; this section bounds **one call**, so an agent stage that is entered cannot
+run away inside its own budget. The three caps are properties of the configured chain (§4.3a) and are
+enforced by `internal/llm`, which is why they are testable without a model:
+
+| Cap | Enforced | Behaviour when exceeded |
+|---|---|---|
+| `max_tokens` (hard) | **before** the request is built | the request is refused; nothing is sent |
+| `max_tokens` (observed) | after the response is decoded | a completion whose reported `usage.completion_tokens` exceeds the cap fails the stage; the text is discarded, never truncated and never used |
+| `timeout` (wall clock) | **mid-call**, as a per-attempt deadline | the attempt is cancelled at the cap; the chain may move to the next candidate, but a stage whose caller deadline has expired stops |
+
+**One buffered request per stage.** There is no streaming request and no SSE parse: the request body
+pins `stream:false`, and an upstream that answers `text/event-stream` is a contract failure, not a
+completion to reassemble. A hung stream is the failure mode this rule refuses.
+
+**Context compaction is a hook, and it never truncates.** Before the request is built, the assembled
+context is measured. At or below `compact.budget_tokens` nothing happens. Above it:
+
+1. the context is grouped into at most `compact.max_chunks` groups of about `compact.chunk_tokens`
+   each, in order — a chunk is never cut in half and never dropped;
+2. **each group is summarised by exactly one** completion through the same ordered chain, with
+   `max_tokens = min(compact.max_tokens, max_tokens)` (the stage cap bounds the summariser, so a
+   summary can never cost more than the run it compacts for);
+3. the summaries replace the groups, and `compaction{in_tokens, out_tokens, chunks, max_chunks,
+   candidate, model}` is recorded on the stage record (§3.12a).
+
+A split that would need more groups than `max_chunks`, or a summarisation call that fails, REFUSES the
+stage (`failure_class:compaction`). There is no code path that returns a shorter context than it was
+given without an accounting that says so: silent truncation is the one outcome the hook exists to
+prevent. Token counts come from the provider's `usage` when it reports one and from the documented
+byte-based estimator otherwise, and every estimated count is flagged `estimated:true` — an estimate is
+never presented as a measurement.
+
+**Failure code.** A stage whose LLM work fails or exceeds a cap returns **TROUBLE-LADDER-021**
+(permanent) with a `reason` token that names the branch: `no_agent_port`, `no_candidate`, `transport`,
+`attempt_timeout`, `rate_limited`, `server_error`, `credential`, `client_error`, `contract`,
+`token_cap_exceeded`, `completion_over_cap`, `streaming_refused`, `compaction_not_cappable`. The
+returned code is mirrored into the record's `payload.error_code` and the port's class into
+`payload.failure_class`; T28's own guard still decides the strike path, so a budgeted failure is a
+failed run with evidence, not a silent retry. Retryability is the port's: transport, timeout, 429, 5xx
+and a candidate-local credential failure move the chain to the next candidate; a 4xx that is not
+429/401/403 stops it, because a malformed request is malformed for every candidate.
+
 ### 3.8 Breakers, suppression windows and quiet-close
 
 `Breaker` state changes are `B⟨…⟩` records (`breaker` kind). Suppression is not a separate mechanism: a
@@ -580,8 +707,47 @@ applies.
 | `incident` (this spec) | `transition`, `from`, `to`, `rung`, `entry_rung`, `rule`, `inKey`, `sigs[]`, `arrival_paths{}`, `reopen`, `reopen_count`, `play_runs`, `agent_runs`, `strikes`, `lease{}`, `budget{}`, `breaker_scope`, `suppress_until`, `suppressed_count`, `park{}`, `resume{}`, `orphan{}`, `refused`, `pending`, `resume_from`, `illegal_transitions`, `window{}`, `evidence_ref`, `research_id`, `issue_id`, `task_id`, `spawn_id`, `pending_human`, `severity`, `stabilize_degraded`, `changed`, `folded` |
 | `verify` (this spec) | `evidence` (the complete `Evidence` tuple), `gap_refs[]`, `gap_missing`, `invalid_count`, `canary{id,path,observed_ts}`, `window{}` |
 | `breaker` (this spec) | `scope`, `state`, `trips`, `opened_ts`, `open_until`, `reason`, `probe_inc`, `previous_duration_s` |
+| `agent_run` (this spec, §3.12a) | `stage`, `outcome`, `serving_candidate`, `model`, `endpoint`, `attempts[]`, `usage{}`, `compaction{}`, `failure_class`, `error_code`, `reason`, `prompt_digest`, `research_id`, `brief_digest`, `budget{}` |
 
 Every failure record mirrors the returned code in `payload.error_code` (SPEC-INDEX §5.3).
+
+### 3.12a The `agent_run` record — the ledger stage record (v0.1.1b)
+
+SPEC-07 §3.7 and §3.9 already require `prompt_digest`, `brief_digest` and `research_id` in "the
+`agent_run` record written by SPEC-05", and SPEC-01 §3.1 lists `agent_run` as an audit-spine kind — but
+the payload was never pinned here. This section pins it: it is written by `RunAgentStage` (§2a) once per
+run, success or failure, and it is the record that answers *which candidate served this run, at what
+cost, and over what context*.
+
+| Key | Type | Present | Meaning |
+|---|---|---|---|
+| `stage` | string | always | `agent` — the agent stage is the only writer of this kind from this spec |
+| `outcome` | string | always | `done` \| `failed` — the same value the incident's `AgentResult` carries |
+| `serving_candidate` | string | success | the chain entry's configured `name`; `""` on failure — never an index, never a URL |
+| `model` | string | success | the model id the serving candidate sent |
+| `endpoint` | string | success | the credential-free host of the serving candidate (no path, no query, no credential) |
+| `attempts[]` | array | always | one `{candidate, model, status, class, reason, latency_ms}` per attempt, in order — the failover's evidence |
+| `usage{}` | object | always | `{prompt_tokens, completion_tokens, total_tokens, estimated}` |
+| `compaction{}` | object | always | `{applied, chunks, in_tokens, out_tokens, max_chunks, candidate, model}` (§3.7a) |
+| `failure_class` | string | failure | the port's class (`transport`, `rate_limited`, `token_cap_exceeded`, `compaction`, …); `""` on success |
+| `error_code` | string | failure | the mirrored code — TROUBLE-LADDER-021 (SPEC-INDEX §5.3 rule) |
+| `reason` | string | failure | the stable reason token of §3.7a |
+| `prompt_digest` | string | when a prompt was sent | `Digest(prompt)` — the join SPEC-07 §3.7 requires |
+| `research_id`, `brief_digest` | string | when research informed the run | the `res_` id and the brief digest (SPEC-07 §3.9) |
+| `budget{}` | object | always | the §3.7 day counters after the run, `agent_runs` included |
+| `inc`, `sig` | string | always | the incident and its sig (`Rec.inc` / `Rec.sig`) |
+
+Rules:
+
+1. **One record per run**, written before the stage returns. A run whose outcome cannot be recorded is
+   not a completed run: the ledger is authoritative over the incident's cached state (INV-2).
+2. **No credential can appear in it.** The candidate is recorded by name; the key is a `key_ref` that
+   never leaves the config (§4.3a); `endpoint` is the host, so a support bundle can name the upstream
+   that served without naming a token.
+3. `serving_candidate` is empty exactly when `outcome` is `failed`. There is no "unknown" value, and a
+   failed run never claims a candidate.
+4. It is the size-capped audit-spine kind of SPEC-01 §3.1: refused rather than truncated, and its
+   attempt list is bounded by the chain length (`max_attempts`, §4.3a).
 
 ### 3.13 Types added to SPEC-TYPES by this spec
 
@@ -699,7 +865,11 @@ spike by reading two dashboards:
 `LedgerWriter.Append/Flush` (SPEC-01) for every record; `PlayRunner` (SPEC-06) for check/apply/rollback;
 `ResearchPort` (SPEC-07) for the research rung; `Outlet` (SPEC-08 flow + SPEC-09 issues) for issue,
 board row, comment, hot-fix spawn, promotion and close; `IndexReader` (SPEC-01) for the dedup keys,
-window counters and gaps; `Notifier` (SPEC-12 escalation path) for orphan and quarantine notices.
+window counters and gaps; `Notifier` (SPEC-12 escalation path) for orphan and quarantine notices;
+`AgentPort` (implemented by SPEC-05 §2a's `internal/llm` client) for the agent rung's one buffered
+completion; `SkillLibrary` (implemented by SPEC-11 §2b's local library) for the skills stage's typed
+steps. Both newer ports are interface declarations in this package, so the direction below is
+unchanged: the implementers import `internal/types`, never `internal/ladder`.
 Dependency direction is one-way: the ladder imports `internal/types` (mandatorily), `internal/ledger`
 (writer + index), and — for the default evaluator only — `internal/sensors`; `registry`, `research`,
 `flow`, `issues`, `dashboard` and `skills` depend on the ladder through the interfaces above, never the
@@ -729,6 +899,54 @@ reverse, which is what keeps the build order of SPEC-INDEX §4.1 acyclic.
 | `ladder.source_max_age.{sentinel,sensor}` | `300s` / `120s` | per-source liveness expectation |
 | `ladder.breaker.*` | §3.8 table | trip thresholds, open durations, `max_open_incidents` 200 |
 | `ladder.drain_timeout` / `park_ttl` / `orphan_ttl` | `5s` / `24h` / `24h` | §3.4–§3.5 |
+
+### 4.3a The `[llm]` table — the agent stage's chain and caps (v0.1.1b)
+
+The agent stage's model work is configured by a top-level `[llm]` table (declared like the subsystem
+tables of SPEC-12 §3.1b, and handed to `internal/llm`'s strict decoder as verbatim text). Every key has
+a safe default, the compiled default chain is **empty**, and no fleet endpoint, model or key is ever
+compiled in: with no table declared, `Deps.Agent` stays unwired and the agent stage refuses with
+TROUBLE-LADDER-021 (`reason=no_agent_port`) instead of inventing a model.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `llm.max_tokens` | `4096` | the HARD completion cap of one stage call (validated `> 0`) |
+| `llm.timeout` | `120s` | the wall-clock cap of ONE attempt, applied as a context deadline |
+| `llm.max_attempts` | `0` | how many chain entries one stage run may try; `0` = the whole chain (bounded failover) |
+| `llm.max_response_bytes` | `1048576` | the buffered response cap; a larger body is refused, not read |
+| `llm.fallback_chain` | `[]` | the ordered list of candidate NAMES; omitted = the `[[llm.candidates]]` declaration order |
+| `llm.candidates[].name` | required | the stable chain-entry id the `agent_run` record carries |
+| `llm.candidates[].base_url` | required | the OpenAI-compatible root (`http`/`https`, no embedded credentials) |
+| `llm.candidates[].model` | required | the model id sent in the body |
+| `llm.candidates[].key_ref` | required | the NAME of the environment variable holding the key |
+| `llm.candidates[].max_tokens` | `0` | this candidate's cap; `0` inherits `llm.max_tokens`, and a larger value is refused |
+| `llm.candidates[].timeout` | `0` | this candidate's wall-clock cap; `0` inherits `llm.timeout` |
+| `llm.compact.enabled` | `false` | the §3.7a compaction hook; off means an over-budget context is refused |
+| `llm.compact.budget_tokens` | `24000` | the assembled-context budget |
+| `llm.compact.chunk_tokens` | `6000` | the target size of one summarisation group |
+| `llm.compact.max_chunks` | `8` | the summarisation-call cap; a context needing more groups is refused |
+| `llm.compact.max_tokens` | `800` | the summarisation completion cap, bounded by `llm.max_tokens` |
+
+Rules:
+
+1. **`key_ref` is a NAME, never a value.** It must match `^[A-Z][A-Z0-9_]{2,63}$`; anything else — a
+   provider token, a base64 blob, a path — is a construction refusal. The value is read from the
+   process environment at call time (SPEC-12's `[secrets] environment_file` is how it gets there), so
+   rotation needs no restart, and no config dump, boot record, record payload or error message can
+   carry it.
+2. **Strict decode.** An unknown key inside `[llm]` is refused by name, the same rule SPEC-11 §2
+   applies to `[skills]` — a typo that silently keeps a cap is how a budget stops existing.
+3. **No default endpoint, no default model, no default key.** A host that declares the table owns the
+   chain; a host that does not declares nothing.
+4. **A declared-but-unbuildable table is a boot refusal** (SPEC-12 §3.1c), recorded with
+   TROUBLE-LIFECYCLE-001 naming the key's own message — never a silent fall back to "no model".
+5. `llm.candidates` entries are ordered by declaration; `llm.fallback_chain` (the brief's spelling of
+   the same idea) selects the order and the subset, and names each entry at most once.
+
+`internal/llm`'s own local types are `LLMConfig` (the resolved table above), `Candidate` (one chain
+entry), `CompactConfig` (the hook's four caps) and `LLMRequest`/`LLMResponse` (one buffered call). They
+are opaque to this spec's interface: the ladder sees `AgentPort` and `AgentOutcome` only (SPEC-TYPES
+§3.15.12a), which is what keeps the client swappable and the record shape stable.
 
 ### 4.4 Lifecycle hooks
 
@@ -761,6 +979,7 @@ SIGTERM/upgrade: stop admissions → `Park` → `Flush` → exit. Ledger sequenc
 | TROUBLE-LADDER-018 | permanent | suppression window active for this sig | fold arrivals; quiet-close resolves (T45) |
 | TROUBLE-LADDER-019 | permanent | stabilization window invalid for this rule | replace with `stabilize_default`; a gap inside the interval resets once, the second reset admits with `stabilize_degraded` |
 | TROUBLE-LADDER-020 | permanent | reopen found an open incident whose sig does not match | quarantine the mismatched incident, open the correct one, record both ids |
+| TROUBLE-LADDER-021 | permanent | the agent stage's LLM call failed or exceeded a budgeted cap (§3.7a): no port wired, no candidate served, token cap, wall clock, or a compaction that could not be capped | the run is recorded as `failed` with `failure_class` + `reason` (never as an empty diagnosis); T28/T31/T32 decide the strike path |
 
 Precedence when several apply at one checkpoint: TROUBLE-LADDER-010 > -014 > -013 > -011 > -001 > the
 stage's own outcome. Every returned code is mirrored into the emitted record's `payload.error_code`
@@ -804,6 +1023,17 @@ re-minted here.
     `related`, never merged (SPEC-TYPES §6.3); both keep their own evidence windows.
 16. **`Unquarantine` on an incident whose worktree is orphaned** — honoured, and the orphan reaper's TTL
     still applies to the worktree (SPEC-08 §3).
+17. **The chain is configured but every candidate is down** — the stage fails with TROUBLE-LADDER-021
+    and `failure_class` naming the LAST attempt's class; the `agent_run` record carries the whole
+    attempt list, so "which upstreams were tried, and what each said" is answerable from the ledger
+    alone. The incident gets a strike through T28/T31/T32 — a broken provider is a failed run, never a
+    free retry loop.
+18. **The context is over budget and the summariser is unreachable** — the compaction pass refuses
+    (`failure_class:compaction`) and nothing is sent. The stage fails budgeted rather than sending an
+    over-budget context or a truncated one.
+19. **A candidate's key_ref does not resolve** — that candidate fails (`class:credential`) and the chain
+    moves on; the request is never sent without a credential. With the whole chain unresolvable the
+    stage fails with the attempt list naming each `key_ref` by NAME only.
 
 ## 7. Testing
 
@@ -902,6 +1132,30 @@ re-minted here.
 Whole package: `go test -race -count=1 ./internal/ladder/...` ≤ 60s, zero skipped tests, and the
 `Evidence` fixture file shared with SPEC-TYPES' JSON round-trip test so the tuple cannot drift.
 
+`internal/ladder/agent_test.go` (AC-3, AC-5 — the §3.7a/§3.12a amendment)
+- The port is satisfied by the shipped client: `var _ AgentPort = (*llm.Client)(nil)` (a broken
+  signature is a compile error, not a runtime surprise).
+- A serving run: the fake port answers with a candidate name and usage; `RunAgentStage` writes exactly
+  ONE `agent_run` record whose `payload` carries `serving_candidate`, `model`, `endpoint`, `usage{}`,
+  `compaction{}`, `attempts[]` and `outcome:"done"`, and whose `inc`/`sig` are the incident's.
+- A failed run: the fake port returns an outcome with `failure_class` set; the record carries
+  `outcome:"failed"`, `serving_candidate:""`, `error_code:TROUBLE-LADDER-021` and the class, and the
+  incident's `AgentResult` carries the same class so T28's guard is satisfied by evidence.
+- No port wired → TROUBLE-LADDER-021, `reason=no_agent_port`, **zero** `agent_run` records (a stage
+  that cannot call a model must not look like one that did).
+- Kill-switch set → the stage is refused with TROUBLE-LADDER-010, recorded pending, one refusal record,
+  zero calls into the port.
+- Budget: 21 runs against a 20/day counter escalates through T26/T33 with TROUBLE-LADDER-013 and the
+  counter stays at 20 — the per-call caps are the port's and the per-day cap is this spec's.
+
+`internal/ladder/library_test.go` (AC-24)
+- `SkillPlays` reads through the port and returns the compiled plays in name order; with no library
+  wired it returns an empty list and no error (the read surface is not a failure).
+- `RunSkillStep` under `shadow` calls the port with `mode=check_mode` and mutates nothing; under
+  `assisted` with the module grant it asks for `apply`; without the grant it refuses with
+  TROUBLE-LADDER-011 and the port is never called.
+- Kill-switch mid-run: the step entry is refused with TROUBLE-LADDER-010 and recorded as pending.
+
 ## 8. hilo impact
 
 Files created (all new, greenfield repo `~/trouble`):
@@ -909,6 +1163,20 @@ Files created (all new, greenfield repo `~/trouble`):
 canary.go, liveness.go, gates.go, grants.go, killswitch.go, pending.go, lease.go, budget.go, breaker.go,
 suppress.go, park.go, readopt.go, orphan.go, config.go, errors.go}` plus the seven `_test.go` files in
 §7.
+
+Added by the v0.1.1b amendment (§2a, §2b, §3.7a, §3.12a, §4.3a):
+
+| Path | Contents |
+|---|---|
+| `internal/ladder/agent.go` | `AgentPort`, `RunAgentStage`, the `agent_run` payload builder (§3.12a) |
+| `internal/ladder/library.go` | `SkillLibrary`, `SkillPlays`, `RunSkillStep` at the §3.11/§3.4 gates |
+| `internal/ladder/agent_test.go`, `internal/ladder/library_test.go` | the §7 batteries above |
+| `internal/llm/client.go` | the buffered OpenAI-compatible client, the ordered chain, the per-attempt wall-clock cap |
+| `internal/llm/compact.go` | the capped single-shot compaction pass and the token estimator |
+| `internal/llm/config.go` | the strict `[llm]` decoder, the `key_ref` shape rule, the defaults |
+| `internal/llm/errors.go` | the failure classes, retryability and the stable reason tokens |
+| `internal/llm/{client_test.go, fallback_test.go, compact_test.go, testutil_test.go}` | the contract, fallback and budget batteries (httptest servers, no socket, no real key) |
+| `internal/types/llm.go` | `LLMUsage`, `LLMAttempt`, `LLMCompaction`, `AgentOutcome` (SPEC-TYPES §3.15.12a) |
 
 Dependency direction (one-way, per SPEC-INDEX §4.2): `internal/ladder` **imports** `internal/types`
 (mandatory, highest fan-in node in the repo), `internal/ledger` (writer + index read), and

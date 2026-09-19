@@ -333,6 +333,31 @@ Rules, pinned:
   is kept as it stands: the file is the operator's statement, the caller's own value is not overwritten by it
   — the precedence §3.1a pins for the sentinel's project set.
 
+### 3.1c Declaring the agent stage's `[llm]` table (v0.1.1b)
+
+`llm` is a third registered config key of the same class as §3.1b's two tables: the file's `[llm]` header,
+its `[llm.candidates]` array of tables and any root-level dotted `llm.…` key are collected verbatim and
+resolved as ONE `ConfigValue`, whose text the composition root hands to `internal/llm`'s strict decoder
+(SPEC-05 §4.3a). The row of `trouble config explain` names the declared keys and never a value — a value in
+this table is a `base_url` or a `key_ref`, and the key's VALUE is never in this file at all (§3.1's rule).
+
+Two rules differ from §3.1b, and both are consequences of `[llm]` not being an optional subsystem:
+
+- **The table is core config, so a declaration that cannot be built is a FILE-key refusal.**
+  `internal/lifecycle` records **TROUBLE-LIFECYCLE-001** naming the decoder's own message (an unknown key, a
+  `key_ref` that is not an environment-variable name, a candidate cap above the stage cap) and the daemon
+  does not boot with it — there is no "subsystem not built" row to carry it, because the ladder itself is
+  core. A silent fall back to "no chain" is exactly the failure §3.1 refuses for a scalar key.
+- **No table is not a refusal.** With no `[llm]` table anywhere, no endpoint, model or key reference is
+  compiled in (SPEC-05 §4.3a): the agent stage simply has no LLM port, and an incident that reaches the
+  agent rung refuses at runtime with TROUBLE-LADDER-021 (`reason=no_agent_port`). A host that never runs
+  that rung is complete without a chain, and a stock boot stays `ok` (§3.3a).
+
+Secret handling: the table carries references only. `key_ref` names an environment variable, and the value
+reaches the process through `[secrets] environment_file` (§3.1) — so the boot `config` record, the explain
+dump, the `agent_run` payload and every error message can be printed without redaction because none of them
+can contain a credential.
+
 ### 3.2 State root, secret-file modes, bind preflight
 
 ```

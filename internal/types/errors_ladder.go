@@ -25,6 +25,7 @@ const (
 	CodeLadder018 ErrorCode = "TROUBLE-LADDER-018" // permanent: suppression window active
 	CodeLadder019 ErrorCode = "TROUBLE-LADDER-019" // permanent: stabilization window invalid
 	CodeLadder020 ErrorCode = "TROUBLE-LADDER-020" // permanent: reopen found a mismatched open incident
+	CodeLadder021 ErrorCode = "TROUBLE-LADDER-021" // permanent: agent-stage LLM call failed or exceeded its budgeted cap
 )
 
 // LadderCodeClass is the SPEC-05 §5 class column.
@@ -49,6 +50,7 @@ var LadderCodeClass = map[ErrorCode]ErrorClass{
 	CodeLadder018: ErrClassPermanent,
 	CodeLadder019: ErrClassPermanent,
 	CodeLadder020: ErrClassPermanent,
+	CodeLadder021: ErrClassPermanent,
 }
 
 func init() {

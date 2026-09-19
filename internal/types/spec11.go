@@ -84,31 +84,39 @@ const (
 
 // SkillsConfig is the [skills] table (SPEC-TYPES §3.15.8).
 type SkillsConfig struct {
-	Enabled             bool          `json:"enabled" toml:"enabled"`
-	SourcePath          string        `json:"source_path" toml:"source_path"`
-	SourceURL           string        `json:"source_url" toml:"source_url"`
-	SourceRef           string        `json:"source_ref" toml:"source_ref"`
-	RefMode             string        `json:"ref_mode" toml:"ref_mode"` // tag | branch
-	PullInterval        Duration      `json:"pull_interval" toml:"pull_interval"`
-	PullJitterPct       int           `json:"pull_jitter_pct" toml:"pull_jitter_pct"`
-	PullOnBoot          bool          `json:"pull_on_boot" toml:"pull_on_boot"`
-	PullTimeout         Duration      `json:"pull_timeout" toml:"pull_timeout"`
-	PullMaxBytes        int64         `json:"pull_max_bytes" toml:"pull_max_bytes"`
-	RequireSignature    bool          `json:"require_signature" toml:"require_signature"`
-	Approve             string        `json:"approve" toml:"approve"` // auto | review | never
-	CanaryHostID        string        `json:"canary_host_id" toml:"canary_host_id"`
-	CanaryValidity      Duration      `json:"canary_validity" toml:"canary_validity"`
-	CanaryOverride      bool          `json:"canary_override" toml:"canary_override"`
-	AutoAcceptEnabled   bool          `json:"auto_accept_enabled" toml:"auto_accept_enabled"`
-	AutoAcceptThreshold int           `json:"auto_accept_threshold" toml:"auto_accept_threshold"`
-	AutoAcceptWindow    Duration      `json:"auto_accept_window" toml:"auto_accept_window"`
-	AutoAcceptModules   []string      `json:"auto_accept_modules" toml:"auto_accept_modules"`
-	MaxHold             Duration      `json:"max_hold" toml:"max_hold"`
-	DemoteAfterFailures int           `json:"demote_after_failures" toml:"demote_after_failures"`
-	RetainVersions      int           `json:"retain_versions" toml:"retain_versions"`
-	StateDir            string        `json:"state_dir" toml:"state_dir"`
-	GitBinary           string        `json:"git_binary" toml:"git_binary"`
-	Signers             []SkillSigner `json:"signers" toml:"signers"`
+	Enabled             bool     `json:"enabled" toml:"enabled"`
+	SourcePath          string   `json:"source_path" toml:"source_path"`
+	SourceURL           string   `json:"source_url" toml:"source_url"`
+	SourceRef           string   `json:"source_ref" toml:"source_ref"`
+	RefMode             string   `json:"ref_mode" toml:"ref_mode"` // tag | branch
+	PullInterval        Duration `json:"pull_interval" toml:"pull_interval"`
+	PullJitterPct       int      `json:"pull_jitter_pct" toml:"pull_jitter_pct"`
+	PullOnBoot          bool     `json:"pull_on_boot" toml:"pull_on_boot"`
+	PullTimeout         Duration `json:"pull_timeout" toml:"pull_timeout"`
+	PullMaxBytes        int64    `json:"pull_max_bytes" toml:"pull_max_bytes"`
+	RequireSignature    bool     `json:"require_signature" toml:"require_signature"`
+	Approve             string   `json:"approve" toml:"approve"` // auto | review | never
+	CanaryHostID        string   `json:"canary_host_id" toml:"canary_host_id"`
+	CanaryValidity      Duration `json:"canary_validity" toml:"canary_validity"`
+	CanaryOverride      bool     `json:"canary_override" toml:"canary_override"`
+	AutoAcceptEnabled   bool     `json:"auto_accept_enabled" toml:"auto_accept_enabled"`
+	AutoAcceptThreshold int      `json:"auto_accept_threshold" toml:"auto_accept_threshold"`
+	AutoAcceptWindow    Duration `json:"auto_accept_window" toml:"auto_accept_window"`
+	AutoAcceptModules   []string `json:"auto_accept_modules" toml:"auto_accept_modules"`
+	MaxHold             Duration `json:"max_hold" toml:"max_hold"`
+	DemoteAfterFailures int      `json:"demote_after_failures" toml:"demote_after_failures"`
+	RetainVersions      int      `json:"retain_versions" toml:"retain_versions"`
+	StateDir            string   `json:"state_dir" toml:"state_dir"`
+	GitBinary           string   `json:"git_binary" toml:"git_binary"`
+	// The local SKILL.md library (SPEC-11 §2b), off by default: nothing is read
+	// and nothing is executed unless local_enabled names a local_dir.
+	LocalEnabled     bool          `json:"local_enabled" toml:"local_enabled"`
+	LocalDir         string        `json:"local_dir" toml:"local_dir"`
+	LocalMaxBytes    int64         `json:"local_max_bytes" toml:"local_max_bytes"`
+	LocalMaxSkills   int           `json:"local_max_skills" toml:"local_max_skills"`
+	LocalMaxSteps    int           `json:"local_max_steps" toml:"local_max_steps"`
+	LocalStepTimeout Duration      `json:"local_step_timeout" toml:"local_step_timeout"`
+	Signers          []SkillSigner `json:"signers" toml:"signers"`
 }
 
 // SkillSigner is one entry of the authoritative signer set (SPEC-TYPES §3.15.8).

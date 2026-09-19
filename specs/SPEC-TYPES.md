@@ -1672,6 +1672,12 @@ type SkillsConfig struct {                                   // [skills] — the
     RetainVersions      int           `toml:"retain_versions" json:"retain_versions"`
     StateDir            string        `toml:"state_dir" json:"state_dir"`
     GitBinary           string        `toml:"git_binary" json:"git_binary"`
+    LocalEnabled        bool          `toml:"local_enabled" json:"local_enabled"`               // §2b — read the local SKILL.md library
+    LocalDir            string        `toml:"local_dir" json:"local_dir"`                       // §2b — one <name>/SKILL.md per skill
+    LocalMaxBytes       int64         `toml:"local_max_bytes" json:"local_max_bytes"`
+    LocalMaxSkills      int           `toml:"local_max_skills" json:"local_max_skills"`
+    LocalMaxSteps       int           `toml:"local_max_steps" json:"local_max_steps"`
+    LocalStepTimeout    Duration      `toml:"local_step_timeout" json:"local_step_timeout"`
     Signers             []SkillSigner `toml:"signers" json:"signers"`
 }
 
@@ -1928,6 +1934,63 @@ type LedgerArchiveMarker struct {       // one append-only object per generation
 {"marker_id":"3f9a1c0d5b7e2416","file":"2026-09-16.1.gen.jsonl","namespace":"trouble/7f3a91c2d4e5b607","object_key":"trouble/7f3a91c2d4e5b607/ledger/2026-09-16.1.gen.jsonl.gz","bytes":30408704,"gzip_bytes":10643046,"sha256":"3f9a1c0d5b7e2416a8c93d0e1f4b6275c8d9e0f1a2b3c4d5e6f708192a3b4c5d","records":41207,"first_seq":1,"last_seq":41207,"min_ts":"2026-09-16T00:00:00.104Z","max_ts":"2026-09-16T23:59:59.887Z","state":"verified","verified_ts":"2026-09-16T09:20:41.004Z","error_code":"","ts":"2026-09-16T09:20:41.004Z"}
 ```
 
+#### 3.15.12a Contributed by SPEC-05 §3.7a/§3.12a — the agent-stage LLM outcome (v0.1.1b)
+
+_SPEC-05 — the agent stage's buffered completion, its ordered fallback chain and its context-compaction
+accounting. Produced by `internal/llm`, recorded by `internal/ladder` in the `agent_run` payload
+(SPEC-05 §3.12a), and consumed by nobody else: the client and the ladder share these four shapes and
+neither package imports the other._
+
+```go
+type LLMUsage struct {                  // the token accounting one completion is checked against
+    PromptTokens     int  `json:"prompt_tokens"`
+    CompletionTokens int  `json:"completion_tokens"`
+    TotalTokens      int  `json:"total_tokens"`
+    Estimated        bool `json:"estimated"`      // true when the byte-based estimator supplied the counts
+}
+
+type LLMAttempt struct {                // one chain entry's try, in order
+    Candidate string `json:"candidate"`           // the configured candidate NAME, never an index
+    Model     string `json:"model"`
+    Status    int    `json:"status"`              // HTTP status, 0 when no response arrived
+    Class     string `json:"class"`               // failure class, "" for the attempt that served
+    Reason    string `json:"reason"`              // stable token, never prose
+    LatencyMS int    `json:"latency_ms"`
+}
+
+type LLMCompaction struct {             // one context-compaction pass (SPEC-05 §3.7a)
+    Applied   bool   `json:"applied"`             // false = the context fit; the counts are still recorded
+    Chunks    int    `json:"chunks"`              // summarisation groups actually run
+    InTokens  int    `json:"in_tokens"`           // the assembled context, measured before the pass
+    OutTokens int    `json:"out_tokens"`          // the summaries, measured after the pass
+    MaxChunks int    `json:"max_chunks"`          // the cap the split had to respect
+    Candidate string `json:"candidate"`           // which chain entry summarised
+    Model     string `json:"model"`
+}
+
+type AgentOutcome struct {              // one buffered agent-stage completion
+    Text          string        `json:"text"`
+    Candidate     string        `json:"serving_candidate"`   // "" exactly when FailureClass is set
+    Model         string        `json:"model"`
+    Endpoint      string        `json:"endpoint"`            // credential-free host
+    Usage         LLMUsage      `json:"usage"`
+    Compaction    LLMCompaction `json:"compaction"`
+    Attempts      []LLMAttempt  `json:"attempts"`
+    FailureClass  string        `json:"failure_class"`       // "" on success
+}
+```
+
+Rules:
+
+1. **No field can carry a credential.** A key is named by a `key_ref` in the config (SPEC-05 §4.3a);
+   `Endpoint` is the host, so an outcome can name the upstream that served without naming a token.
+2. `Candidate` is empty **exactly** when the run failed. There is no "unknown" value and a failed run
+   never claims a candidate.
+3. `Usage.Estimated` is set when the provider reported no `usage` object and the documented byte-based
+   estimator supplied the counts: an estimate is never presented as a measurement.
+4. The chain is tried in config order and `Attempts` preserves that order, one entry per try, so the
+   failover is answerable from the record alone (SPEC-05 §3.12a).
+
 ## 4. Wiring
 
 | Producer | Consumes | Emits kinds |
@@ -1936,13 +1999,14 @@ type LedgerArchiveMarker struct {       // one append-only object per generation
 | internal/scrub | nothing (pure) | — (returns ScrubResult) |
 | internal/sensors | Record, Rule, Breaker | event, gap, canary |
 | internal/sentinel | Record, Project, Group, CodeplaneContext | event, group, gap, canary |
-| internal/ladder | Incident, Evidence, AutonomyGates, CodeplaneContext | incident, verify, breaker |
+| internal/ladder | Incident, Evidence, AutonomyGates, CodeplaneContext, AgentOutcome, Play, ToolCall | incident, verify, breaker, agent_run |
 | internal/registry | Descriptor, ToolCall, Play | tool_call, play_run |
 | internal/research | ResearchOutcome, CodeplaneContext | research, gap |
 | internal/flow | BoardRow, SpawnRequest, Promotion | flow, spawn |
 | internal/issues | IssueRef, DriverHealth, CodeplaneContext | issue, gap |
 | internal/dashboard | HealthResponse (read-only consumer) | (none; reads ledger + index) |
-| internal/skills | Skill, SkillCandidate, SkillStats | skill |
+| internal/skills | Skill, SkillCandidate, SkillStats, Play, ToolCall | skill |
+| internal/llm | AgentOutcome, LLMUsage, LLMAttempt, LLMCompaction | (none; returns AgentOutcome — the ladder writes agent_run) |
 | internal/lifecycle | ConfigValue, Heartbeat, ForwardEnvelope | config, lifecycle |
 | internal/hub | ProfileConfig, HubStatus, RedisStreamOffsets, LedgerArchiveMarker, ForwardEnvelope, Record, GapRecord | lifecycle (config), gap (archive loss) |
 
@@ -2042,6 +2106,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-LADDER-018 | permanent | suppression window active for this sig | SPEC-05 |
 | TROUBLE-LADDER-019 | permanent | stabilization window invalid for this rule | SPEC-05 |
 | TROUBLE-LADDER-020 | permanent | reopen found an existing open incident whose sig does not match | SPEC-05 |
+| TROUBLE-LADDER-021 | permanent | the agent-stage LLM call failed or exceeded a budgeted cap (token cap, wall clock, no candidate served, compaction not cappable) | SPEC-05 |
 | TROUBLE-REGISTRY-001 | permanent | module not found in the registry | SPEC-06 |
 | TROUBLE-REGISTRY-002 | permanent | args violate the module JSON schema (rejected at validate) | SPEC-06 |
 | TROUBLE-REGISTRY-003 | transient | Check() failed | SPEC-06 |

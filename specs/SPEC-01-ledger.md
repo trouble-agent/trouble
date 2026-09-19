@@ -76,6 +76,7 @@ type Options struct {
 
 func Open(ctx context.Context, o Options) (*Ledger, error)          // LOCK, recover, index — all three or fail
 func (l *Ledger) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) // durable on return
+func (l *Ledger) AppendBatch(ctx context.Context, d []types.RecordDraft) ([]types.Record, error) // §3.5a: K records, ONE group commit, durable on the batch's return
 func (l *Ledger) Close(ctx context.Context) error                   // drain + fdatasync + HEAD + release LOCK
 func (l *Ledger) Query() Query
 func (l *Ledger) Status() LedgerStatus                              // O(1), no I/O, no lock
@@ -447,6 +448,69 @@ locator. Rules:
    `cold_read_max_lines` and returns `QueryInfo.Partial=true` plus the scanned counts when it hits them.
    There is no API that reads "the whole ledger" into memory — 1 GiB at the measured 545 MB/s scan rate is
    1.8 s and would blow the 80 MB RSS budget.
+
+#### 3.5a The batch append path: `AppendBatch` and durable-on-return per BATCH (TRBL-044)
+
+The durability contract of §2.1 is per-record: `Append` returns only once its record is durable. §7b
+(SPEC-12) measured what that costs a boot whose writers are SEQUENTIAL — one full group-commit window per
+record, ~92 % of a loaded boot — and TRBL-025 deliberately left the contract choice open. This section is
+the decision, and it amends §2.2 and §3.5 exactly as far as it must and no further.
+
+**The winning contract.** The ledger exposes one additional write shape:
+
+```go
+func (l *Ledger) AppendBatch(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error)
+```
+
+`AppendBatch` writes K prepared drafts as ONE group commit and returns only once the batch is durable.
+The durability unit is the BATCH: on a nil error, every record of the batch is durable — seqs contiguous,
+in draft order, written by the same writer, with the same fdatasync and the same torn-line recovery story
+as §3.5; on an error, the batch is absent entirely, never partially present, and the seq range it would
+have occupied is reported as a hole (§3.5, TROUBLE-LEDGER-002) — identical in shape to a failed
+single-record batch of today, just carrying more seqs. Each draft is boundary-checked exactly as `Append`
+would (scrub, caps, validation); one bad draft fails the call with nothing written. `K` is bounded by
+`ledger.max_batch_records`: the writer's cap is a flush boundary and a batch must never span one, so a
+larger call is split into `ceil(K/cap)` group commits, still contiguous in seq and indistinguishable in
+the file. The single-record API is unchanged and remains the DEFAULT posture: every producer not named by
+SPEC-03 §3.3a keeps calling `Append` and keeps §2.1's per-record guarantee, and the §7 invariant — N
+sequential Appends = N durable commits — holds unchanged for them.
+
+**The rule for when the two contracts conflict.** SPEC-01 §2.2 (durable-on-return per record) and
+SPEC-03 §3.3 (per-unit incident model, one record per failed unit) intersect on the startup reconcile,
+where the incident model demands N records and the durability contract, applied per record to a serial
+writer, demands N windows. The conflict rule is:
+
+1. **Record cardinality never yields.** A producer whose contract says "one record per X" writes one
+   record per X; batching changes only how many records share a group commit, never how many records
+   exist. (This is why the off-path alternative — writing one summary record for the reconcile — was
+   rejected: it would have traded away §3.3's per-unit incident model to save windows.)
+2. **Durability yields from per-record to per-batch ONLY on a named batch path.** A caller that
+   deliberately hands N drafts to `AppendBatch` accepts "every record durable when the batch returns" in
+   place of "each record durable when its own Append returns"; the records share one crash boundary. The
+   caller must be able to state what it loses in the worst case (see below), and the path must be
+   spelled in the spec of the producer that uses it (SPEC-03 §3.3a). No implicit, config-key, or
+   accidental batching exists: if the call is `Append`, the guarantee is §2.1 verbatim.
+3. **Everything else about durability is non-negotiable.** Group commit, fdatasync, torn-line recovery,
+   hole accounting, seq contiguity, the ack-implies-durable property (§7 `TestAckImpliesDurable`), and
+   the maximum-loss-window statement of §2.1 all apply to a batch exactly as to a record. A batch is a
+   bigger unit of the SAME durability, never a weaker one.
+
+**Exactly what a crash between READY-adjacent writes and reconcile-completion now loses.** Under §2.1
+alone, a crash (SIGKILL) during the startup reconcile could lose only records still inside the open
+group-commit window — at most one, the record in flight. Under §3.5a, the equivalent in-flight unit is
+the whole batch: a SIGKILL, daemon restart or warm reboot between the reconcile's first unit and the
+batch's durable ack can lose the entire reconcile batch — up to N records (bounded by
+`ledger.max_batch_records`), every one of them a "unit failed before this daemon started" event for the
+same sweep. A power loss adds the ordinary §2.1 window on top. The loss is bounded, named, and
+self-healing: the failed units still exist (a failed unit stays failed until restarted), so the NEXT
+startup reconcile or the 300s periodic sweep re-observes every lost unit and re-emits its record — the
+crash can delay the story, but with reconcile + sweep running it cannot retire it. The record's content
+is what makes this safe: reconcile records carry `arrival_path = reconcile` and the merge rule keys on
+`(manager, unit, state)`, so a re-emitted record lands in the same incident, and the §3.6 M1–M4
+accounting treats the re-observation as a count, not a duplicate incident. What a crash genuinely costs
+is therefore only time-to-detection (≤ one reconcile interval) plus the count inflation of one re-emit —
+and, on the boot path, the §7b finding that the batch is what made READY affordable is a property worth
+that bounded tail.
 
 ### 3.6 The in-memory index: structures, budget, degradation (mandate e)
 
@@ -998,6 +1062,7 @@ Test files under `internal/ledger/`, all with the measured numbers as regression
 | File | Cases | Numeric thresholds / regression numbers |
 |---|---|---|
 | `durability_test.go` | `TestFsyncCountIsStructural` — 100k appends, batch 4096: assert `FsyncCalls == ceil(records/max_batch_records)` (the group-commit invariant, not a timing proxy); `TestAmortizedThroughput` — ≥ 100,000 rec/s amortized on the reference host (measured 515k rec/s, so a 5× margin); `TestFsyncWindowBound` — a producer appending 1 rec/10 ms with `fsync_window_ms=200`: p99 ack latency ≤ 210 ms and ack count == record count; `TestAckImpliesDurable` — SIGKILL a child writer mid-batch: every acked record is present after restart, unacked records may be absent, and `LastSeq == count(acked)`; `TestPerLineRegression` — a test-only per-line mode must be measurably slower (measured 512 rec/s) so the amortized mode's advantage cannot be optimised away silently | ≥100k rec/s amortized; p99 ≤ window + 10 ms; fsync/record ≤ 1/4096 |
+| `batchappend_test.go` | the §3.5a batch contract (`TestAppendBatchCostsOneGroupCommitWindow` — one `AppendBatch` of 10 records = exactly 1 durable commit while the same 10 appended sequentially cost 10 on the same ledger, the §3.5 serial model asserted as the control arm; `TestAppendBatchSeqsAreContiguousAndOrdered` — draft-order seqs, no gaps, every per-record field stamped; `TestAppendBatchDurableOnReturnAndQueriable` — `LastSeq` = the batch's last seq and the persisted lines carry the batch's seqs in order; `TestAppendBatchEmptyAndBadDraft` — empty writes nothing, one bad draft fails the call with 0 records; `TestAppendBatchClampedByMaxBatchRecords` — K > `max_batch_records` splits into `ceil(K/cap)` commits with one contiguous seq range) | 1 batch of 10 = 1 commit, control arm = 10 commits; 0 partial batches; the split is invisible to seq order (§3.5a, TRBL-044) |
 | `recover_test.go` | `TestTornLastLine` (no `\n`) → 003 + one line dropped + `\n` inserted; `TestTornPrefixKeepsCompleteLines`; `TestInteriorCorruption` → 011 + skip + seq hole reported as 002; `TestNewerSchemaSkipped` → 004 + `SkippedNewerSchema==1` + daemon up; `TestSeqRecoveryFromHeadHint` (HEAD deleted / HEAD stale / HEAD ahead of the file — the max rule wins); `TestCompactionResume` (gen 0 + gen 1 present) → gen 1 authoritative + `compaction_resume` | 0 records lost except the torn fragment; `VerifyReport.OK==false` iff findings |
 | `index_test.go` | `TestRebuildBudget` — 512 MiB synthetic ledger: `BuildMS ≤ 9000`, `IndexBytes ≤ 67108864`, `ScanRateMiBs ≥ 60`; `TestDegradationLadder` — 1.2 GiB synthetic: rung 2 then rung 3 selected, `Degraded=true`, `DegradedReason=="budget_exceeded"`, `TruncatedBeforeTS` set; `TestGroupEviction` — `index_max_groups+1` groups: `GroupsCold==1`, counts equal before/after, `ColdEvictionsPerMin>0`; `TestQueryLatency` — 500k groups/500k incidents: `TopGroups(10)` ≤ 5 ms, `TopGroups(50)` ≤ 50 ms, `Incident(id)` ≤ 50 µs, `GroupBySig` ≤ 50 µs, `Sources()` (5,000) ≤ 200 µs; `TestColdReadIsCapped` — the cold path never exceeds `cold_read_max_bytes`/`cold_read_max_lines` and returns `Partial=true` | as listed; no query may exceed 5× the §3.8 trigger-3 thresholds without failing CI |
 | `sig_test.go` | `TestVectorTable` — every row of §3.3 (14 rows) asserted byte-for-byte, full 32-byte digest **and** 16-hex short; `TestMessageNormIdempotent` (re-normalizing a normalized message is a fixed point); `TestFramingEscapes` — a field containing `\x00`/`\x1f`/`\x1e` is cleaned, and `norm_version` is part of the string; `TestMergeKeyVectors` (3 rows) and `TestMergeKeySubjectResolution` (payload → config table → sig-short fallback); `TestNormVersionMismatchNeverMerges` | all 17 vectors exact; any diff fails CI |
@@ -1019,7 +1084,7 @@ touched — the only repository in scope is the new one):
 
 ```
 internal/ledger/ledger.go      Open/Close/Append/Status, Options, the writer goroutine
-internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD
+internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD, the §3.5a batch group
 internal/ledger/recover.go     LOCK, seq recovery, torn-line recovery, VerifyReport
 internal/ledger/index.go       the bounded index, boot rebuild, degradation ladder, cold read
 internal/ledger/query.go       the Query interface implementation, QueryInfo

@@ -506,6 +506,38 @@ func (l *Ledger) Append(ctx context.Context, d types.RecordDraft) (types.Record,
 	return l.w.enqueue(ctx, rec)
 }
 
+// AppendBatch writes K records in ONE group-commit window and returns only
+// once the batch is durable (§3.5a). The batch is the durability unit: on a
+// nil error every returned record is durable (seqs contiguous, in order); on
+// an error the batch may be absent entirely — never partially present — and a
+// hole record covers the seq range it would have occupied. Each draft is
+// prepared and boundary-checked exactly as Append would (a bad draft fails
+// nothing before it was written); an empty draft list returns nil, nil and
+// writes nothing. The single-record invariant of §2.2 is untouched: a batch
+// MUST NOT span two files, so K is clamped to the space left in
+// ledger.max_batch_records and the remainder is a second batch (its own
+// window), not a second batch boundary inside one.
+func (l *Ledger) AppendBatch(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error) {
+	if l.closed.Load() {
+		return nil, ledgerErr(types.CodeLedger001, ReasonWrite, "ledger is closed", nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if len(drafts) == 0 {
+		return nil, nil
+	}
+	recs := make([]types.Record, 0, len(drafts))
+	for _, d := range drafts {
+		rec, err := l.prepare(ctx, d)
+		if err != nil {
+			return nil, err
+		}
+		recs = append(recs, rec)
+	}
+	return l.w.enqueueBatch(ctx, recs)
+}
+
 // prepare validates a draft and stamps everything Append owns except Seq.
 func (l *Ledger) prepare(ctx context.Context, d types.RecordDraft) (types.Record, error) {
 	if !d.Kind.Valid() {

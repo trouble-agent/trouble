@@ -102,6 +102,12 @@ type Daemon struct {
 	// implementation so the light-hub boot path is exercisable without a Redis.
 	hubStreams hub.Streams
 
+	// batchBoundary is the §3.3a batch write boundary the boot installed on
+	// the sensors (TRBL-044): AppendBatch over this process's ledger. It is
+	// kept on the Daemon so the wiring is verifiable without reaching into the
+	// sensors package; it is not a second write path.
+	batchBoundary func(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error)
+
 	log     *slog.Logger
 	notify  *notifier
 	started time.Time
@@ -342,6 +348,32 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)
 		return nil, err
 	}
+	// §3.3a: the startup reconcile's failed-unit records land in ONE durable
+	// group instead of one group-commit window per record (TRBL-044, SPEC-12
+	// §7b: N windows on the READY path was ~92% of a slow boot). The batch
+	// boundary is AppendBatch — durable-on-return per BATCH (§3.5a) — and the
+	// ladder bridge re-arms the admission half of emit, because a batched
+	// record bypasses d.emit and its post-Append Admit. Per-record writes
+	// (events, gaps, canaries, every other producer) keep d.emit unchanged.
+	batchBoundary := func(bctx context.Context, drafts []types.RecordDraft) ([]types.Record, error) {
+		return l.AppendBatch(bctx, drafts)
+	}
+	sn.SetBatchWriter(batchBoundary)
+	d.batchBoundary = batchBoundary
+	sn.SetLadderBridge(func(bctx context.Context, rec types.Record, payload map[string]any) error {
+		fire, _ := payload["fire"].(bool)
+		if !fire || d.Ladder == nil {
+			return nil
+		}
+		obs, ok := observationFrom(rec, payload)
+		if !ok {
+			return nil
+		}
+		if _, err := d.Ladder.Admit(bctx, obs); err != nil {
+			return err
+		}
+		return nil
+	})
 	d.Sensors = sn
 
 	// 10. registry (SPEC-06) then ladder (SPEC-05): the ladder is the only caller
@@ -559,7 +591,17 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 }
 
 // bootFailure records a lifecycle boot_refused record and closes the ledger.
+// When the sensors were already built (§4.1 step 9 runs before several later
+// steps that can refuse), they are drained FIRST: a refused boot must not
+// leave reconcile loops running, the journald child alive, or an open fold
+// unwritten. A fold the drain cannot write against the dead boot context is
+// flushed under a fresh bounded one (Sensors.Close), so the §3.3a batch
+// contract's nothing-pending-when-refusing holds instead of being true only
+// when refusing is convenient.
 func (d *Daemon) bootFailure(ctx context.Context, code types.ErrorCode, err error) {
+	if d.Sensors != nil {
+		d.Sensors.Close(ctx)
+	}
 	_, _ = d.Store.Append(ctx, types.KLifecycle, "", "", map[string]any{
 		"stage":      "boot_refused",
 		"error_code": string(code),

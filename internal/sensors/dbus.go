@@ -700,6 +700,9 @@ func usecPair(v any) uint64 {
 
 // reconcile is the startup + periodic ListUnits sweep: a unit that failed before
 // this daemon started emits no signal at all and is invisible without it.
+//
+// Emissions go through the §3.3a batch path (evaluateEveryUnit + the caller's
+// AppendBatch), so N failed units cost one group-commit window instead of N.
 func (s *Sensors) reconcile(ctx context.Context, name string, w *dbusWatch) error {
 	if s.dbState.merge == nil {
 		return nil
@@ -710,18 +713,18 @@ func (s *Sensors) reconcile(ctx context.Context, name string, w *dbusWatch) erro
 	}
 	now := s.now()
 	seen := map[string]struct{}{}
-	n := 0
+	failed := make([]unitStatus, 0, len(units))
 	for _, u := range units {
 		seen[u.Name] = struct{}{}
 		if u.SubState != "failed" && u.ActiveState != "failed" {
 			continue
 		}
-		res := s.dbState.merge.arrival(name, u.Name, arrivalReconcile, u.SubState, "", "", now)
-		if res.Opened || res.Attached || res.Reopened {
-			s.emitDBusOutcome(ctx, res, name, u.ActiveState, u.SubState, arrivalReconcile)
-		}
-		n++
+		failed = append(failed, u)
 	}
+	// §3.3a: decide everything first (merge rule + full rule pipeline per
+	// arrival, no writes), then ONE durable batch for the sweep. On the boot
+	// path this is what replaces N sequential group-commit windows with one.
+	s.emitBatchOutcome(ctx, s.evaluateEveryUnit(ctx, name, failed, now))
 	// Keep the unit match set in step with the manager's unit set (the 300s
 	// re-subscribe sweep of SPEC-03 §3.3).
 	w.mu.Lock()
@@ -743,10 +746,38 @@ func (s *Sensors) reconcile(ctx context.Context, name string, w *dbusWatch) erro
 		}
 	}
 	w.mu.Unlock()
-	if n > 0 {
-		s.dbState.arrivals.Add(uint64(n))
+	if len(failed) > 0 {
+		s.dbState.arrivals.Add(uint64(len(failed)))
 	}
 	return nil
+}
+
+// writeDrafts writes one batch of already-decided drafts (§3.3a) and returns
+// the durable records. A non-nil writeBatch delegates to the batch writer; the
+// default falls back to emit-per-draft so a Sensors built without the boot's
+// batch writer behaves exactly as §3.8 always has (durable-on-return per
+// record). On error the batch is NOT partially reported: the caller drops all
+// of it and the reconciliation is retried by the next sweep.
+func (s *Sensors) writeDrafts(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error) {
+	if len(drafts) == 0 {
+		return nil, nil
+	}
+	if s.writeBatch != nil {
+		return s.writeBatch(ctx, drafts)
+	}
+	recs := make([]types.Record, 0, len(drafts))
+	var firstErr error
+	for _, d := range drafts {
+		rec, err := s.emit(ctx, d)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		recs = append(recs, rec)
+	}
+	return recs, firstErr
 }
 
 // runDBusSignals consumes signals for one manager, re-subscribing on
@@ -833,6 +864,8 @@ func (s *Sensors) handleSignal(ctx context.Context, name string, w *dbusWatch, s
 
 // emitDBusOutcome turns one merged arrival into an event record carrying the
 // merge accounting, so "3 arrivals → 3 incidents" is catchable by numbers.
+// The payload it builds and the counters it keeps are exactly what a batch
+// member carries (§3.3a); only the write differs.
 func (s *Sensors) emitDBusOutcome(ctx context.Context, res mergeOutcome, manager, activeState, substate string, path arrivalPath) {
 	arr, merges, opens, journald := s.dbState.merge.snapshot()
 	s.merges.Store(merges)
@@ -877,6 +910,97 @@ func (s *Sensors) emitDBusOutcome(ctx context.Context, res mergeOutcome, manager
 	}
 	s.sensorOK(types.SenDBus)
 	s.handleEvent(ctx, ev)
+}
+
+// dbusOutcomeDraft is emitDBusOutcome's payload work without the write: the
+// batch path needs the SAME accounting payload as a RecordDraft so §3.3a
+// writes records a query cannot distinguish from the per-record path's.
+func (s *Sensors) dbusOutcomeDraft(res mergeOutcome, manager, activeState, substate string, path arrivalPath) types.RecordDraft {
+	arr, merges, opens, journald := s.dbState.merge.snapshot()
+	s.merges.Store(merges)
+	_ = opens
+	_ = journald
+	detail := map[string]any{
+		"unit_key":          res.UnitKey,
+		"unit_active_state": activeState,
+		"unit_substate":     substate,
+		"failure_class":     res.Class,
+		"crash_loop":        res.CrashLoop,
+		"arrival_path":      string(path),
+		"manager":           manager,
+		"exit_code":         0,
+		"count":             float64(res.Count),
+		"merge_arrivals":    arr,
+		"merged":            res.Attached,
+		"reopen_count":      res.Reopened,
+		"severity":          string(res.Severity),
+		"sensors_arrivals":  s.dbState.arrivals.Load(),
+		"sensors_merges":    merges,
+		"value":             float64(res.Count),
+		"unit_field":        "",
+		"msg":               "",
+		"substr":            "",
+		"window_s":          0,
+		"age_s":             0,
+	}
+	ev := types.SensorEvent{
+		ID:     types.NewID(types.PEv),
+		TS:     types.FormatUTC(s.now()),
+		Sensor: types.SenDBus,
+		Scope:  res.UnitKey,
+		Value:  float64(res.Count),
+		Unit:   "",
+		Detail: detail,
+		Sig:    res.Sig,
+	}
+	if rt := s.rt[types.SenDBus]; rt != nil {
+		rt.events.Add(1)
+		rt.lastEvent.Store(s.now().UnixNano())
+	}
+	s.sensorOK(types.SenDBus)
+	payload := s.evaluateEvent(context.Background(), ev)
+	return s.draftFor(ev, payload)
+}
+
+// evaluateEveryUnit is the reconcile's decision phase for the failed units one
+// ListUnits returned: merge accounting per unit (the §3.6 state machine,
+// unchanged), then the FULL §3.4/§3.5/§3.8 rule pipeline per outcome —
+// stabilization, cooldowns, breakers and incident opens all happen here,
+// exactly as they would have per record — and one draft per arrival. It
+// writes NOTHING: the caller persists the returned drafts through writeDrafts,
+// which is what turns N durable commits into one (§3.3a).
+func (s *Sensors) evaluateEveryUnit(ctx context.Context, name string, failed []unitStatus, now time.Time) []types.RecordDraft {
+	drafts := make([]types.RecordDraft, 0, len(failed))
+	for _, u := range failed {
+		res := s.dbState.merge.arrival(name, u.Name, arrivalReconcile, u.SubState, "", "", now)
+		if !res.Opened && !res.Attached && !res.Reopened {
+			continue
+		}
+		drafts = append(drafts, s.dbusOutcomeDraft(res, name, u.ActiveState, u.SubState, arrivalReconcile))
+	}
+	return drafts
+}
+
+// emitBatchOutcome is the batched reconcile write path (§3.3a): every
+// already-decided draft lands in ONE ledger group commit, durable on its
+// return. The ladder bridge runs AFTER the batch is durable, per durable
+// record with its real rec_id — the ordering guarantee `emit` gave per record
+// (Append returned before Admit).
+func (s *Sensors) emitBatchOutcome(ctx context.Context, drafts []types.RecordDraft) {
+	if len(drafts) == 0 {
+		return
+	}
+	recs, err := s.writeDrafts(ctx, drafts)
+	if err != nil {
+		if rt := s.rt[types.SenDBus]; rt != nil {
+			rt.drops.Add(uint64(len(drafts)))
+		}
+		s.recError(types.SenDBus, types.CodeSensors015, fmt.Sprintf("reconcile batch write (%d records): %v", len(drafts), err))
+		return
+	}
+	for _, rec := range recs {
+		s.bridgeLadder(ctx, rec)
+	}
 }
 
 // runDBusPing is the 30s Peer.Ping liveness proof (SPEC-03 §3.9).
@@ -996,6 +1120,26 @@ func (s *Sensors) stopDBus() {
 			close(w.stopNow)
 		}
 	}
+}
+
+// Close stops the detection plane and drains its pending writes. The daemon's
+// boot path uses it when a LATER §4.1 step fails after sensors_build: a
+// refused boot must not leave the reconcile loops running, the journald child
+// alive, or an open fold unwritten (the same drain §4's shutdown orders,
+// reached from the boot side). The drain runs under a fresh bounded context
+// when the caller's is already dead — a fold flushed against a cancelled ctx
+// would drop the observations it exists to keep.
+func (s *Sensors) Close(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+	}
+	err := s.Stop(ctx)
+	// Stop already flushed the fold; a second flush is a no-op unless the
+	// first one wrote nothing because the context was dead.
+	s.fold.flush(ctx, s.emit)
+	return err
 }
 
 // probeDBusManagers is the probe record's dbus_managers array: every manager

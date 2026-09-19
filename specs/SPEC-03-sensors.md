@@ -306,6 +306,37 @@ IN_Q_OVERFLOW`. Watch capacity is checked at boot and every `15m` against
 number. With `sensors.inotify.paths = []` the sensor still runs for the rules directory; with
 `enabled = false` it reports `Enabled: false`.
 
+### 3.3a The startup reconcile's batch write path (TRBL-044)
+
+The §3.3 startup `ListUnits` reconcile decides one record per failed unit — the §3.3 incident model —
+but it does not have to PAY one group-commit window per record (SPEC-12 §7b measured that cost as ~92 %
+of a loaded boot). The write half of the reconcile is the batch path:
+
+- **Decide everything, then write once.** The sweep runs the §3.6 merge rule per failed unit and the
+  full §3.4/§3.5/§3.8 rule pipeline per outcome (stabilization, cooldowns, breakers, incident opens —
+  exactly as the per-record path decides them), collects the drafts, and writes them through ONE
+  durable batch (SPEC-01 §3.5a `AppendBatch`). N failed units cost `ceil(N/ledger.max_batch_records)`
+  group commits instead of N.
+- **The record is unchanged.** A batch member carries the same kind (`event`), the same sig
+  (norm_version 1, `(manager, unit, state)`), the same `arrival_path = reconcile` and the same merge
+  accounting payload the per-record path wrote. Nothing that queries, dedups or ladders the record can
+  tell the write shapes apart.
+- **The ladder bridge is preserved in order.** A firing batch member is admitted AFTER the batch is
+  durable, with the durable record's identity — the same ordering the per-record emit gave (`Append`
+  returned before `Admit`). The composition root re-arms this bridge on the sensors at boot (the
+  per-record bridge lives inside `emit`, which the batch path bypasses).
+- **Crash loss (the §3.5a conflict rule, applied).** A SIGKILL between the sweep's first unit and the
+  batch's durable ack can lose the whole sweep's batch — up to N records naming already-failed units.
+  The loss is bounded by `ledger.max_batch_records` and self-healing: failed units stay failed, so the
+  next startup reconcile or the 300s sweep re-observes them and re-emits into the same incidents
+  (§3.6 M1–M4 counts the re-observation). The worst case is delayed detection, never a silently
+  retired failure. A batch write failure (device error) is louder still: no partial sweep, a
+  TROUBLE-SENSORS-015 record naming the batch, and a drop count for the whole sweep.
+- **Compatibility rule.** Without the composition root's batch boundary the reconcile falls back to the
+  per-record emit — the §3.8 shape, durable-on-return per record — so a `sensors.New`-built plane
+  behaves exactly as before. The batch is a boot wiring decision (the daemon installs `AppendBatch` as
+  the boundary), never a config key: no operator can accidentally batch (or unbatch) the reconcile.
+
 ### 3.4 Condition language (the single expression dialect)
 
 One language, defined once here, used by: rule `match` (§3.5), play task `when:` (SPEC-06), and rule
@@ -884,6 +915,7 @@ printed reason otherwise.
 | `reload_test.go` | Swap atomicity: 100k evaluations during 200 reloads — zero evaluations observe a mixed set; in-flight evaluation keeps its snapshot; `match`-identical rule carries its `for=` timer (elapsed preserved ±1ms), changed `match` resets it (`rule_state_reset` recorded); deleted rule drops its timer and leaves its incident open; invalid file → previous set still firing + one TROUBLE-SENSORS-019; 256 rules reload ≤50ms (CI asserts <250ms on the reference box); >1s reload abandoned with the previous set; 3 strikes disable the inotify trigger. The `60s` backstop fingerprint (§3.7a) is covered without depending on timestamp granularity: a content-only rewrite with size and mtime pinned to a frozen instant is detected, a natural edit is detected within a polled `3s` deadline, a quiet directory yields two identical fingerprints (one file and several), and adding/removing a rule file each moves the fingerprint. |
 | `journald_test.go` | Fake `journalctl` script: cursor round-trip; malformed cursor → rc=1 zero stdout → exactly one `gap{cursor_invalid}` + `--since` fallback (never "no logs"); child killed 5× → backoff sequence `0.25,0.5,1,2,4s` ±10% jitter; 100k entries into an 8192 queue → `Dropped == 100000-8192` exactly and one gap per episode; dedupe: replaying 4096 identical cursors produces 0 duplicate records; 64KiB+ entry truncated with `dropped_bytes` exact; non-UTF-8 entry kept with `non_utf8=true`; `--since` outside retention → `est_lost=-1` + `retention_window_exceeded`. |
 | `dbus_test.go` | Path escaping golden: `coding-hermes-scheduler.service` → `coding_2dhermes_2dscheduler_2eservice` and round-trip for 10k generated unit names; merge rule M1–M4 with synthetic signal sequences: {PropertiesChanged, JobRemoved, journald} in 6 orderings ⇒ exactly 1 incident, 3 attaches, 0 duplicates; journald alone ⇒ 1 journald incident; 3 failures in 300s ⇒ `crash_loop=true`, severity critical, sig re-derived; `NameOwnerChanged` ⇒ re-subscribe + resync + 1 gap; manager unreachable ⇒ 013 naming it. |
+| `dbus_batch_test.go` | §3.3a batch reconcile (TRBL-044): 50 failed units in one sweep ⇒ exactly 1 batch boundary call carrying 50 drafts, one `arrival_path = reconcile` record per unit with its per-unit merge key; a batch write failure ⇒ 0 sweep records written, drop count = the whole sweep, one TROUBLE-SENSORS-015 record naming `reconcile batch write` (no partial sweep, no silence); no batch boundary installed ⇒ per-record emit fallback (the §3.8 shape); a firing member reaches the ladder bridge only after the batch returns, carrying the durable record's real rec_id; a second sweep inside the merge window attaches (count=2) in its own single batch. |
 | `merge_rule_test.go` | Property test (10k randomized arrival sequences, 5s window boundary at ±1ms) asserting §3.6 M1–M4 invariants: one incident per key per window, `reopen_count` matches the post-resolve arrivals, and no arrival is lost (`arrivals == attaches + opens + reopens`). |
 | `disk_timer_inotify_test.go` | statfs on a `tmpfs` fixture: `free_pct` ±0.1%; `Files==0` ⇒ `inode_free_pct == -1` and inode rules false; unmounted path ⇒ one 022 per hour; `ListTimers` garbage reply ⇒ 023 with the raw size; missed-run detection with a synthetic timer 2 intervals stale ⇒ `missed_runs` increments and resets on the next run; `IN_Q_OVERFLOW` ⇒ all watches re-added + 1 gap; watch cap `used/limit=0.81` ⇒ 020; `add_watch` ENOSPC ⇒ watch name in the record. |
 | `liveness_test.go` | Each sensor's stale threshold fires 024 exactly once per episode and recovery emits `sensor_recovered`; entry silence (0 events for 1h, probe green) never marks anything stale; dependency case (bus down ⇒ timers degraded with `dependency dbus degraded`) emits exactly one gap; `Health()` ≤50ms with 1024 rules and 6 sensors; canary lands ≤30s through the real pipeline and a blocked pipeline emits `gap{canary_missing}`. |

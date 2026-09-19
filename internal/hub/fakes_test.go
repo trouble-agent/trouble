@@ -120,9 +120,19 @@ func newFakeStreams() *fakeStreams {
 	}
 }
 
-func (f *fakeStreams) Ping(ctx context.Context) error { return f.pingErr }
+// Ping, ServerInfo and the read block are the fake's AVAILABILITY surface: a
+// test may change it while the runtime is running (a Redis that is lost and
+// comes back), so they are read under the same lock the writers take. Blocking
+// is done OUTSIDE the lock, or a test's write would wait for the block.
+func (f *fakeStreams) Ping(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pingErr
+}
 
 func (f *fakeStreams) ServerInfo(ctx context.Context) (ServerInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.info, f.infoErr
 }
 
@@ -177,11 +187,14 @@ func (f *fakeStreams) XGroupCreate(ctx context.Context, stream, group, start str
 }
 
 func (f *fakeStreams) XReadGroup(ctx context.Context, req ReadRequest) ([]StreamEntry, error) {
-	if f.block > 0 {
+	f.mu.Lock()
+	block := f.block
+	f.mu.Unlock()
+	if block > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(f.block):
+		case <-time.After(block):
 		}
 	}
 	f.mu.Lock()

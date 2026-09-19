@@ -152,7 +152,7 @@ func TestLiveRedisQueueRoundTrip(t *testing.T) {
 		t.Fatalf("orphan key: %v", err)
 	}
 	gate.Release(ctx, orphanKey) // make sure no claim exists for it
-	orphan := localRecord(draftFor(types.KEvent, sig, "sentinel:live", map[string]any{"item_type": "event", "orphan": "1"}), cfg.HostID)
+	orphan := localRecord(draftFor(types.KEvent, sig, "sentinel:live", map[string]any{"item_type": "event", "orphan": "1"}), cfg.HostID, "")
 	if _, err := c.EnqueueEntry(ctx, types.ForwardEnvelope{
 		ProtocolVersion: 1,
 		IdempotencyKey:  orphanKey,
@@ -209,4 +209,100 @@ func TestLiveRedisPreflightRefusesPersistenceLessServer(t *testing.T) {
 	if _, err := OpenRedis(context.Background(), cfg); CodeOf(err) != types.CodeHub016 {
 		t.Fatalf("code = %q want TROUBLE-HUB-016 (%v)", CodeOf(err), err)
 	}
+}
+
+// TestLiveRedisRewarmServesDuplicateAfterClaimLoss is the re-warm of SPEC-13
+// §2.1.1 rule 5a against a live server: a ledger produced by THIS run's own
+// door → stream → consumer → ledger round trip is read back through the SAME
+// walk a (re)wire uses (`ledgerIdemKeys`), the gate is restored from it, and a
+// duplicate whose claim is then GONE from Redis (the failover shape — what a
+// flush or a lost dataset does to one claim, done here with `Del` so the
+// scratch server other probes share is not flushed) is answered by the index
+// with zero new records and zero queue traffic. The dedicated fake-server twin
+// of this test is TestRewireRewarmsTheGateFromTheLedgerIndex; this one adds the
+// wire: a real XADD'd entry, a real SET NX claim, a real deletion, a real
+// read-back.
+func TestLiveRedisRewarmServesDuplicateAfterClaimLoss(t *testing.T) {
+	cfg := liveRedisCfg(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	c, err := OpenRedis(ctx, cfg)
+	if err != nil {
+		t.Fatalf("OpenRedis: %v", err)
+	}
+	defer c.Close()
+	if err := c.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+
+	events := &eventLog{}
+	ledger := newFakeLedger(events)
+	gate := NewDedupGate(c.Config(), c)
+	cs := NewConsumer(c, ledger, gate, c.Config())
+	door := NewDoor(c, gate, DoorConfig{Route: RouteA, HostID: cfg.HostID, Wait: 5 * time.Second})
+	cs.WithCompletion(door.Complete)
+	go func() { _ = cs.Run(ctx) }()
+
+	sig := "sentinel:sha256v1:9f2c1d3e4b5a6c7d"
+	draft := draftFor(types.KEvent, sig, "sentinel:live", map[string]any{"item_type": "event", "probe": types.NewID(types.PEv)})
+	if _, err := door.Offer(ctx, draft); err != nil {
+		t.Fatalf("offer: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for ledger.Count() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if ledger.Count() != 1 {
+		t.Fatalf("ledger records = %d want 1", ledger.Count())
+	}
+
+	// The index: the ledger's tail through the same walk a (re)wire runs. The
+	// read-back key must be the door's key EXACTLY — on this wire it is the
+	// struct-payload lookalike trap, which is why the digest is read from the
+	// record rather than re-derived.
+	keys, err := ledgerIdemKeys(fakeLedgerIndex{ledger}, cfg.HostID, c.Config().DedupLRU)
+	if err != nil {
+		t.Fatalf("ledgerIdemKeys: %v", err)
+	}
+	if len(keys) != 1 {
+		t.Fatalf("index keys = %d want 1: %+v", len(keys), keys)
+	}
+	wantKey := mustLiveKey(t, draft, cfg.HostID)
+	if keys[0] != wantKey {
+		t.Fatalf("read-back key = %q want %q (the key the door claimed on the live server)", keys[0], wantKey)
+	}
+	gate.Restore(keys)
+	if n, open := gate.Restored(); n != 1 || !open {
+		t.Fatalf("restored = %d open=%v want 1 true", n, open)
+	}
+
+	// THE FAILOVER SHAPE on the live server: the claim is gone. Asserted as a
+	// premise — with the claim present, `SET NX` would answer the duplicate and
+	// the index would prove nothing.
+	key := keys[0]
+	if n, err := c.Streams().Del(ctx, key); err != nil || n != 1 {
+		t.Fatalf("premise: deleting the claim returned n=%d err=%v, want 1 nil", n, err)
+	}
+
+	// THE DUPLICATE: answered from the ledger index — no new record, no new
+	// entry, and no conflict counter (the gate answered, so the ledger never
+	// had to arbitrate).
+	if _, err := door.Offer(ctx, draft); err != nil {
+		t.Fatalf("duplicate offer: %v", err)
+	}
+	if door.Duplicates.Load() != 1 {
+		t.Fatalf("duplicates = %d want 1 (the key the ledger holds must be answered as a replay)", door.Duplicates.Load())
+	}
+	if n, _ := c.StreamLen(ctx); n != 1 {
+		t.Fatalf("stream length = %d want 1: the duplicate was enqueued although the restored index held its key", n)
+	}
+	if ledger.Count() != 1 {
+		t.Fatalf("ledger records = %d want 1: the duplicate was re-appended after the re-warm", ledger.Count())
+	}
+	if _, _, conflicts, _ := gate.Counters(); conflicts != 0 {
+		t.Fatalf("dedup_conflicts = %d want 0 (the gate answered from the index)", conflicts)
+	}
+	n, _ := gate.Restored()
+	t.Logf("restored_keys=%d — the duplicate was served by the ledger's idempotency index with no queue traffic", n)
 }

@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -121,14 +122,20 @@ func (d *Door) Offer(ctx context.Context, draft types.RecordDraft) (types.Record
 }
 
 // OfferRoute is Offer with an explicit routing decision (the transport seam's
-// per-event-class decision of SPEC-04 §3.10a travels with the event).
+// per-event decision of SPEC-04 §3.10a travels with the event).
 func (d *Door) OfferRoute(ctx context.Context, draft types.RecordDraft, route RouteDecision) (types.Record, error) {
-	local := localRecord(draft, d.hostID)
-
 	key, keyErr := d.idemKey(draft)
 	if keyErr != nil {
 		return types.Record{}, keyErr
 	}
+	// The claim travels WITH the record: `localRecord` records the content
+	// component of `key` in the payload (IdemDigestField), which is what makes the
+	// ledger readable as the idempotency index a later (re)wire re-warms from
+	// (SPEC-13 §2.1.1 rule 5a). It cannot be RE-DERIVED later: the key is hashed
+	// over the producer's in-memory payload, and a decoded record loses what a struct
+	// keeps (field order), so a digest recomputed from the record is a lookalike.
+	local := localRecord(draft, d.hostID, key)
+
 	fresh, err := d.gate.Claim(ctx, key)
 	if err != nil {
 		return types.Record{}, err
@@ -250,10 +257,42 @@ func IdemKeyForDraft(draft types.RecordDraft, hostID string) (string, error) {
 // gate in `trouble hub dedup`-style probes.
 func (d *Door) Dedup() *DedupGate { return d.gate }
 
+// IdemDigestField is the payload field that carries the CONTENT component of the
+// dedup key the door claimed for this record — `content:sha256v1:<16>` (SPEC-13
+// §2.1.1 rule 5a, §3.2 rule 5).
+//
+// It is recorded rather than recomputed because the key is hashed over the
+// producer's IN-MEMORY payload: the sentinel puts a Go struct in
+// `payload["event"]`, Go marshals a struct in field order, and a record that has
+// been through JSON (the stream entry, then the ledger) holds that object as a
+// map, which marshals sorted. The two digests differ, so a digest re-derived from
+// a decoded record is a lookalike that matches no claim — measured live on a real
+// Redis run, which is why the index READS this field instead of re-deriving it.
+//
+// The rest of the key is not stored because the record already carries it
+// verbatim: the sig (scope), the kind, and the daemon's host id.
+const IdemDigestField = "idem_digest"
+
+// contentComponent returns the content-derived part of a dedup key: the last
+// `|`-separated component, which is the only part not implied by the record's own
+// fields. A content-only key (a record with no parseable sig) returns itself.
+func contentComponent(key string) string {
+	if i := strings.LastIndex(key, "|"); i >= 0 {
+		return key[i+1:]
+	}
+	return key
+}
+
 // localRecord mints the record the stream carries: the hub's local identity for
 // the event. The ledger replaces rec_id at append time and the local id survives
 // in `payload.local_rec_id` (SPEC-13 §3.2 rule 5).
-func localRecord(draft types.RecordDraft, hostID string) types.Record {
+//
+// `claim` is the dedup key the door took for this record; a non-empty claim is
+// recorded as IdemDigestField so the ledger can answer "was this key already
+// claimed?" without re-deriving anything. The payload is COPIED when the claim is
+// recorded (and when it is nil): the draft's map belongs to the producer, and the
+// hub does not add a field behind its back.
+func localRecord(draft types.RecordDraft, hostID, claim string) types.Record {
 	origin := draft.Origin
 	if origin.HostID == "" {
 		origin.HostID = hostID
@@ -263,8 +302,15 @@ func localRecord(draft types.RecordDraft, hostID string) types.Record {
 		actor = types.Actor{Kind: types.ActorDaemon, ID: "hub-door"}
 	}
 	payload := draft.Payload
-	if payload == nil {
-		payload = map[string]any{}
+	if claim != "" || payload == nil {
+		next := make(map[string]any, len(payload)+1)
+		for k, v := range payload {
+			next[k] = v
+		}
+		payload = next
+	}
+	if claim != "" {
+		payload[IdemDigestField] = contentComponent(claim)
 	}
 	return types.Record{
 		RecID:         types.NewID(types.PEv),

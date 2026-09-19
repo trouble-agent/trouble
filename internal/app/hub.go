@@ -82,9 +82,15 @@ func hubRuntimeConfig(d *Daemon, hostID string, gate hub.ProfileGate, stateRoot 
 		// queue is a hop in front of the writer, never a second writer.
 		Ledger:     sink,
 		Standalone: sink,
-		AckCursor:  func() uint64 { return d.Ledger.Status().LastSeq },
-		Streams:    d.hubStreams,
-		Log:        func(format string, args ...any) { d.log.Warn(fmt.Sprintf(format, args...)) },
+		// The dedup gate re-warms from the ledger's idempotency index at every
+		// (re)wire (SPEC-13 §2.1.1 rule 5a). The sink IS the ledger — it already
+		// carries the read half the sentinel rebuilds through (`LastSeq`,
+		// `ScanFrom`) — so the index is read from the one ledger this daemon
+		// writes, never from a second copy.
+		LedgerIndex: sink,
+		AckCursor:   func() uint64 { return d.Ledger.Status().LastSeq },
+		Streams:     d.hubStreams,
+		Log:         func(format string, args ...any) { d.log.Warn(fmt.Sprintf(format, args...)) },
 	}
 }
 

@@ -113,7 +113,37 @@ matrix of §4.3:
    group with `MKSTREAM $` and serves from the ledger — senders' spools replay what Redis lost,
    the dedup gate re-warms from the ledger's idempotency index (boot-time restore, §3.1
    `dedup.state`), and `trouble hub status` reports `redis.state = "cold"` until the first
-   acknowledged entry.**
+   acknowledged entry.** Rule 5a pins what that re-warm IS.
+5a. **The re-warm, and the `failover_grace` window that makes it a behaviour.** Every (re)wire of
+   the queue — the boot of §4.1 step 3 and the reconnect of §4.3's "Redis returns" row — re-warms
+   the dedup gate from the ledger's idempotency index before the gate can be used, and the re-warm
+   is BOUNDED: the walk reads the ledger's tail starting at `last_seq − hub.dedup_lru + 1` and
+   keeps at most `hub.dedup_lru` keys, so a (re)wire costs one bounded scan and the restored index
+   can never be larger than the LRU it lands in. The keys the index yields are **read from the
+   record** — the content component the door recorded with the claim it took
+   (`payload.idem_digest`, §3.2 rule 5), prefixed with the scope, kind and host the record already
+   carries verbatim — and they are never RE-DERIVED from the record's decoded payload. That is not
+   a shortcut but the only exact option, and it is measured: the door hashes the payload the
+   producer holds IN MEMORY, the sentinel puts a Go struct in `payload["event"]`, a struct marshals
+   in field order while a decoded record's copy of it marshals sorted, so a digest recomputed from
+   a record is a lookalike (live: `content:sha256v1:20fd49f31373b3da` re-derived vs
+   `content:sha256v1:17b5c28aebcdd8a8` claimed) that would make a warm-looking index protect
+   nothing. A record that carries no claim — one this hub did not ingest through the door (its own
+   lifecycle records, records written before this identity existed, an entry enqueued by a forward
+   path with an envelope-scoped key) — is simply absent from the index: the window is never larger
+   than the evidence for it, and a missed key costs the duplicate §3.4 prices. The size of the
+   index is `dedup.state.restored_keys` (§3.1) and it appears on the health surface as
+   `redis.dedup_restored`; **0 means the window is NOT warm**.
+   A restored key is **TRUSTED for `server.redis.failover_grace`**, measured from the (re)wire:
+   inside that window a claim on it is answered `present` (the idempotent replay of §3.4) and a
+   re-delivery check reads it as `appended`, both without a Redis round trip and with no queue
+   traffic, because the ledger the index was read from — not the Redis that lost its dataset — is
+   the authority. Once the window closes the trust is gone: the next claim on that key goes through
+   `SET NX` again, so a request arriving after the window re-enters the queue and the duplicate
+   lands as the one entry §3.4 prices, with the ledger's own idempotency check as the last arbiter.
+   The window is what keeps a recovery burst (spools flushing, senders retrying) from paying that
+   price per retry while the tier is still settling; it is **not** a second dedup window and it
+   never extends `dedup_ttl`, and the index is replaced, not accumulated, at every (re)wire.
 6. **Loss classification: a lost queue is only ever inferred from a failure attributable to Redis.**
    The rows of §4.3 move the daemon's degraded state on a Redis refusal (002), an unreachable server
    (003) or a failed stream operation (004), and on a server that no longer knows the consumer group
@@ -239,7 +269,14 @@ Rules:
    both profiles, so the queue never holds an un-redacted value and the log-redaction counters are the
    same numbers in both profiles.
 5. **The hub still mints canonical ids** (SPEC-12 §3.7): a record that arrives with a local id gets its
-   canonical `rec_id` at ledger-append time, and the local id stays in `payload.local_rec_id`.
+   canonical `rec_id` at ledger-append time, and the local id stays in `payload.local_rec_id`. The hub
+   also records the identity of the claim it took on the record: `payload.idem_digest` carries the
+   content component of the dedup key the door claimed (`content:sha256v1:<16>`), because the key is
+   hashed over the producer's IN-MEMORY payload and a decoded record cannot reproduce it (§2.1.1 rule
+   5a measures the difference). Both fields are the hub's own annotations of the producer's payload;
+   neither changes `rec_id`, `seq`, the kind or the record schema of SPEC-01. A producer that carries a
+   field of either name has it replaced by the hub's, which is the price of the identity being
+   authoritative.
 
 ### 3.3 The consumer group and the exactly-once seam
 
@@ -282,7 +319,9 @@ Dedup(ctx, c, sig, normVersion, hostID) // SET trouble:dedup:{sig}|{norm_version
 - **Redis down** ⇒ the gate falls back to the bounded in-memory LRU (`hub.dedup_lru` = 65536, restored
   at boot from the ledger's origin fields) and records TROUBLE-HUB-006 once per degradation window. The
   fallback window is smaller than 24h; that fact is printed in `/health.json` as
-  `hub.dedup_window = "lru"`, so a smaller window is never mistaken for the full one.
+  `hub.dedup_window = "lru"`, so a smaller window is never mistaken for the full one. What the
+  restore seeds, how far its walk is bounded, and the `failover_grace` window that trusts it at a
+  (re)wire are §2.1.1 rule 5a.
 - **Failover**: when a replica is promoted, the `SET NX` claim made before the promotion either survived
   (replication) or did not (asynchronous replication loss). The dedup gate is therefore **not** the
   exactly-once guarantee; the ack-after-fsync rule of §3.3 is. A failover that loses a claim costs one
@@ -462,6 +501,7 @@ failure (`Record.payload.error_code`, SPEC-INDEX §5.3).
 | `internal/hub/gate_test.go` | profile matrix: standalone, light-hub complete, light-hub without redis url, without namespace, unknown profile, light-hub + `hub.mode=satellite` | 001 selected for each incomplete case; **0 HTTP responses served** before the refusal; standalone starts with `Enabled=false` |
 | `internal/hub/redis_test.go` | `EnsureGroup` twice (BUSYGROUP = success); wrong key type → 005; auth failure → 002; dial timeout with `require_redis` false/true → 003 + degraded start / exit 13 | group exists after both calls; 0 panics; the degraded start serves and reports `detail.reason="redis_unavailable"` |
 | `internal/hub/dedup_test.go` | fresh → present; TTL expiry re-opens the window; Redis-idle fallback to the LRU; failover that loses the claim → 1 duplicate entry + `dedup_conflict_total` | exactly 1 ledger record for a replayed batch under failover (AC-29); dedup hits/misses counted |
+| `internal/hub/dedup_rewarm_test.go` | §2.1.1 rule 5a: the `failover_grace` boundary (a restored key is `present`/`appended` inside the window with no Redis round trip and no queue traffic; the same key is re-claimed through `SET NX` after it); the index key is read back EXACTLY for a payload carrying a Go struct, where a digest re-derived from the decoded record is a lookalike (the live-found case); a record with no recorded claim is absent from the index; a **rewire** re-warms the gate, so the duplicate that arrives right after it lands 0 new records and 0 conflicts; the walk is bounded to `hub.dedup_lru` (starts at `last_seq − limit + 1`) | inside the window: 0 NEW ledger records, 0 stream entries, `Redis` never asked; after it: exactly 1 duplicate record (the §3.4 priced case); `redis.dedup_restored` equals the index the rewire installed; a nil index and a zero capacity restore nothing and walk nothing |
 | `internal/hub/consume_test.go` | batch bound 256/512KB; append-before-ack ordering (kill between `Append` and `XACK` → re-delivery → 0 new records); reclaim after `claim_min_idle`; ordering preserved inside a batch; backpressure above `maxlen` | 0 duplicate records; ack count == fsync count; `lag` never exceeds `maxlen` |
 | `internal/hub/archive_test.go` | plan/export/verify/mark/drop cycle; read-back mismatch → 012 + not droppable; unclosed generation → 011; DuckBrain down → 010 + queue depth; re-export of the same file is one object (idempotent by `marker_id`); drop refused while unverified → 014 | 1 object per generation; sha256 verified before every drop; 0 generations dropped without a verified marker |
 | `internal/hub/profile_invariance_test.go` | one scripted event stream replayed through both profiles (standalone and light-hub with Redis + a DuckBrain stub) | **identical incident and verify sequences** (same count, same states, same order); AC-29 ladder-invariance assertion |

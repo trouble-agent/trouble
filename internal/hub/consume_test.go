@@ -177,7 +177,7 @@ func TestConsumePreservesOrderInsideOneEnvelope(t *testing.T) {
 		Route: RouteA,
 	}
 	for _, d := range drafts {
-		rec := localRecord(d, "h1")
+		rec := localRecord(d, "h1", "")
 		rec.Kind = d.Kind
 		rec.Sig = d.Sig
 		rec.Payload = d.Payload

@@ -85,6 +85,11 @@ func (r *Runtime) redisOffsets(ctx context.Context) types.RedisStreamOffsets {
 		out.DedupMisses = misses
 		out.DedupConflicts = conflicts
 		out.DedupWindow = gate.Window()
+		// The ledger index the gate was re-warmed with (SPEC-13 §2.1.1 rule 5a,
+		// §3.1 dedup.state's restored_keys): 0 means the window is NOT warm —
+		// no read seam, an unreadable ledger, or a ledger that holds nothing —
+		// and a failover that emptied Redis then costs the duplicate §3.4 prices.
+		out.DedupRestored, _ = gate.Restored()
 	} else if out.DedupHits+out.DedupMisses > 0 {
 		out.DedupWindow = "lru"
 	}

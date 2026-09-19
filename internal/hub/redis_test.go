@@ -160,7 +160,7 @@ func TestEnqueueWritesOneFieldEntryAndCounts(t *testing.T) {
 		t.Fatalf("EnsureGroup: %v", err)
 	}
 	draft := draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", map[string]any{"subject": "q"})
-	rec := localRecord(draft, "7f3a91c2d4e5b607")
+	rec := localRecord(draft, "7f3a91c2d4e5b607", "")
 	env := types.ForwardEnvelope{
 		ProtocolVersion: 1,
 		IdempotencyKey:  "sentinel:sha256v1:9f2c1d3e4b5a6c7d|1|7f3a91c2d4e5b607",
@@ -203,7 +203,7 @@ func TestEnqueueFailureIsFourAndLeavesNoEntry(t *testing.T) {
 	f.info = ServerInfo{AOFEnabled: true, Policy: "noeviction", OptionsChecked: true}
 	c := openFake(t, f, nil)
 	draft := draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel", nil)
-	rec := localRecord(draft, "h1")
+	rec := localRecord(draft, "h1", "")
 	f.failXAdd = errors.New("READONLY You can't write against a read only replica")
 	_, err := c.EnqueueEntry(context.Background(), types.ForwardEnvelope{
 		ProtocolVersion: 1,
@@ -234,7 +234,7 @@ func TestOverloadedLagGate(t *testing.T) {
 	}
 	for i := 0; i < 6; i++ {
 		ent := draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "s", map[string]any{"i": i})
-		rec := localRecord(ent, "h1")
+		rec := localRecord(ent, "h1", "")
 		if _, err := c.EnqueueEntry(context.Background(), types.ForwardEnvelope{
 			ProtocolVersion: 1, IdempotencyKey: "k" + itoa(int64(i)), HostID: "h1",
 			Origin: rec.Origin, Records: []types.Record{rec},

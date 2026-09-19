@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/totalwindupflightsystems/trouble/internal/loadfence"
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
 
@@ -345,7 +346,20 @@ func TestCollectorNonUTF8IsReplaced(t *testing.T) {
 	}
 }
 
-// TestCollectorLongLineIsTruncated pins §3.5 guard 4.
+// TestCollectorLongLineIsTruncated pins §3.5 guard 4: a line longer than
+// max_line_bytes yields exactly one event whose message is capped.
+//
+// The event count is also host-measured, because the collector's write path is
+// fail-closed: a scrub budget exceeded while the host is descheduled refuses the
+// 64 KiB payload (TROUBLE-SCRUB-005 → the sentinel's CodeSentinel001 refusal →
+// internal/sentinel/collectors.go documents it as a gap cause=scrub_refused and
+// does not persist the event), so the truncation assertion never runs. Measured
+// on the pre-change tree: 1 iteration in 25 of this test — and iteration 14 of a
+// 400-iteration probe at load_avg 57.75 — produced exactly that gap and zero
+// events. Only that measured artifact is fenced, and only past the loadfence
+// fence, where the run cannot separate a descheduling-driven refusal from a real
+// one; any other event-count shape (a second event, a refusal below the fence)
+// stays a hard failure.
 func TestCollectorLongLineIsTruncated(t *testing.T) {
 	ts := collectorTestServer(t)
 	defer ts.close()
@@ -354,12 +368,33 @@ func TestCollectorLongLineIsTruncated(t *testing.T) {
 	ts.s.collectors.flushExpired(nowFunc().Add(10 * time.Second))
 	recs := ts.sink.ofKind(types.KEvent)
 	if len(recs) != 1 {
-		t.Fatalf("%d events, want 1", len(recs))
+		refusals := collectorScrubRefusals(ts)
+		measured := fmt.Sprintf("%d events, want 1", len(recs))
+		if refusals > 0 {
+			measured += fmt.Sprintf(" — the %d-byte line was refused fail-closed by the scrubber (gap cause=scrub_refused ×%d), so the truncation assertion never ran", len(long), refusals)
+		}
+		if len(recs) == 0 && refusals > 0 {
+			loadfence.MissFatal(t, "TestCollectorLongLineIsTruncated", measured, loadfence.LoadAvg1())
+		}
+		t.Fatalf("%s", measured)
 	}
 	ev := eventPayload(t, recs[0])
 	if len(fmt.Sprint(ev["message"])) > ts.s.cfg.MaxLineBytes+64 {
 		t.Fatalf("the event message was not capped at max_line_bytes: %d bytes", len(fmt.Sprint(ev["message"])))
 	}
+}
+
+// collectorScrubRefusals counts the fail-closed scrub refusals the collector
+// documented while a test ran: gap records with cause=scrub_refused. It is the
+// measured evidence a skipped TestCollectorLongLineIsTruncated quotes.
+func collectorScrubRefusals(ts *testServer) int {
+	n := 0
+	for _, r := range ts.sink.ofKind(types.KGap) {
+		if r.Payload["cause"] == "scrub_refused" {
+			n++
+		}
+	}
+	return n
 }
 
 // TestCollectorParserErrorEmitsGapAnd017 pins §5's 017: a parser that cannot

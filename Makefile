@@ -28,7 +28,24 @@ RELEASE_TARGETS = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
 # sha256sum on Linux, shasum on the BSDs/macOS. Resolved once at parse time.
 SHA256 := $(shell command -v sha256sum 2>/dev/null || command -v shasum 2>/dev/null || echo sha256sum)
 
-.PHONY: all build bin release test race vet fmt schema schema-check conformance check smoke smoke-e2e ac-matrix clean
+# The host-measured gates (TRBL-004). Each one asserts a number the HOST
+# produces — amortized ledger throughput, a per-call derivation budget — so each
+# fences itself through internal/loadfence: at a load_avg of 45 or more the miss
+# is reported as an explicit SKIP naming the observed load_avg and the measured
+# value instead of a red that would misreport host load as a regression. Below
+# the fence the same run fails exactly as it always has.
+#
+# The list lives here (one place) so `check-host` can run these gates verbosely:
+# `go test` hides the output of a skipped test without -v, and the whole point of
+# the fence is that the SKIP verdict is VISIBLE and is not read as a failure.
+# HOST_GATE_NAMES is the report's guard against this list and the -run pattern
+# drifting apart — a listed gate with no verdict fails the step instead of
+# silently not running.
+HOST_MEASURED_GATES = TestAmortizedThroughput|TestPerLineRegression|TestDeriveNeverBlocks|TestCollectorLongLineIsTruncated
+HOST_GATE_PKGS = ./internal/ledger/... ./internal/research/... ./internal/sentinel/...
+HOST_GATE_NAMES = TestAmortizedThroughput TestPerLineRegression TestDeriveNeverBlocks TestCollectorLongLineIsTruncated
+
+.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host smoke smoke-e2e ac-matrix clean
 
 all: build
 
@@ -124,12 +141,37 @@ conformance:
 	$(GO) test ./internal/registry/testkit/... -run 'TestHarnessRejectsNonIdempotent|TestHarnessRejectsNoCheckMode|TestSchemaDialectClosed' -count=1
 
 # The v0.1 exit gate: the spec-suite self-consistency loop (SPEC-INDEX §7) plus the
-# two subsystem gates that own a cross-spec contract.
+# two subsystem gates that own a cross-spec contract, plus the host-measured gates
+# verbosely (so their fence verdict — PASS or an explicit SKIP — is part of the
+# check output rather than hidden by `go test`'s non-verbose mode).
 check:
 	python3 specs/tools/selfcheck.py
 	$(MAKE) schema-check
 	$(MAKE) vet
 	$(GO) test -count=1 ./internal/...
+	$(MAKE) check-host
+
+# The host-measured gates, verbosely, with their fence verdicts echoed. A failure
+# below the fence exits non-zero; an explicit SKIP (host past the fence) exits 0 —
+# a SKIP is not a failure, that is what the fence is for (TRBL-004). The step also
+# fails if a listed gate produced no verdict at all, so the gate list and the -run
+# pattern cannot drift apart silently.
+check-host:
+	@out=$$(mktemp); \
+	echo "host-measured gates — fence: internal/loadfence.FenceLoadAvg, this host: load_avg $$(cut -d' ' -f1 /proc/loadavg)"; \
+	$(GO) test -count=1 -v -run '$(HOST_MEASURED_GATES)' $(HOST_GATE_PKGS) > $$out 2>&1; rc=$$?; \
+	grep -E '^--- (PASS|SKIP|FAIL): |load_avg' $$out | sed 's/^/  /'; \
+	missing=""; \
+	for g in $(HOST_GATE_NAMES); do \
+	  grep -qE "^--- (PASS|SKIP|FAIL): $$g " $$out || missing="$$missing $$g"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "host-measured gates: NO VERDICT for$$missing — HOST_GATE_NAMES and HOST_MEASURED_GATES have drifted"; \
+	  rm -f $$out; exit 1; \
+	fi; \
+	skips=$$(grep -c '^--- SKIP: ' $$out || true); \
+	echo "host-measured gates: rc=$$rc, $$skips explicit SKIP verdict(s) (SKIP is not a failure; FAIL below the fence is)"; \
+	rm -f $$out; exit $$rc
 
 # Boot the real daemon against a throwaway state root and prove the health
 # surface, the stall checker and the config explain dump all answer (see

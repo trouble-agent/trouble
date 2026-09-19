@@ -6,12 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/totalwindupflightsystems/trouble/internal/loadfence"
 	"github.com/totalwindupflightsystems/trouble/internal/scrub"
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -228,22 +227,11 @@ func writeRawFixture(t *testing.T, root, name string, n int, payloadBytes int, d
 }
 
 // loadAvg1 reads the host's 1-minute load average so throughput assertions can
-// say which machine they measured on (see TestAmortizedThroughput).
-func loadAvg1() float64 {
-	b, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return 0
-	}
-	f := strings.Fields(string(b))
-	if len(f) == 0 {
-		return 0
-	}
-	v, err := strconv.ParseFloat(f[0], 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
+// say which machine they measured on AND fence themselves on an oversubscribed
+// host (see TestAmortizedThroughput). One reader serves both, so the load a
+// floor was derived from is the load the fence judges the miss against;
+// TROUBLE_HOST_LOAD_OVERRIDE forces the figure for falsification runs.
+func loadAvg1() float64 { return loadfence.LoadAvg1() }
 
 // newJSONEncoder is the pinned serialization shape: no HTML escaping.
 func newJSONEncoder(f *os.File) *json.Encoder {

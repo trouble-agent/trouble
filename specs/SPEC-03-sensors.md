@@ -503,6 +503,41 @@ the affected sensors. The previous set stays authoritative — a broken edit nev
   `60s` mtime sweep continues, and only `SIGHUP` retries immediately. This prevents an editor's
   half-written file from producing an error storm.
 
+### 3.7a Content-derived reload backstop fingerprint
+
+The `60s` sweep (§3.7) needs a detector that answers one question: "would a reload produce a
+different rule set?" The detector is derived from the path, the size, the mtime **and a content
+digest** (SHA-256 of a rule file's bytes) of every `*.toml` file under `rules.d`, folded into one
+fingerprint.
+
+- **Why the digest is load-bearing.** Path + size + mtime alone is blind to a rewrite that lands
+  inside one filesystem timestamp tick. A coarse-granularity filesystem, a tar-synced or restored
+  tree, and an editor that preserves mtime all produce a real content change with an identical size
+  and an identical mtime; without the digest the backstop reports "nothing changed" and the daemon
+  keeps evaluating a stale rule set while `rules.d` says otherwise. With the digest, a same-size,
+  same-mtime rewrite is a change like any other.
+- **Stability (no reload storm).** An identical file set, identical bytes and identical stat data
+  produce an identical fingerprint — for a one-file directory and for a many-file directory — so a
+  quiet `rules.d` never triggers a reload on the sweep's tick.
+- **Change set.** A moved fingerprint means any of: content edit, size change, mtime change (a bare
+  `touch` with unchanged content is still a change, matching `SIGHUP` semantics), file added, file
+  removed. A vanished or unreadable file is skipped rather than failing the sweep; its absence from
+  the fingerprint is itself a change, so the next tick triggers a reload that reports the read
+  problem through the unchanged §3.5 refusal path.
+- **The sweep stays a backstop.** `SIGHUP`, the inotify watcher and `trouble rules reload` remain
+  the primary triggers of §3.7; §3.7a only makes the last-resort trigger correct on filesystems
+  whose timestamps cannot witness an edit.
+- **No codes of its own.** §3.7a introduces no new `TROUBLE-SENSORS-*` code. A reload the sweep
+  triggers travels the unchanged §3.7 path, including TROUBLE-SENSORS-019 for a refused set.
+- **Wiring.** The detector is consumed by `runReloadSweep` at each tick, and by the reload path's
+  initial snapshot; no new wiring, no new package surface (§3.10).
+- **Test.** `internal/sensors/reload_test.go` `TestRuleDirMTimesDetectsChange` asserts the four
+  halves deterministically on any filesystem: a content-only change with size and mtime pinned to a
+  frozen instant (fingerprint must change), a natural edit detected by polling with a `3s` deadline
+  (long enough for a `1s`-granularity filesystem), two consecutive fingerprints identical with
+  nothing changed (one-file and multi-file directories), and add/remove of a rule file each moving
+  the fingerprint. No sleep shorter than one poll interval decides the verdict.
+
 ### 3.8 Storm breakers and caps (AC-4)
 
 Scopes are the shared `Breaker.Scope` strings: `rule:<name>`, `sig:<sig>`, `source:<kind>`, `global`.
@@ -730,7 +765,7 @@ printed reason otherwise.
 | `psi_test.go` | Trigger byte builder golden: `"some 150000 2000000\n\x00"` = 21 bytes ending `\n\x00`; a builder that omits the terminator is asserted to be unreachable (the only constructor is the golden one). Grammar matrix over 8 measured shapes: 2s/4s/20s accepted, 1s/5s/500ms accepted→refused, `0` threshold refused, `stall > window` refused. Arm/epoll guard: adding a fd to epoll before a successful arm panics in the test double; `psi.armed_fds == len(epoll_sets)` after shutdown. Busy-spin regression: the guard blocks the 347,378-hits/200 ms shape (asserted by counting poll iterations in a 200 ms window with an unarmed fd — must be 0 in the guarded path). Wake handling: 1 per window; `spurious_wakes` increments when the re-read fails the match. CPU budget: 3 resources × 2s interval ⇒ ≤0.3% of one core over a 30s run. Probe: modes `triggers+sampling`/`sampling-only`, ceiling discovery `20s→10s→2s`, `oomd_available` recorded. |
 | `expr_test.go` | The 14 vectors of §3.4 both directions plus 26 more (short-circuit, `in` with one element, `not` precedence, 4096-byte boundary, depth-16 boundary, depth-17 refusal, >512-byte regex refusal). Every refusal asserts TROUBLE-SENSORS-018 and names the rule+line. |
 | `rules_test.go` | TOML decode parity with `types.Rule` for all 12 fields; both `[[rule.match]]` and inline-table forms; duplicate names refused (017); limit 257 rules refused (017); the 9 shipped default rules load and validate; `auto_grants` naming an unknown module refused (017). |
-| `reload_test.go` | Swap atomicity: 100k evaluations during 200 reloads — zero evaluations observe a mixed set; in-flight evaluation keeps its snapshot; `match`-identical rule carries its `for=` timer (elapsed preserved ±1ms), changed `match` resets it (`rule_state_reset` recorded); deleted rule drops its timer and leaves its incident open; invalid file → previous set still firing + one TROUBLE-SENSORS-019; 256 rules reload ≤50ms (CI asserts <250ms on the reference box); >1s reload abandoned with the previous set; 3 strikes disable the inotify trigger. |
+| `reload_test.go` | Swap atomicity: 100k evaluations during 200 reloads — zero evaluations observe a mixed set; in-flight evaluation keeps its snapshot; `match`-identical rule carries its `for=` timer (elapsed preserved ±1ms), changed `match` resets it (`rule_state_reset` recorded); deleted rule drops its timer and leaves its incident open; invalid file → previous set still firing + one TROUBLE-SENSORS-019; 256 rules reload ≤50ms (CI asserts <250ms on the reference box); >1s reload abandoned with the previous set; 3 strikes disable the inotify trigger. The `60s` backstop fingerprint (§3.7a) is covered without depending on timestamp granularity: a content-only rewrite with size and mtime pinned to a frozen instant is detected, a natural edit is detected within a polled `3s` deadline, a quiet directory yields two identical fingerprints (one file and several), and adding/removing a rule file each moves the fingerprint. |
 | `journald_test.go` | Fake `journalctl` script: cursor round-trip; malformed cursor → rc=1 zero stdout → exactly one `gap{cursor_invalid}` + `--since` fallback (never "no logs"); child killed 5× → backoff sequence `0.25,0.5,1,2,4s` ±10% jitter; 100k entries into an 8192 queue → `Dropped == 100000-8192` exactly and one gap per episode; dedupe: replaying 4096 identical cursors produces 0 duplicate records; 64KiB+ entry truncated with `dropped_bytes` exact; non-UTF-8 entry kept with `non_utf8=true`; `--since` outside retention → `est_lost=-1` + `retention_window_exceeded`. |
 | `dbus_test.go` | Path escaping golden: `coding-hermes-scheduler.service` → `coding_2dhermes_2dscheduler_2eservice` and round-trip for 10k generated unit names; merge rule M1–M4 with synthetic signal sequences: {PropertiesChanged, JobRemoved, journald} in 6 orderings ⇒ exactly 1 incident, 3 attaches, 0 duplicates; journald alone ⇒ 1 journald incident; 3 failures in 300s ⇒ `crash_loop=true`, severity critical, sig re-derived; `NameOwnerChanged` ⇒ re-subscribe + resync + 1 gap; manager unreachable ⇒ 013 naming it. |
 | `merge_rule_test.go` | Property test (10k randomized arrival sequences, 5s window boundary at ±1ms) asserting §3.6 M1–M4 invariants: one incident per key per window, `reopen_count` matches the post-resolve arrivals, and no arrival is lost (`arrivals == attaches + opens + reopens`). |

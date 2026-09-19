@@ -85,14 +85,20 @@ deploy/install in `deploy/README.md`, and the ingestion surface in
 `docs/sentinel-compat.md`. Read those three before concluding something is
 missing.
 
-### Trap 5 — `degraded` means "a sensor", `ok` does not mean "complete"
+### Trap 5 — `ok` does not mean "complete": read the ledger
 
-The rules directory is `<state_root>/../config/rules.d/`, installed only by
-`trouble install`. Boot the daemon by hand without it and the inotify sensor
-reports `TROUBLE-SENSORS-025` and `/health.json` says `degraded` — install the
-rules (`cp examples/rules/*.toml <state_root>/../config/rules.d/`) and the same
-config reports `status:"ok"` **even though sentinel/issues/skills were refused
-in the same boot**. The only surface that tells the whole truth is the ledger:
+`/health.json`'s `status` aggregates the sensor rows AND the subsystem rows, so a
+`status:"ok"` proves only that neither raised. Since TRBL-022 (SPEC-03 §3.7b) an
+absent rules directory is **not** a failure: a hand-rolled boot without
+`trouble install` keeps the inotify sensor up with the shipped defaults active
+and the absent path named in its `reason` (`rules dir <path> absent; the shipped
+defaults are active`) — it no longer reports `TROUBLE-SENSORS-025` or `degraded`.
+A sensor that IS degraded (a rules path that exists but cannot be watched, for
+one) still lifts the status, but so does a **refused subsystem**
+(`sentinel`/`issues`/`skills` without projects), which the sensor rows cannot
+show. Copy `examples/rules/*.toml` into `<state_root>/../config/rules.d/` when you
+want the file-watch trigger (`trouble install` does it for you) and treat the
+ledger as the whole truth:
 
 ```bash
 jq -r 'select(.kind=="lifecycle" and .payload.stage=="subsystem_not_built") | .payload.name, .payload.detail' state_root/ledger/*.jsonl

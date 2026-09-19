@@ -268,12 +268,16 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	dashPort, ingestPort := freePortPair(t)
 
 	// The rules dir the sensors watch unconditionally lives beside the state root
-	// (SPEC-03 §3.7: `<state_root>/../config/rules.d`). `trouble install` creates
-	// it on a real host; a throwaway state root starts without one and the inotify
-	// sensor then reports TROUBLE-SENSORS-025, degrading the whole boot for a
-	// reason that has nothing to do with the subsystems this test is about. It is
-	// created here — and every sensor row is asserted healthy below — rather than
-	// weakening the AC3 status assertion.
+	// (SPEC-03 §3.7: `<state_root>/../config/rules.d`). It is created here — empty,
+	// which the §3.5 validator reports as "no rule files found; the shipped
+	// defaults are active" — so this boot exercises the INSTALLED state beside its
+	// throwaway state root, deterministically and independently of whatever a
+	// previous run left in the shared parent directory. An ABSENT rules dir is
+	// equally non-failing (SPEC-03 §3.7b, pinned by
+	// TestMissingRulesDirBootsToHealthOK): before TRBL-022 the inotify sensor
+	// degraded this whole boot with TROUBLE-SENSORS-025 for the absence, which is
+	// why the directory used to be created for a reason that had nothing to do
+	// with the subsystems under test.
 	rulesDir := filepath.Join(filepath.Dir(root), "config", "rules.d")
 	if err := os.MkdirAll(rulesDir, 0o700); err != nil {
 		t.Fatalf("mkdir %s: %v", rulesDir, err)

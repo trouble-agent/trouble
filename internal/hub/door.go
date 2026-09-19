@@ -210,20 +210,40 @@ func (d *Door) idemKey(draft types.RecordDraft) (string, error) {
 	return IdemKeyForDraft(draft, host)
 }
 
-// IdemKeyForDraft is the door's key derivation, callable without a door so a
-// caller (or a test) can compute the key an offer WILL use: the spec's
-// incident-scoped derivation when the draft carries a parseable sig, and the
-// content-derived fallback when it does not (a housekeeping record has no
-// incident identity to scope by).
+// IdemKeyForDraft is the door's key derivation for one LOCAL record, and it is
+// the reason the door cannot simply reuse the envelope derivation.
+//
+// SPEC-13 §3.4's key (`sig|norm_version|host_id`) is the ForwardEnvelope's
+// idempotency key: it identifies the BATCH a sender chose to send, which is why
+// the forward path dedups whole envelopes. The local ingestion path is not that:
+// one request produces several DISTINCT records under the SAME sig (an `event`
+// record and the `group` record the sentinel folds it into, then the next event
+// of that group), so keying the gate on the sig alone would drop every record
+// after the first — a live run proved exactly that (one entry in the stream for
+// a request that wrote two records, with the second answered as an idempotent
+// duplicate).
+//
+// The local derivation therefore keeps the spec's scope as its prefix and adds
+// what identifies the record itself: its kind and a digest of its canonical
+// payload.
+//
+//	<sig>|<norm_version>|<host_id>|<kind>|content:sha256v1:<16>
+//
+// Two consequences, both wanted: a retry of the SAME record (the sender re-sends
+// the same event id and body) is the same key and is deduped, while two records
+// that merely share an incident are distinct. A draft with no parseable sig keeps
+// the content-only key (ContentIdemKey), because there is no incident scope to
+// prefix.
 func IdemKeyForDraft(draft types.RecordDraft, hostID string) (string, error) {
-	if key, ok := IdemKeyForSig(draft.Sig, hostID); ok {
-		return key, nil
-	}
 	body, err := canonicalJSON(draft.Payload)
 	if err != nil {
 		return "", errWrap(types.CodeHub007, ReasonDecode, "payload is not canonical JSON", err)
 	}
-	return ContentIdemKey(draft.Kind, body), nil
+	content := ContentIdemKey(draft.Kind, body)
+	if scope, ok := IdemKeyForSig(draft.Sig, hostID); ok {
+		return scope + "|" + string(draft.Kind) + "|" + content, nil
+	}
+	return content, nil
 }
 
 // GatewayDedup exposes the gate the door claims on, so the app can report the

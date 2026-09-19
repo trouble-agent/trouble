@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,6 +184,81 @@ func TestDedupKeyDerivation(t *testing.T) {
 	if a != b || a == c2 {
 		t.Fatalf("content idem key is not content-derived: %q %q %q", a, b, c2)
 	}
+}
+
+// TestLocalIdemKeysDistinguishDistinctRecordsOfOneSig is the regression test for
+// a defect a LIVE run found: with the envelope derivation alone, a request that
+// wrote two records (the sentinel's `event` record and the `group` record folded
+// from it) lost the second one, because both share the incident's sig and the
+// gate answered the second as an idempotent duplicate. The local derivation must
+// keep distinct records distinct while still deduping a retry of the SAME one.
+func TestLocalIdemKeysDistinguishDistinctRecordsOfOneSig(t *testing.T) {
+	sig := "sentinel:sha256v1:9f2c1d3e4b5a6c7d"
+	event := draftFor(types.KEvent, sig, "sentinel", map[string]any{"item_type": "event", "n": 1})
+	group := draftFor(types.KGroup, sig, "sentinel", map[string]any{"op": "create", "group_id": "grp_1"})
+	groupAgain := draftFor(types.KGroup, sig, "sentinel", map[string]any{"op": "create", "group_id": "grp_1"})
+	eventAgain := draftFor(types.KEvent, sig, "sentinel", map[string]any{"item_type": "event", "n": 1})
+
+	keyEvent, err := IdemKeyForDraft(event, "h1")
+	if err != nil {
+		t.Fatalf("event key: %v", err)
+	}
+	keyGroup, err := IdemKeyForDraft(group, "h1")
+	if err != nil {
+		t.Fatalf("group key: %v", err)
+	}
+	if keyEvent == keyGroup {
+		t.Fatalf("two distinct records of one sig share a key: %q", keyEvent)
+	}
+	if !strings.HasPrefix(keyEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d|1|h1|") {
+		t.Fatalf("the local key lost the spec's scope prefix: %q", keyEvent)
+	}
+	same1, _ := IdemKeyForDraft(groupAgain, "h1")
+	same2, _ := IdemKeyForDraft(eventAgain, "h1")
+	if same1 != keyGroup {
+		t.Fatalf("a retry of the same record changed its key: %q vs %q", same1, keyGroup)
+	}
+	if same2 != keyEvent {
+		t.Fatalf("a retry of the same event changed its key: %q vs %q", same2, keyEvent)
+	}
+	// A different body under the same kind and sig is a different record.
+	other, _ := IdemKeyForDraft(draftFor(types.KGroup, sig, "sentinel", map[string]any{"op": "flush", "group_id": "grp_1"}), "h1")
+	if other == keyGroup {
+		t.Fatalf("two different group records share a key: %q", other)
+	}
+	// And the full path: the door appends BOTH records and dedups only the retry.
+	f, ledger, cs, c, gate := consumerFixture(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+	door := NewDoor(c, gate, DoorConfig{Route: RouteA, HostID: "h1", Wait: 2 * time.Second})
+	cs.WithCompletion(door.Complete)
+	go func() { _ = cs.Run(ctx) }()
+	for _, d := range []types.RecordDraft{event, group} {
+		if _, err := door.Offer(ctx, d); err != nil {
+			t.Fatalf("offer %s: %v", d.Kind, err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for ledger.Count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if ledger.Count() != 2 {
+		t.Fatalf("ledger records = %d want 2 (both records of the request must be queued)", ledger.Count())
+	}
+	// The retry of the second record is a duplicate: still two records.
+	if _, err := door.Offer(ctx, groupAgain); err != nil {
+		t.Fatalf("replay offer: %v", err)
+	}
+	if ledger.Count() != 2 {
+		t.Fatalf("a replay appended a third record: %d", ledger.Count())
+	}
+	if door.Duplicates.Load() != 1 {
+		t.Fatalf("duplicates = %d want 1", door.Duplicates.Load())
+	}
+	_ = f
 }
 
 func TestDedupStateFileRoundTrip(t *testing.T) {

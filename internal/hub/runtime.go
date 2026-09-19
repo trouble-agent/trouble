@@ -445,7 +445,7 @@ func (r *Runtime) superviseOnce(ctx context.Context) bool {
 		r.cfg.Log("hub: the queue is not live while the runtime says up (%v): rewiring", err)
 		// The state machine said "up"; it must not (SPEC-13 §1 rule 4:
 		// degradation is a designed state, never a silent success).
-		r.markLost(err)
+		r.markLost(ctx, err)
 		r.probeFailures = 0
 		return r.reconnect(ctx)
 	}
@@ -541,7 +541,9 @@ func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Re
 		door := r.doorRef()
 		rec, err := door.Offer(ctx, draft)
 		if err != nil {
-			r.markLost(err)
+			// A failed offer is NOT automatically a Redis loss: the door answers
+			// three different things here (see markLost).
+			r.markLost(ctx, err)
 			return types.Record{}, err
 		}
 		r.countIngested.Add(1)
@@ -580,17 +582,67 @@ func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Re
 
 // markLost records a runtime Redis loss and moves the state machine (§4.3).
 //
-// The record describes the TRANSITION, not every observation: while the state
-// machine is already degraded the supervisor keeps retrying the rewire without
-// writing a second `redis_lost` for every attempt. The loss signal is poked
-// afterwards so the recovery loop retries the rewire at once instead of sleeping
-// out the rest of its interval.
-func (r *Runtime) markLost(err error) {
+// It is the ONE place that decides the daemon lost its queue, so it is also the
+// place that refuses to record a loss that is not one. §4.3's rows are statements
+// about REDIS — "Redis lost at runtime" refuses senders, names code 004 and buys
+// a rewire — and the door answers THREE different things, only one of which is
+// about Redis:
+//
+//	the sender's request ended   context.Canceled / DeadlineExceeded
+//	the draft was refused        TROUBLE-HUB-007 (the payload is not canonical JSON)
+//	the queue failed             002 / 003 / 004 from the client, NOGROUP, transport
+//
+// Treating all three as a loss cost a live tick: a POST served with an
+// already-dead context made the door return `context.Canceled`, the daemon wrote
+// a `redis_lost` record with an EMPTY code and reason ("hub: redis lost at
+// runtime (): context canceled" on stdout and
+// {"op":"redis_lost","error_code":"","reason":""} in the ledger), tore down a
+// healthy consumer mid-append — stranding the entry the sender had already
+// enqueued until claim_min_idle — and rewired the queue. A recovery for a Redis
+// failure that never happened.
+//
+// An error that cannot be attributed to the queue is therefore not acted on and
+// not recorded: the supervisor's own liveness probe (§2.1.1 rule 5) decides that
+// case on its next pass, with its own attributable error. The record describes
+// the TRANSITION, not every observation: while the state machine is already
+// degraded the supervisor keeps retrying the rewire without writing a second
+// `redis_lost` for every attempt. The loss signal is poked afterwards so the
+// recovery loop retries the rewire at once instead of sleeping out the rest of
+// its interval.
+//
+// One offer failure still moves the state machine although Redis itself answered:
+// the door's own TIMEOUT (code 004, "enqueued as <entry> but the consumer did not
+// append within <wait>"). That stays a loss deliberately — the entry is IN the
+// stream and nothing is draining it, which is the degradation §4.3 describes for
+// senders (429 + Retry-After), and the rewire it buys is the remedy for a wedged
+// consumer — and the record it writes carries that code and the matching reason,
+// so it is never an empty one. This is also the shape a real mid-ack failure
+// (XACK refused while a sender waits) reaches the ledger through: the consumer
+// logs the un-acked batch and leaves its entries pending (consume.go), the
+// sender's door wait expires, and the loss is recorded once, with a reason.
+func (r *Runtime) markLost(ctx context.Context, err error) {
 	if r.degraded() {
+		return
+	}
+	if IsRequestEnd(ctx, err) {
+		r.cfg.Log("hub: the sender's request ended (%v): the queue is left as it is", err)
+		return
+	}
+	if !IsQueueFailure(err) {
+		r.cfg.Log("hub: the offer failed for a reason that is not the queue (%v): the queue is left as it is", err)
 		return
 	}
 	code := CodeOf(err)
 	reason := DegradedReasonFor(code, r.redis.RequireRedis)
+	if code == "" || reason == DegradedNone {
+		// A `redis_lost` record with an empty code and an empty reason names no
+		// failure at all, so it is not written. Unreachable for the errors the
+		// door and the probe actually raise (every one of them carries a code
+		// from the 002/003/004 family); kept as the invariant this function owes
+		// its callers.
+		r.cfg.Log("hub: an unattributable failure (%v): no state change and no record", err)
+		return
+	}
 	mode := ModeUnavailable
 	if r.redis.RequireRedis {
 		mode = ModeRefusing

@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -97,3 +98,54 @@ func ReasonOf(err error) string {
 // ErrorCodeString is the plain string form used in payloads (SPEC-INDEX §5.3:
 // every failure code is mirrored into the ledger record that describes it).
 func ErrorCodeString(err error) string { return string(CodeOf(err)) }
+
+// IsRequestEnd reports whether err is the CALLER's request ending — its context
+// cancelled, or its deadline passing — rather than a failure of the queue behind
+// it.
+//
+// It is structural, never string matching, because SPEC-13 §4.3's rows are
+// statements about REDIS and a caller that went away is not one of them:
+//
+//   - context.Canceled has exactly one producer: a cancelled context. A Redis
+//     server cannot answer with it, and a client that lost its connection is
+//     reported as `redis: client is closed` or a net error, so an error chain
+//     carrying it is the caller's own lifetime ending.
+//   - context.DeadlineExceeded is ambiguous — a read timeout reads the same — so
+//     it counts as the caller's only when the caller's own context says so.
+func IsRequestEnd(ctx context.Context, err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	}
+	return false
+}
+
+// IsQueueFailure reports whether err is evidence ABOUT THE QUEUE: a Redis
+// refusal, an unreachable server, a lost consumer group, a transport failure.
+//
+// An error that cannot be attributed to the queue must not move a state machine
+// that describes the queue, so the unattributable case fails CLOSED here and the
+// supervisor's own liveness probe (§2.1.1 rule 5) is what decides it — on its
+// next pass, with its own attributable error.
+func IsQueueFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsRequestEnd(nil, err) {
+		return false
+	}
+	switch CodeOf(err) {
+	case types.CodeHub002, types.CodeHub003, types.CodeHub004:
+		return true
+	}
+	// The server REPLIED and what it said is a queue fact: it does not know the
+	// group (the cold-server case of §2.1.1 rule 5) or it refused the
+	// credentials. TROUBLE-HUB-005 is deliberately absent: an unusable group is
+	// refused by attach (ModeRefusing) before a door exists to report it.
+	return IsNoGroup(err) || IsAuthError(err)
+}

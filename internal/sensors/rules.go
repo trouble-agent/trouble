@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -837,7 +838,26 @@ func rulesDirFiles(dir string) ([]string, error) {
 	return out, err
 }
 
-// rulesMTimes is the reload backstop's cheap change detector.
+// rulesMTimes is the reload backstop's cheap change detector (SPEC-03 §3.7a).
+//
+// The fingerprint is CONTENT-DERIVED: for every rule file it folds the path, the
+// size, the mtime *and* a SHA-256 digest of the file's bytes into one hash. A
+// rewrite that lands inside a single filesystem timestamp tick — a
+// coarse-granularity fs, a tar-synced or restored tree, an editor that preserves
+// mtime — therefore still moves the fingerprint, which a path/size/mtime
+// fingerprint cannot see.
+//
+// The contract, both directions:
+//   - STABLE when nothing changed: identical file set + identical bytes + identical
+//     stat data produce an identical fingerprint, so the sweep does not reload on
+//     every tick (no reload storm).
+//   - CHANGED on any of: content edit, size change, mtime change (a pure touch with
+//     identical content stays a change — size and mtime remain in the hashed form),
+//     file added or removed.
+//
+// The sweep stays a BACKSTOP: SIGHUP, the inotify watcher and `trouble rules
+// reload` are the primary triggers (§3.7); this detector only covers what they
+// miss. It introduces no failure code of its own.
 func rulesMTimes(dir string) (string, error) {
 	files, err := rulesDirFiles(dir)
 	if err != nil {
@@ -847,9 +867,37 @@ func rulesMTimes(dir string) (string, error) {
 	for _, f := range files {
 		fi, err := os.Stat(f)
 		if err != nil {
+			// Tolerant by design, like the read error below: a file that
+			// vanished between the listing and the stat is skipped, not an
+			// error — the backstop must never fail a sweep on a race with an
+			// editor, and the changed file set moves the fingerprint anyway.
 			continue
 		}
-		fmt.Fprintf(h, "%s:%d:%d\n", f, fi.Size(), fi.ModTime().UnixNano())
+		digest, err := fileDigest(f)
+		if err != nil {
+			// Same tolerance: an unreadable file (permissions, transient I/O) is
+			// skipped rather than aborting the sweep. The file's absence from the
+			// fingerprint moves it, so the next tick still triggers a reload —
+			// which reports the read failure with its own refusal code.
+			continue
+		}
+		fmt.Fprintf(h, "%s:%d:%d:%s\n", f, fi.Size(), fi.ModTime().UnixNano(), digest)
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+// fileDigest returns a short digest of one file's bytes. io.Copy streams the
+// file, so a NUL-filled, binary or very large file is hashed without buffering
+// it whole — the sweep can never be blown up by the content it fingerprints.
+func fileDigest(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16], nil
 }

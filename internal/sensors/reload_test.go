@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -291,24 +292,164 @@ func TestNoRetroactiveEvaluation(t *testing.T) {
 	}
 }
 
-// TestRuleDirMTimesDetectsChange proves the 60s mtime backstop has a real
-// change detector rather than a hopeful one.
+// TestRuleDirMTimesDetectsChange proves the 60s reload backstop has a real change
+// detector rather than a hopeful one (SPEC-03 §3.7a).
+//
+// All four halves are deterministic on ANY filesystem: none of them relies on the
+// clock advancing between two writes, so a coarse-granularity filesystem, a
+// tar-synced tree or a restored tree cannot make the requirement unassertable.
 func TestRuleDirMTimesDetectsChange(t *testing.T) {
+	// (a) CONTENT-ONLY change, with size and mtime deliberately frozen. This is
+	// the hostile condition — harsher than any real filesystem — and it is what
+	// the pre-fix path/size/mtime fingerprint could not see.
+	t.Run("content-only change inside a frozen timestamp tick", func(t *testing.T) {
+		h := newHarness(t)
+		rulesDir := filepath.Join(h.dir, "rules.d")
+		first := ruleBody("aaa", ">=", "1", "0s")
+		second := ruleBody("bbb", ">=", "1", "0s")
+		if len(first) != len(second) {
+			t.Fatalf("premise: the two bodies must be the same byte length, got %d and %d", len(first), len(second))
+		}
+		p := h.writeRules("10.toml", first)
+		if err := os.Chtimes(p, time.Unix(1700000000, 0), time.Unix(1700000000, 0)); err != nil {
+			t.Fatalf("Chtimes: %v", err)
+		}
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("Stat: %v", err)
+		}
+		pinnedAt, pinnedSize := fi.ModTime(), fi.Size()
+
+		before, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+
+		h.writeRules("10.toml", second)
+		if err := os.Chtimes(p, pinnedAt, pinnedAt); err != nil {
+			t.Fatalf("Chtimes: %v", err)
+		}
+		after, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+
+		// Assert the premise: the hostile condition really is in force, so a
+		// failure below is the detector's, not the fixture's.
+		fi2, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("Stat: %v", err)
+		}
+		if fi2.Size() != pinnedSize || !fi2.ModTime().Equal(pinnedAt) {
+			t.Fatalf("premise: size/mtime must be unchanged, got size %d (want %d) mtime %v (want %v)",
+				fi2.Size(), pinnedSize, fi2.ModTime(), pinnedAt)
+		}
+		if before == after {
+			t.Fatalf("content-only change missed: fingerprint stayed %s although the bytes changed while size (%d) and mtime (%v) did not",
+				before, fi2.Size(), fi2.ModTime())
+		}
+	})
+
+	// (b) The natural edit path: rewrite and POLL, so a filesystem whose
+	// timestamps move only on the second still passes, and a detector that never
+	// notices still fails.
+	t.Run("natural edit is detected within a polled deadline", func(t *testing.T) {
+		h := newHarness(t)
+		rulesDir := filepath.Join(h.dir, "rules.d")
+		h.writeRules("10.toml", ruleBody("a", ">=", "1", "0s"))
+		before, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		h.writeRules("10.toml", ruleBody("b", ">=", "1", "0s"))
+		deadline := time.Now().Add(3 * time.Second)
+		after := before
+		for {
+			cur, err := rulesMTimes(rulesDir)
+			if err != nil {
+				t.Fatalf("rulesMTimes: %v", err)
+			}
+			if cur != before {
+				after = cur
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("a natural edit to 10.toml was not detected within 3s: the fingerprint is still %s", before)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if after == before {
+			t.Fatalf("the fingerprint did not change after an edit")
+		}
+	})
+
+	// (c) STABILITY: nothing changed ⇒ identical fingerprint, so the backstop
+	// does not reload on every tick.
+	t.Run("stable while nothing changes", func(t *testing.T) {
+		h := newHarness(t)
+		rulesDir := filepath.Join(h.dir, "rules.d")
+		h.writeRules("10.toml", ruleBody("a", ">=", "1", "0s"))
+		one, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		oneAgain, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		if one != oneAgain {
+			t.Fatalf("one-file dir: consecutive fingerprints differ (%s vs %s) with nothing changed — that is a reload storm", one, oneAgain)
+		}
+
+		h.writeRules("20.toml", ruleBody("b", ">=", "2", "0s"))
+		h.writeRules("30.toml", ruleBody("c", ">=", "3", "0s"))
+		many, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		manyAgain, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		if many != manyAgain {
+			t.Fatalf("three-file dir: consecutive fingerprints differ (%s vs %s) with nothing changed — that is a reload storm", many, manyAgain)
+		}
+	})
+
+	// (d) FILE SET: add and remove are both changes.
+	t.Run("file set changes are detected", func(t *testing.T) {
+		h := newHarness(t)
+		rulesDir := filepath.Join(h.dir, "rules.d")
+		h.writeRules("10.toml", ruleBody("a", ">=", "1", "0s"))
+		one, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		added := h.writeRules("20.toml", ruleBody("b", ">=", "2", "0s"))
+		two, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		if one == two {
+			t.Fatalf("adding rules.d/20.toml did not change the fingerprint (%s)", one)
+		}
+		if err := os.Remove(added); err != nil {
+			t.Fatalf("remove: %v", err)
+		}
+		three, err := rulesMTimes(rulesDir)
+		if err != nil {
+			t.Fatalf("rulesMTimes: %v", err)
+		}
+		if three == two {
+			t.Fatalf("removing rules.d/20.toml did not change the fingerprint (%s)", two)
+		}
+		if three != one {
+			t.Fatalf("removing the added file did not restore the original fingerprint: %s (want %s)", three, one)
+		}
+	})
+
 	h := newHarness(t)
 	h.writeRules("10.toml", ruleBody("a", ">=", "1", "0s"))
-	before, err := rulesMTimes(filepath.Join(h.dir, "rules.d"))
-	if err != nil {
-		t.Fatalf("rulesMTimes: %v", err)
-	}
-	time.Sleep(2 * time.Millisecond)
-	h.writeRules("10.toml", ruleBody("b", ">=", "1", "0s"))
-	after, err := rulesMTimes(filepath.Join(h.dir, "rules.d"))
-	if err != nil {
-		t.Fatalf("rulesMTimes: %v", err)
-	}
-	if before == after {
-		t.Fatal("the mtime fingerprint did not change after an edit")
-	}
 	if _, err := rulesDirFiles(filepath.Join(h.dir, "rules.d")); err != nil && err != fs.ErrNotExist {
 		t.Fatalf("rulesDirFiles: %v", err)
 	}

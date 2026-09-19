@@ -109,6 +109,84 @@ func firstLineOf(s string) string {
 	return s
 }
 
+// repositoryRootFromThisTest resolves repository-owned documentation from this
+// source file rather than the test process CWD. The quickstart is operator
+// documentation, but its commands are part of the shipped interface and must
+// not drift from the config and listener contract that this package boots.
+func repositoryRootFromThisTest(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed; cannot locate repository documentation")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
+func readRepositoryDocument(t *testing.T, root, rel string) string {
+	t.Helper()
+	path := filepath.Join(root, rel)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(body)
+}
+
+// TestCanonicalDeployQuickstartContract is the documentation regression gate
+// for TRBL-008. It checks the single copy-paste foreground path against the
+// shipped config and the actual listener/auth contract without running shell
+// commands or depending on a network.
+func TestCanonicalDeployQuickstartContract(t *testing.T) {
+	root := repositoryRootFromThisTest(t)
+	deploy := readRepositoryDocument(t, root, filepath.Join("deploy", "README.md"))
+	readme := readRepositoryDocument(t, root, "README.md")
+
+	if strings.Count(deploy, "## First foreground run (canonical quickstart)") != 1 {
+		t.Errorf("deploy/README.md must contain exactly one canonical quickstart heading")
+	}
+	if !strings.Contains(readme, "deploy/README.md#first-foreground-run-canonical-quickstart") {
+		t.Error("README.md must point fresh operators to deploy/README.md's canonical quickstart")
+	}
+
+	for _, want := range []string{
+		"Go 1.26 or newer",
+		"examples/config.toml",
+		"examples/trouble.env",
+		"chmod 0600 \"$CONFIG_DIR/config.toml\" \"$CONFIG_DIR/trouble.env\"",
+		"chmod 0700 \"$STATE_ROOT\"",
+		"state_root = \"/home/you/.local/state/trouble\"",
+		"config_path = \"/home/you/.config/trouble/config.toml\"",
+		"environment_file = \"/home/you/.config/trouble/trouble.env\"",
+		"advertised_host = \"trouble.your-domain.example\"",
+		"public_key = \"replace-with-a-new-32-lowercase-hex-character-key\"",
+		"ingest.bind = \"127.0.0.1:7643\"",
+		"dashboard.bind = \"127.0.0.1:7644\"",
+		"make bin",
+		"bin/troubled --config \"$CONFIG_DIR/config.toml\"",
+		"http://127.0.0.1:7644/health.json",
+		"http://127.0.0.1:7643/api/1/event/?sentry_key=$PUBLIC_KEY",
+		"Content-Type: application/json",
+		"\"$STATE_ROOT\"/ledger/*.jsonl",
+		"Ctrl-C",
+		"SIGINT",
+		"SIGTERM",
+	} {
+		if !strings.Contains(deploy, want) {
+			t.Errorf("canonical quickstart is missing %q", want)
+		}
+	}
+
+	for _, stale := range []string{
+		"bin/trouble install",
+		"cp examples/config.toml ~/.config/trouble/config.toml",
+		"bin/troubled --config ~/.config/trouble/config.toml",
+	} {
+		if strings.Contains(deploy, stale) || strings.Contains(readme, stale) {
+			t.Errorf("README/deploy quickstart retains stale first-run command %q", stale)
+		}
+	}
+}
+
 // shippedZoneWindows is SPEC-12 §167's pinned default, verbatim.
 const shippedZoneWindows = "loopback=10m lan=15m tailnet=20m public=30m"
 

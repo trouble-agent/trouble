@@ -26,13 +26,17 @@ type sensorConfig struct {
 	timers   timerConf
 	inotify  inotifyConf
 
-	rulesDir        string
-	reloadDebounce  time.Duration
-	rulesMTMSSweep  time.Duration
-	mergeWindow     time.Duration
-	limits          limitsConf
-	knownModules    []string
-	modulesKnownSet bool
+	rulesDir       string
+	reloadDebounce time.Duration
+	rulesMTMSSweep time.Duration
+	mergeWindow    time.Duration
+	// sampleFoldWindow is the count-preserving fold window for repeated identical
+	// sampled observations (SPEC-03 §3.8a). 0 is OFF and reproduces the
+	// one-record-per-cycle posture.
+	sampleFoldWindow time.Duration
+	limits           limitsConf
+	knownModules     []string
+	modulesKnownSet  bool
 }
 
 type psiConf struct {
@@ -145,6 +149,13 @@ func defaultConfig() sensorConfig {
 		reloadDebounce: 500 * time.Millisecond,
 		rulesMTMSSweep: 60 * time.Second,
 		mergeWindow:    5 * time.Second,
+		// SPEC-03 §3.8a. The default IS the per-rule cooldown default (§3.5): a
+		// continuing condition then cannot persist records faster than the ladder
+		// can act on it, so the sampled amplifier TRBL-009 measured (122
+		// records/min for ONE signature, none of it breaker-visible) is capped at
+		// one record per window per signature — 288 records/day at the 2s default
+		// sampling interval, whatever the host's rate.
+		sampleFoldWindow: 5 * time.Minute,
 		limits: limitsConf{
 			// SPEC-03 §3.8 table numbers; the rule scope's 20-incidents/300s
 			// arm is not a config key in §4, so it carries the table value.
@@ -349,6 +360,18 @@ func (c *sensorConfig) apply(v types.ConfigValue) error {
 	case "sensors.merge_window":
 		return setDur(key, v, &c.mergeWindow)
 
+	// ---- sampled-event fold (SPEC-03 §3.8a); 0 disables the fold ----
+	case "sensors.sample_fold_window":
+		d, err := asDur(v)
+		if err != nil {
+			return keyErr(key, err)
+		}
+		if d < 0 {
+			return keyErr(key, fmt.Errorf("a negative fold window is refused: 0 disables the fold, a positive value is the window (SPEC-03 §3.8a)"))
+		}
+		c.sampleFoldWindow = d
+		return nil
+
 	// ---- limits (SPEC-03 §3.8); the table's own numbers are the defaults ----
 	case "sensors.limits.rule_per_min":
 		var n int
@@ -445,6 +468,17 @@ func asDur(v types.ConfigValue) (time.Duration, error) {
 		d, err := time.ParseDuration(strings.TrimSpace(t))
 		if err != nil {
 			return 0, fmt.Errorf("expected a duration string, got %q", t)
+		}
+		return d, nil
+	case types.Duration:
+		// The canonical encoding (SPEC-TYPES §3.2) reaches this decoder through
+		// SPEC-12's resolver: a registered key's value is carried as its own
+		// type, not re-spelled as a bare string. A named string type does not
+		// match `case string` in a type switch, so without this arm every
+		// registered sensors duration key would be an unmatched type.
+		d, err := time.ParseDuration(strings.TrimSpace(string(t)))
+		if err != nil {
+			return 0, fmt.Errorf("expected a duration string, got %q", string(t))
 		}
 		return d, nil
 	case int:

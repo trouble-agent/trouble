@@ -90,6 +90,10 @@ type Sensors struct {
 	stab *stabilizer
 	cool *cooldownTable
 
+	// fold is the SPEC-03 §3.8a count-preserving fold for repeated identical
+	// sampled observations.
+	fold *eventFold
+
 	suppressed  atomic.Uint64
 	evaluations atomic.Uint64
 	fired       atomic.Uint64
@@ -196,6 +200,14 @@ func New(vals []types.ConfigValue, emit EmitFunc, redact RedactFunc, now func() 
 		stopCh:   make(chan struct{}),
 		reloadCh: make(chan struct{}, 1),
 	}
+	// SPEC-03 §3.8a: the sampled-event fold. It sits behind every decision the
+	// pipeline makes (rules, stabilization, breakers) and only decides how many
+	// records the folded observations become.
+	s.fold = newEventFold(cfg.sampleFoldWindow, func(k types.SensorKind) {
+		if rt := s.rt[k]; rt != nil {
+			rt.drops.Add(1)
+		}
+	})
 	for _, k := range types.SensorKinds {
 		s.rt[k] = &sensorRuntime{kind: k}
 		s.rt[k].enabled.Store(false)
@@ -387,6 +399,11 @@ func (s *Sensors) Stop(ctx context.Context) error {
 		s.recError(types.SenPSI, types.CodeSensors004,
 			fmt.Sprintf("armed_fds=%d epoll_sets=%d at shutdown", armed, sets))
 	}
+	// SPEC-03 §3.8a: every fold still open holds observations that already
+	// happened. They are written now (in first-observation order, one record
+	// each), so a stop never loses a sampled observation, and the count on each
+	// record says how many it stands for.
+	s.fold.flush(ctx, s.emit)
 	// A degraded scope that never recovered gets its final documented gap.
 	s.errMu.Lock()
 	open := make([]*gapEpisode, 0, len(s.gapOpen))
@@ -1063,6 +1080,24 @@ func (s *Sensors) handleEvent(ctx context.Context, ev types.SensorEvent) bool {
 		Actor:      s.actor,
 		Redactions: redactionCount(ev.Detail),
 		Payload:    payload,
+	}
+	// SPEC-03 §3.8a: a repeated identical sampled observation is FOLDED, not
+	// re-persisted. Everything that decides anything already happened above, per
+	// observation: the rules evaluated it, the stabilization and the breakers saw
+	// it. Only the record is deferred, and the record that replaces the run
+	// carries the count of what it stands for.
+	if s.fold.enabled() {
+		// A fold whose window has passed is written now, whoever the arrival is
+		// for: a signature that stopped repeating must not hold its record open.
+		s.fold.closeElapsed(ctx, s.emit, now)
+		if foldableObservation(ev, d) {
+			s.fold.observe(ctx, s.emit, d, ev.Sensor, now)
+			return matchedAny
+		}
+		// This record is not foldable (it fires, or it is a wake, or the sampler
+		// did not produce it): the fold for its signature is written first so the
+		// ledger keeps the chronology.
+		s.fold.closeSig(ctx, s.emit, d.Sig)
 	}
 	if _, err := s.emit(ctx, d); err != nil {
 		if rt := s.rt[ev.Sensor]; rt != nil {

@@ -565,6 +565,62 @@ a scope is open (TROUBLE-LADDER-014).
 - Breakers are per host (a single daemon's protection). Their state is exposed in `/health.json` and
   `/breakers` so an open breaker is never invisible.
 
+### 3.8a Sampled-event fold (count-preserving persistence)
+
+P3 makes the sampler the source of truth and §3.8 says a breaker never drops an event, so
+`handleEvent` persists one `event` record per observation — one per `sensors.psi.sample_interval` for
+a condition that has not changed. That posture IS the amplifier measured on an idle host (TRBL-009,
+tick trouble-2026-09-19-08-24-56): one PSI signature wrote 122 event records in 259s, 503 event
+records in the window, ~199 MB/day extrapolated from a host with no incident — and every record sat
+under the global cap, so no breaker engaged. §3.8a keeps the observations and removes the cardinality:
+repeated identical sampled observations become ONE record that carries the count of what it stands
+for.
+
+- **What is folded.** One observation qualifies when all three hold: the sampler produced it
+  (`detail.sample_backed = true`), it is not a trigger wake (§3.2 P4/P5), and no rule fired for it. A
+  firing observation is the ladder's input and is written immediately; a wake is an edge the sampler
+  did not produce. Nothing upstream changes: rules (§3.4, §3.5), stabilization, the breakers and the
+  per-rule cooldown (§3.8) still see EVERY observation, so `Suppressed`, `evaluations`, `fired`,
+  `events_total`, `last_success_ts` and `last_event_age_s` are exactly what they were, and "events are
+  never dropped by a breaker" holds unchanged — the `count` on the folded record is the proof of how
+  many observations it stands for.
+- **The window.** A fold opens on its first observation and covers `[first_ts, first_ts + window)`.
+  An observation at or after `first_ts + window` closes the fold it replaces — writing it — and opens
+  the next one. Every arrival also closes any fold whose window has already passed, so a signature
+  that stops repeating is written by the next unrelated arrival instead of waiting for that signature
+  to come back. A non-foldable record for the same signature (a fire, a wake) closes that signature's
+  fold first, so the ledger keeps the chronology. `Stop` writes every open fold: an observation that
+  already happened is never lost to a shutdown.
+- **The record.** Same `kind = event`, same `sig` (the ladder's identity in §3.3 is untouched) and the
+  same `origin` as the observations it stands for, carrying the payload of the FIRST folded
+  observation plus the fold's own accounting at the payload top level: `count` = the number of
+  identical sampled observations the record stands for, `first_ts` / `last_ts` = the window they fall
+  in, `fold = true`, and `fold_window_s`. `detail` is carried verbatim from the first observation, so
+  the detail shape a consumer already reads does not change.
+- **Config.** `sensors.sample_fold_window` (a registered key, SPEC-12 §3.1), default `5m`. `0`
+  disables the fold and reproduces the per-cycle posture exactly: one record per observation, no fold
+  fields. A negative window is refused when the configuration is decoded (§2's loud-failure rule). The
+  default equals the per-rule cooldown default (§3.5), so a continuing condition persists records no
+  faster than the ladder can act on it: 288 records/day per continuing signature at the 2s default
+  sampling interval against 43 200 observations — a 150:1 fold — and 22 464 records/day for the
+  78-signature idle-host shape the probe measured (175 583/day), 7.8x fewer.
+- **Bound.** At most 4096 folds are held at once, one per distinct signature inside a window. At the
+  bound the OLDEST fold is closed — written — rather than discarded: the bound costs record
+  compression, never an observation.
+- **No codes of its own.** §3.8a introduces no `TROUBLE-SENSORS-*` code. A fold whose record the emit
+  path refuses counts as `Dropped` on the producing sensor (§3.9), the same accounting as any other
+  emit failure.
+- **Test.** `internal/sensors/fold_test.go` asserts it deterministically on the injected clock with no
+  wall-clock waits: 150 observations inside a 5m window become one record carrying `count = 150`,
+  `first_ts`, `last_ts` and `fold = true`; the boundary observation closes that window and opens the
+  next (two windows, two records, 30 + 30); `0` writes one record per observation with no fold fields;
+  a fire and a wake are written immediately and the fold they end precedes them; `Stop` flushes an
+  open fold; the bound closes a fold instead of dropping one; and one simulated day of a repeating
+  signature writes exactly 288 records whose counts add back to 43 200 observations.
+  `internal/sensors/dedup_pin_test.go` pins TRBL-009's refuted half: 12 observations inside one 5m
+  cooldown produce 12 records (the cooldown gates FIRING, not RECORDING), exactly one of them fires
+  under one rule+sig identity, and no breaker opens on that stream.
+
 ### 3.9 Sensor liveness, heartbeats and `/health`
 
 | Sensor | Heartbeat / last-success definition | Stale after | On stale |
@@ -614,7 +670,7 @@ Never exported, never serialized, never named in another spec; they exist so no 
 §2 leaks an implementation shape.
 
 ```go
-type sensorConfig struct { psi psiConf; journald journalConf; dbus dbusConf; disk diskConf; timers timerConf; inotify inotifyConf; rulesDir string }
+type sensorConfig struct { psi psiConf; journald journalConf; dbus dbusConf; disk diskConf; timers timerConf; inotify inotifyConf; rulesDir string; sampleFoldWindow time.Duration }
 
 type psiMode string // "triggers+sampling" | "sampling-only" | "disabled"
 type psiTrigger struct { resource string; metric string; stallUS, windowUS int64; fd int; epfd int; shutdownFD int }
@@ -629,6 +685,8 @@ type journalFollower struct { scope string; cmd *exec.Cmd; cursor string; lastTS
 type dbusWatch struct { bus string; conn *dbus.Conn; units map[string]struct{}; sub int }
 type sensorRuntime struct { kind types.SensorKind; enabled, degraded bool; reason string; lastOK, lastEvent time.Time; events, drops uint64; gaps int }
 type breakerKey struct { scope string; name string }
+type eventFold struct { window time.Duration; open map[string]*foldEntry; observations, records, overflow, emitFailures uint64 } // §3.8a
+type foldEntry struct { key string; sensor types.SensorKind; draft types.RecordDraft; firstTS, lastTS time.Time; count uint64 }  // §3.8a
 ```
 
 ## 4. Wiring
@@ -647,7 +705,8 @@ Config keys (all with defaults; no host-specific value is compiled in anywhere):
 `…dbus.user_managers[]`, `…dbus.ping_interval`, `…dbus.reconcile_interval`, `…disk.enabled`,
 `…disk.mounts[]`, `…disk.interval`, `…timers.enabled`, `…timers.interval`, `…inotify.enabled`,
 `…inotify.paths[].{path,mask,recursive,max_depth,rule}`, `…rules.dir`, `…rules.reload_debounce`,
-`…limits.{rule_per_min,source_per_min,global_per_min,incidents_per_5m}`, `…merge_window`.
+`…limits.{rule_per_min,source_per_min,global_per_min,incidents_per_5m}`, `…merge_window`,
+`…sample_fold_window` (§3.8a; `0` = off).
 
 Startup order (each step's failure degrades only its own sensor): (1) decode `sensorConfig` from
 `ConfigValue`s and fail loudly on an unknown `sensors.*` key; (2) `Probe` — kernel floor, PSI arm
@@ -772,13 +831,16 @@ printed reason otherwise.
 | `disk_timer_inotify_test.go` | statfs on a `tmpfs` fixture: `free_pct` ±0.1%; `Files==0` ⇒ `inode_free_pct == -1` and inode rules false; unmounted path ⇒ one 022 per hour; `ListTimers` garbage reply ⇒ 023 with the raw size; missed-run detection with a synthetic timer 2 intervals stale ⇒ `missed_runs` increments and resets on the next run; `IN_Q_OVERFLOW` ⇒ all watches re-added + 1 gap; watch cap `used/limit=0.81` ⇒ 020; `add_watch` ENOSPC ⇒ watch name in the record. |
 | `liveness_test.go` | Each sensor's stale threshold fires 024 exactly once per episode and recovery emits `sensor_recovered`; entry silence (0 events for 1h, probe green) never marks anything stale; dependency case (bus down ⇒ timers degraded with `dependency dbus degraded`) emits exactly one gap; `Health()` ≤50ms with 1024 rules and 6 sensors; canary lands ≤30s through the real pipeline and a blocked pipeline emits `gap{canary_missing}`. |
 | `sensors_ac_test.go` | AC-derived: **AC-1** a match at `for=2s` opens exactly one incident inside `2s ±250ms` of the qualifying stream; **AC-2** 10 crossings in 10s with `for=30s` ⇒ 0 incidents, one continuous 30s ⇒ 1, resolve+recurrence ⇒ same incident `reopen_count=1`; **AC-4** 10 000 rule-matching events in 60s ⇒ evaluations ≤120/min, breaker opens within 120s, `Suppressed == events - cap`, ladder gate invoked at most `cap` times; **AC-19** an event is queryable through the index ≤1s (p95) after emission and `Health()` reflects its `last_event_age_s` within one heartbeat. |
+| `fold_test.go` | §3.8a on an injected clock, no wall-clock wait: 150 identical sampled observations inside a 5m window ⇒ 1 record with `count=150`, `first_ts`/`last_ts`, `fold=true`, same sig and the first observation's `detail`; the boundary observation closes that window and opens the next (30 + 30 across two windows); a quiet signature's fold is written by the next unrelated arrival; `0` ⇒ one record per observation with no fold fields; a fire and a wake are written immediately with the fold they end written first; `Stop` flushes an open fold; the 4096-fold bound closes (writes) a fold rather than discarding one; the budget is derived and then measured — one simulated day of a repeating signature writes exactly 288 records whose counts sum to the 43 200 observations; a 600-observation over-cap sampled burst still trips the rule breaker, still caps the ladder at 120/min, and its records still account for every observation. |
+| `dedup_pin_test.go` | TRBL-009 AC1 pinned as satisfied (the refuted half, so a future change cannot reintroduce it): 12 sampled observations inside one 5m cooldown ⇒ 12 event records, one sig, one fired event, `Suppressed == 11`, no breaker; crossing the cooldown fires once more under the SAME signature (the ladder folds the recurrence into the same incident, AC-22). |
 | `perf_test.go` | 256 rules × 6 sensors: rule evaluation ≤2ms/event (measured p99 on the reference box); ≥5000 events/min sustained through normalize→scrub→dedup→ledger with group-commit; sensors' RSS contribution ≤12MB steady (reference: stdlib+godbus+x/sys binary 8.36MB measured; sensors add no sqlite). |
 
 ## 8. hilo impact
 
 - **Packages/files created** (greenfield repo `~/trouble`):
   `internal/sensors/{sensors.go, psi.go, journald.go, dbus.go, disk.go, timers.go, inotify.go, rules.go,
-  expr.go, normalize.go, breaker.go, liveness.go, config.go}` plus the nine `*_test.go` files above;
+  expr.go, normalize.go, breaker.go, liveness.go, fold.go, config.go}` plus the `*_test.go` files
+  above;
   shipped artifacts `packaging/polkit/10-trouble-manage-units.rules`,
   `examples/rules/10-defaults.toml`, `examples/config/10-sensors.toml`.
 - **Fan-out (imports):** `internal/types` (shared types only), `golang.org/x/sys/unix` (epoll,

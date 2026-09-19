@@ -86,6 +86,16 @@ type Config struct {
 
 	Dashboard DashboardConfig `toml:"dashboard"`
 
+	// Sensors is the SPEC-03 §4 sensor surface this registry resolves. The
+	// sampled-event fold's window is the key registered so far: without a
+	// registry entry a `sensors.*` file key is an unknown file key
+	// (TROUBLE-LIFECYCLE-001), which would make the fold impossible to turn off
+	// from a config file. The other keys of the §4 surface are still
+	// unregistered — a gap that is named, never assumed away.
+	Sensors struct {
+		SampleFoldWindow types.Duration `toml:"sample_fold_window"`
+	} `toml:"sensors"`
+
 	// HealthURL is the health surface the stall checker and the upgrade READY
 	// wait consume (SPEC-12 §2.1/§3.3). Empty means "derive it from
 	// dashboard.bind".
@@ -423,6 +433,12 @@ func defaults() *Config {
 	c.Ingest.Auth.NonloopbackMode = "token"
 	c.Ingest.Auth.PublicRequireProxy = true
 	c.HealthURL = ""
+	// SPEC-03 §3.8a: the count-preserving fold for repeated identical sampled
+	// observations is ON by default, and its window defaults to the per-rule
+	// cooldown default (5m) so a continuing condition persists records no faster
+	// than the ladder can act on them. This default MUST match internal/sensors'
+	// own compiled default — both sides pin it ("5m") so a drift is caught.
+	c.Sensors.SampleFoldWindow = "5m"
 	c.Dashboard.Bind = "127.0.0.1:7644"
 	c.Dashboard.Port = 7644
 	c.Dashboard.Auth.Transport = "cookie"
@@ -1028,6 +1044,14 @@ func registry(c *Config) []keyMeta {
 		{"issues", "", "issues", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.IssuesTable, "issues", v) }},
 		{"skills", "", "skills", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.SkillsTable, "skills", v) }},
 		{"llm", "", "llm", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.LLMTable, "llm", v) }},
+		// SPEC-03 §3.8a: the sampled-event fold's window, registered leaf-by-leaf
+		// like every other scalar key so it resolves with ordinary precedence and
+		// provenance. The rest of the SPEC-03 §4 surface is not registered yet.
+		{"sensors.sample_fold_window", "sensors", "sample_fold_window", c.Sensors.SampleFoldWindow, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sensors.SampleFoldWindow = d
+			return err
+		}},
 		{"dashboard.bind", "dashboard", "bind", c.Dashboard.Bind, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Bind = s; return err }},
 		{"dashboard.port", "dashboard", "port", c.Dashboard.Port, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Dashboard.Port = i; return err }},
 		{"dashboard.mandate", "dashboard", "mandate", c.Dashboard.Mandate, func(cfg *Config, v any) error { s, err := asString(v); cfg.Dashboard.Mandate = s; return err }},

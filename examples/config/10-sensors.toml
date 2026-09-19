@@ -50,3 +50,13 @@ incidents_per_5m = 25
 
 [sensors]
 merge_window = "5s"
+# Count-preserving fold for repeated identical SAMPLED observations (SPEC-03
+# §3.8a). A condition that keeps holding is one record carrying count /
+# first_ts / last_ts per window instead of one record per sampling cycle: at the
+# 2s sample_interval above and this 5m default that is 288 records/day per
+# continuing signature out of 43 200 observations, and the count on the record is
+# the proof nothing was dropped. Rules, stabilization, breakers and the cooldown
+# still see every observation, and a firing observation is always written
+# immediately. 0 disables the fold (one record per observation, the pre-§3.8a
+# posture); a negative value is refused at boot.
+sample_fold_window = "5m"

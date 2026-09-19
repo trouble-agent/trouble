@@ -1272,6 +1272,8 @@ Files and pass thresholds (all numbers normative regressions):
 | `internal/lifecycle/profile_test.go` | `server.profile` precedence (flag/env/file/default) with provenance; `light-hub` missing `server.redis.url` or `server.duckbrain.namespace` → TROUBLE-HUB-001 + exit 13 + **0 HTTP responses**; `hub.mode=satellite` + `light-hub` → 001; SIGHUP flip of `server.profile` → 013 with the running profile intact; the `trouble topology` profile row | every refusal happens before the first bind; a refused reload leaves the running profile unchanged |
 | `tests/e2e/ac28_route_spool.sh` | hub + satellite over the namespace link with `[sentinel.routes]` configured: a `direct` class stays local (route A, satellite ledger only), a `proxy` class relays (route B, hub canonical ledger); hub killed mid-batch → spool grows, replay after restart → exactly one hub record per event; `origin.route` asserted on both sides | 0 events lost, 0 duplicates; 100 % of records carry the resolved route; the spool never exceeds its budget |
 | `internal/app/readybudget_test.go` | the boot-budget derivation over synthetic load values (monotone in load, never below the base, capped at 4x, exactly the base with no host signal, a core count below 1 coerced to one core), a load sweep asserting the monotonicity and the cap as properties, and the verdict composer: the failure text, the SKIP text, the threshold just below the fence, the drain wording, and the composed message for a forced low budget | every case asserted; both texts carry the observed `load_avg` and the elapsed seconds; 0 SKIPs below 4 runnable threads per core |
+| `internal/app/bootphase_test.go` | a real boot with `BootOptions.OnBootPhase` attached: the observed §4.1 phase sequence equals `BootPhaseNames()` in order with no name missing or repeated, the marks are monotone, the last phase is `ready`, and the per-phase table is printed with the ledger's record/commit accounting; on a host whose boot writes ≥20 records the widest phase must be `sensors_start` | the table is complete and ordered (an unattributed phase fails); the boot's cost localizes in the SPEC-03 §4 startup phase, i.e. a new wait entering the READY path reds; on a record-poor host the causal assertion is skipped and says why |
+| `internal/ledger/appendcost_test.go` | N sequential `Append`s at a small `fsync_window_ms`: exactly N durable commits, N records, and an elapsed time at or above the (N-1)-window floor, with the production-window arithmetic logged | 5 sequential appends = 5 commits (a serial producer gets no group-commit coalescing, SPEC-01 §3.5); a batched implementation fails the commit count and is told to re-derive §7b's budget with it |
 
 Regression numbers pinned: heartbeat drift <100ms/2h · stall detection ≤420s · spool budget accuracy ±1% ·
 batch ≤200 records and ≤512KB decompressed · upgrade READY ≤30s · steady RSS ≤80MB after an upgrade ·
@@ -1284,13 +1286,83 @@ outage.
 
 The boot tests in `internal/app` wait on a live boot (`daemon_test.go`, `subsystems_config_test.go`, `shipped_example_test.go`, `config_projects_test.go`). That boot measures ~22-25 s on a quiet 16-core host, so a bare wall-clock deadline turns host load into a verdict: the identical commit passes on an idle box and reds out while the same box carries fleet load. Every host-measured wait in that package is therefore derived from a measured host signal — the 1-minute load average — and a budget only ever bounds "still booting":
 
-- **Derivation.** `base × clamp(1 + loadPerCore, 1, 4)`, with `loadPerCore = loadAvg1 / NumCPU()`. `loadAvg1` is field 0 of `/proc/loadavg`, and 0 on any read or parse error; 0 keeps the base budget and never selects the extreme-load verdict. The multiplier is the first-order descheduling model for a CPU-bound single-threaded boot sharing the box: `L` other runnable threads per core stretch it by ~`1 + L`. The slope is 1, not 1/2, because the measured case says so: at 1.23 runnable threads per core an in-suite boot needed 1.95x its quiet time (48.63 s against the 1.62x a half slope allows), which is the exact failure this policy exists to remove. The multiplier never drops below 1 (a quiet host never tightens a budget) and never exceeds 4 — a ceiling reached at three runnable threads per core, so a budget at the fence is already at its maximum.
+- **Derivation.** `base × clamp(1 + loadPerCore, 1, 4)`, with `loadPerCore = loadAvg1 / NumCPU()`. `loadAvg1` is field 0 of `/proc/loadavg`, and 0 on any read or parse error; 0 keeps the base budget and never selects the extreme-load verdict. The multiplier is a first-order model of the only host signal a test can read cheaply: `L` other runnable threads per core stretch the boot by ~`1 + L`. The slope is 1, not 1/2, because §7b measured what the stretch is. The honest form of that claim is that load is a **proxy, not the mechanism**: the boot's own cost is one ledger group-commit window per record it writes on the READY path (SPEC-01 §3.5), and what stretches it is the block device's sync latency inside every one of those windows. §7b measured the identical test at 17.2 s alone, 17.4 s in the whole package suite, and 50.3 s **alone** under fleet block-device write traffic — so the variable is the host at that moment, not the process the test runs in. `load_avg` includes the D-state tasks heavy write traffic creates, so it tracks that tail well enough to bound it; §7b records the measured curve, the phases, and what the ceiling costs. The multiplier never drops below 1 (a quiet host never tightens a budget) and never exceeds 4 — a ceiling reached at three runnable threads per core, so a budget at the fence is already at its maximum.
 - **Bases.** The two quiet-host deadlines the suite shipped with: 30 s for READY, 20 s for the SIGTERM drain. Both scale by the same rule.
 - **A settled boot is never bounded by the budget.** The waits poll at 250 ms and return as soon as the boot settles: READY, or `RunDaemon` returning (with an error, or without READY — the last case is reported as a failure, never as success). A refusal is reported within one poll tick, so a budget can neither mask a refusal nor hide a hang behind a longer deadline.
 - **An exhausted budget names its numbers.** The failure carries the observed `load_avg`, the elapsed seconds, the base and the derived budget in one message, so a reader can tell host load from a regression.
 - **The extreme-load fence.** At or above four runnable threads per core the same expiry is recorded as an explicit `t.Skipf` naming the same figures: such a host cannot separate a slow boot from a descheduled one, and a red test there would misreport the host as a defect. This is the only SKIP on the boot path.
 - **Falsification hook.** Two inert environment overrides exist so the fence itself can be driven: `TROUBLE_BOOT_BUDGET_MS` forces the quiet-host base (milliseconds) and `TROUBLE_BOOT_LOAD_OVERRIDE` forces the observed load. A forced 1 ms budget fails the shipped-example boot in 0.26 s carrying its load and elapsed figures; the same forced budget with a forced load of 1000 records the SKIP verdict instead.
 - **Scope.** Test-only: this section adds no production code and no error code of its own (every code the boot path reports is already catalogued). The one wait deliberately left alone is the 2 s fragment-poll window in `daemon_test.go` — a negative "must not happen" window, not a boot budget.
+
+### 7b The measured cause of a boot's READY latency
+
+§7a bounds the boot. This section is where the boot's time actually goes, measured rather than inferred — because the row that produced §7a's slope attributed a ~2.7x stretch to the suite sharing one process, and that attribution does not survive measurement.
+
+**Conditions.** One test (`TestStockBootHealthNeverReadsOKWithARefusedSubsystem`, the heaviest boot in the package), one tree, the same `-test.run` regex for "alone" and the whole `go test -json ./internal/app/` package for "in-suite". `boot-to-READY` is the span of the phase table below (its first mark to `ready`); the test wall is what `go test` reports, which also contains the test's own pre-boot setup (state root, port probe, token store), so it is always the larger of the two.
+
+| # | condition | load_avg | test wall | boot-to-READY |
+|---|---|---|---|---|
+| 1 | alone, quiet host | 4.22 | 18.06 s | 17.22 s |
+| 2 | in-suite, whole package (one process, 20 boots before it) | 24.28 | 18.04 s | 17.39 s |
+| 3 | alone, 8 direct-write stressors (`oflag=direct`, `conv=fsync`) on the state-root volume | 26.68 | 54.31 s | 53.78 s |
+| 4 | alone, fleet block-device load (a `git` repack storm; **no suite**) | 45.96 | 50.90 s | 50.29 s |
+| 5 | in-suite, the run TRBL-024 recorded red | 19.69 | 49.23 s | 45.92 s (gap between the daemon's own `rule set loaded` and `dashboard listening` log lines) |
+
+Rows 1 and 2 are the same test in the same conditions to within 0.02 s: **being in the suite costs nothing.** Row 4 is the same test run entirely alone and producing the same ~2.9x the suite was blamed for. The variable is the host's block-device write latency at that moment, not the process the test runs in.
+
+**Phases.** `BootOptions.OnBootPhase` reports every §4.1 phase boundary (`internal/app/bootphase_test.go` asserts the sequence and prints the table). Each row is the span from that phase's start to the next phase's start; `ready` closes the sequence. Columns are rows 1 and 4:
+
+| phase | quiet (load 4.22) | fleet (load 45.96) |
+|---|---|---|
+| `config_resolve` (argv/env/file) | 1.5 ms | 0.4 ms |
+| `state_root`, `secrets`, `schema_compat` | ≤0.1 ms | ≤0.1 ms |
+| `ledger_open` (open + index/HEAD/recovery writes) | 244.5 ms | 645.0 ms |
+| `config_record` (1 record: the redacted config dump) | 224.0 ms | 533.1 ms |
+| `projects`, `hub_gate`, `bind_preflight` | ≤0.1 ms | ≤0.1 ms |
+| `scrubber`, `sensors_build` | ≤1.1 ms | ≤1.1 ms |
+| `subsystems` (3 refusal records: sentinel, desk, loop) | 662.5 ms | 1781.2 ms |
+| `registry`, `skill_library`, `llm_port`, `ladder` | ≤0.4 ms | ≤0.4 ms |
+| `sensors_probe` (1 record: `capability_probe`) | 210.9 ms | 583.4 ms |
+| `checker_mirror`, `dashboard_config` | 0.0 ms | 0.0 ms |
+| **`sensors_start`** (SPEC-03 §4 startup — PSI, journald child, D-Bus connect + `Subscribe` + the **startup `ListUnits` reconcile**, disk, timers, inotify) | **16 213.9 ms** | **43 070.7 ms** |
+| `dashboard_serve`, `hub_runtime`, `sentinel_start` | 0.0 ms | 0.0 ms |
+| `background_loops` | 25.2 ms | 30.7 ms |
+| **total** | **17.58 s** | **46.65 s** |
+
+Every phase that writes a ledger record costs one group-commit window; every phase that does not settles in ~1 ms. Instrumenting `Sensors.Start`'s eight sub-steps separates the one that matters: connecting the two buses costs 22 ms + 0.8 s, `ListUnits` costs 10 ms + 5 ms, adding unit matches costs 31 ms, and PSI, journald, disk, timers and inotify together are under 20 ms — the reconcile's per-failed-unit emission loop is the entire `sensors_start` cost (`~2.4 ms of work, 43 s of waiting`, per the row-4 trace).
+
+**Ruled out, with the number that rules each out.**
+
+| candidate | verdict |
+|---|---|
+| GC / allocator pressure from earlier tests in the same process | **no.** `user 0.34 s + sys 0.20 s` across an 18.6 s wall — the boot is ~97 % blocked, not computing; a `-cpuprofile` of that run has no GC term. And row 2 (20 boots earlier in the same process) equals row 1. |
+| port allocation / bind contention with sibling suites | **no.** `bind_preflight` is 0.1 ms in every column; the harness holds both listeners from one probe, so a sibling cannot take the port between the two binds. |
+| inotify / PSI fd setup serialized behind other tests | **no.** `sensors_build` is 1.0 ms and the inotify + PSI work inside `sensors_start` is sub-millisecond (above). |
+| a synchronization wait that scales with the number of runnable goroutines | **no.** Row 4 reproduces the stretch with no suite, no sibling test and no extra goroutines in the process. |
+| fsync / IO queuing | **yes — this is the mechanism.** See below. |
+
+**The mechanism.** The boot writes ~80-120 ledger records (1 config dump, 3 subsystem refusals, 1 capability probe, and one per failed systemd unit the startup reconcile finds — 46 system + 4 user units on the measured host, and it is the environment's number, not a constant). Its writers are sequential and `Append` is durable-on-return (§3.5), so a record is never in flight with the next one and the group commit coalesces nothing: **each record pays one full `ledger.fsync_window_ms` window**. Boot latency is therefore `records × (window + device sync latency)`, and the second term is the whole stretch:
+
+- quiet boot: 89 `fdatasync`/`fsync` calls, total 1.44 s (median 5.5 ms);
+- same boot with 8 direct writers on the same volume: 262 calls, **total 44.41 s** (median 143 ms, p95 353 ms, max 1.99 s);
+- a 4 KB `fsync` probe on that volume: 3.6 ms median quiet → 19.5 ms median under the stressors.
+
+The quantisation is visible in the table: the phases that write one record measure ~1 window (224 ms quiet), the one that writes three measures ~3 windows (662 ms), and the one that writes fifty measures fifty windows (16.2 s).
+
+**What this means for the ceiling.** §7a's 4x clamp is a backstop on the *host* term, which is the only term a test can observe. The other term — the boot's own linear cost in the records it writes — is not a budget problem and cannot be bounded away: it is ~15.8 s of a 17.2 s quiet boot and ~43 s of a 50 s loaded boot, i.e. 92 % and 86 % of the whole thing. Reducing it means not paying one group-commit window per record on the READY path — a batch-append path for the startup reconcile, or moving that reconcile off the READY path — which is a SPEC-01 §3.5 / SPEC-03 §4 decision, not a test change. What this section fixes is the diagnosis and the sizing.
+
+**Reproduction (the tail, without waiting for the fleet).** Eight direct-write stressors on the state-root volume reproduce the stretch deterministically, in ~50 s, at a load_avg low enough that a descheduling story is not available:
+
+```sh
+mkdir -p ~/.local/state/iotest
+for i in 1 2 3 4 5 6 7 8; do
+  ( while :; do dd if=/dev/zero of="$HOME/.local/state/iotest/w$i" bs=1M count=6 oflag=direct conv=fsync status=none; done ) &
+done
+go test ./internal/app/ -run TestStockBootHealthNeverReadsOKWithARefusedSubsystem -count=1 -v
+pkill -f 'of=/home/.*/\.local/state/iotest/'   # and rm -rf ~/.local/state/iotest
+```
+
+**Test ordering / parallelism: no change.** The measurement says a suite-ordering or `-p` change would buy nothing (rows 1 vs 2), so this is recorded to stop a future tick from chasing it.
 
 ## 8. hilo impact
 

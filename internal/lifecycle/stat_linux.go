@@ -1,4 +1,9 @@
-//go:build linux || darwin
+//go:build linux
+
+// Linux filesystem-type detection: statfs(2) reports the fs type as a magic
+// number (st.Type), decoded with the linux/magic.h table below. darwin needs its
+// own file (stat_darwin.go) because syscall.Statfs_t.Type is uint32 there and its
+// values are NOT the Linux magic numbers (SPEC-12 §3.5a).
 
 package lifecycle
 

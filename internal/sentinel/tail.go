@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -216,8 +215,8 @@ func fileIdentity(st os.FileInfo) (uint64, uint64) {
 	if st == nil {
 		return 0, 0
 	}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		return uint64(sys.Dev), uint64(sys.Ino)
+	if dev, ino, ok := platformFileIdentity(st); ok {
+		return dev, ino
 	}
 	return 0, uint64(st.ModTime().UnixNano())
 }

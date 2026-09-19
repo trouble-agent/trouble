@@ -1,3 +1,5 @@
+//go:build linux
+
 package sensors
 
 import (
@@ -6,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -20,9 +20,6 @@ import (
 // against /proc/sys/fs/inotify/max_user_watches, and an ENOSPC watch is named
 // in the record — never a silent partial watch set.
 
-// defaultInotifyMask is the documented mask set.
-const defaultInotifyMask = "close_write|moved_to|create|delete|attrib|overflow"
-
 const inotifyWatchLimitRatio = 0.8
 
 var inotifyMaskBits = map[string]uint32{
@@ -34,25 +31,6 @@ var inotifyMaskBits = map[string]uint32{
 	"delete":      unix.IN_DELETE,
 	"attrib":      unix.IN_ATTRIB,
 	"overflow":    unix.IN_Q_OVERFLOW,
-}
-
-type inotifyState struct {
-	mu       sync.Mutex
-	fd       int
-	watches  map[int32]*inotifyWatch
-	byPath   map[string]int32
-	dropped  atomic.Uint64
-	nameErrs atomic.Uint64
-}
-
-type inotifyWatch struct {
-	wd        int32
-	path      string
-	mask      uint32
-	recursive bool
-	maxDepth  int
-	rule      string
-	isRules   bool
 }
 
 func (s *Sensors) startInotify(ctx context.Context) error {

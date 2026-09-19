@@ -12,8 +12,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
 
@@ -122,90 +120,11 @@ type psiTrigger struct {
 	spurious atomic.Uint64
 }
 
-// arm performs the single legal write and marks the trigger armed (P1, P6).
-func (t *psiTrigger) arm() error {
-	if err := validateTrigger(t.metric, t.stallUS, t.windowUS); err != nil {
-		return err
-	}
-	n, err := unix.Write(t.fd, triggerBytes(t.metric, t.stallUS, t.windowUS))
-	if err != nil {
-		return err
-	}
-	if n != len(triggerBytes(t.metric, t.stallUS, t.windowUS)) {
-		return fmt.Errorf("short trigger write: %d bytes", n)
-	}
-	t.armed.Store(true)
-	t.armedAt.Store(time.Now().UnixNano())
-	return nil
-}
-
-// epollAdd registers the trigger fd. It panics if the fd is not armed: that is
-// the 347k-hits/200 ms busy-loop regression (P6), and it must be impossible to
-// reach rather than merely unlikely.
-func (t *psiTrigger) epollAdd() error {
-	if !t.armed.Load() {
-		panic(fmt.Sprintf("sensors: psi: refusing to add an unarmed fd to epoll (resource=%s) — an unarmed PSI fd is always ready and spins a core at 100%%", t.resource))
-	}
-	ev := &unix.EpollEvent{Events: unix.EPOLLPRI | unix.EPOLLERR, Fd: int32(t.fd)}
-	if err := unix.EpollCtl(t.epfd, unix.EPOLL_CTL_ADD, t.fd, ev); err != nil {
-		return fmt.Errorf("epoll_ctl add fd %d: %w", t.fd, err)
-	}
-	return nil
-}
-
-// pollOnce is the guarded poll path. An unarmed fd returns immediately with no
-// events, so the measured "always ready" busy loop cannot be expressed here.
-func (t *psiTrigger) pollOnce(timeoutMS int) (int, error) {
-	if !t.armed.Load() {
-		return 0, nil
-	}
-	events := make([]unix.EpollEvent, 4)
-	n, err := unix.EpollWait(t.epfd, events, timeoutMS)
-	if err != nil {
-		return 0, err
-	}
-	got := 0
-	for i := 0; i < n; i++ {
-		if int(events[i].Fd) == t.shutdownFD {
-			return -1, nil
-		}
-		if int(events[i].Fd) == t.fd {
-			if events[i].Events&unix.EPOLLERR != 0 {
-				return 0, errPSIERR
-			}
-			got++
-		}
-	}
-	return got, nil
-}
-
-var errPSIERR = fmt.Errorf("POLLERR on an armed PSI fd: the source is gone")
-
-// close de-registers by closing (the kernel destroys the trigger and the fd is
-// removed from every epoll set) and never leaves an armed fd behind (P6).
-func (t *psiTrigger) close() {
-	if t.fd >= 0 {
-		_ = unix.Close(t.fd)
-		t.fd = -1
-	}
-	if t.shutdownFD >= 0 {
-		_ = unix.Close(t.shutdownFD)
-		t.shutdownFD = -1
-	}
-	if t.epfd >= 0 {
-		_ = unix.Close(t.epfd)
-		t.epfd = -1
-	}
-	t.armed.Store(false)
-}
-
-// openPSIFd opens one resource for read+write. A read-only open is not enough
-// for triggers; /proc/pressure/* are mode 0666 on this kernel.
-func openPSIFd(resource string) (int, error) {
-	return unix.Open(psiPath(resource), unix.O_RDWR|unix.O_NONBLOCK, 0)
-}
-
 func psiPath(resource string) string { return "/proc/pressure/" + resource }
+
+// errPSIERR is the POLLERR verdict shared by the trigger wait paths (defined
+// here, not in the Linux file, because handleWake classifies it on every GOOS).
+var errPSIERR = fmt.Errorf("POLLERR on an armed PSI fd: the source is gone")
 
 // readPSI reads and parses one pressure file in a single ≤4 KiB read (P10).
 func readPSI(resource string) (psiCounters, error) {
@@ -276,22 +195,6 @@ type probeResult struct {
 }
 
 // kernelRelease returns the running kernel's release string (uname -r).
-func kernelRelease() string {
-	var u unix.Utsname
-	if err := unix.Uname(&u); err != nil {
-		b, err := os.ReadFile("/proc/sys/kernel/osrelease")
-		if err != nil {
-			return ""
-		}
-		return strings.TrimSpace(string(b))
-	}
-	b := u.Release[:]
-	if i := indexByte(b, 0); i >= 0 {
-		b = b[:i]
-	}
-	return string(b)
-}
-
 func indexByte(b []byte, c byte) int {
 	for i := range b {
 		if b[i] == c {
@@ -322,18 +225,6 @@ func kernelAtLeast(release string, major, minor int) (bool, bool) {
 // armOnce opens a fresh fd, writes the P1 payload for one window, and reports
 // the errno class. A fresh fd per attempt is mandatory: a second write on an
 // armed fd is EBUSY (measured), so reusing one would misreport the grammar.
-func armOnce(resource, metric string, stallUS, windowUS int64) (errno syscall.Errno, ok bool) {
-	fd, err := openPSIFd(resource)
-	if err != nil {
-		return errnoOf(err), false
-	}
-	defer unix.Close(fd)
-	if _, err := unix.Write(fd, triggerBytes(metric, stallUS, windowUS)); err != nil {
-		return errnoOf(err), false
-	}
-	return 0, true
-}
-
 func errnoOf(err error) syscall.Errno {
 	var errno syscall.Errno
 	if e, ok := err.(syscall.Errno); ok {
@@ -646,6 +537,13 @@ func (s *Sensors) startPSI(ctx context.Context) error {
 		s.setSensor(types.SenPSI, false, false, "disabled by configuration: sensors.psi.enabled=false")
 		return nil
 	}
+	// A platform with no PSI implementation reports UNavailable with the gap
+	// named: an empty sampler that reports healthy would be a silent no-op
+	// (SPEC-03 §3.3, SPEC-12 §3.5a).
+	if reason := psiPlatformReason(); reason != "" {
+		s.setSensor(types.SenPSI, false, true, reason)
+		return nil
+	}
 	pr := s.probe.Load()
 	if pr != nil {
 		s.psiState.mode = pr.Mode
@@ -701,47 +599,6 @@ func (s *Sensors) startPSI(ctx context.Context) error {
 
 // armTrigger opens the fd, arms it, then adds it to its own epoll set — in that
 // order, by this goroutine (P6).
-func (s *Sensors) armTrigger(t *psiTrigger) error {
-	fd, err := openPSIFd(t.resource)
-	if err != nil {
-		return err
-	}
-	t.fd = fd
-	if err := t.arm(); err != nil {
-		_ = unix.Close(fd)
-		t.fd = -1
-		return err
-	}
-	epfd, err := unix.EpollCreate1(unix.EPOLL_CLOEXEC)
-	if err != nil {
-		t.close()
-		return err
-	}
-	t.epfd = epfd
-	sfd, err := unix.Eventfd(0, unix.EFD_NONBLOCK|unix.EFD_CLOEXEC)
-	if err != nil {
-		t.close()
-		return err
-	}
-	t.shutdownFD = sfd
-	// The shutdown eventfd is registered first; the trigger fd only afterwards
-	// and only through epollAdd, which refuses an unarmed fd.
-	ev := &unix.EpollEvent{Events: unix.EPOLLIN, Fd: int32(sfd)}
-	if err := unix.EpollCtl(epfd, unix.EPOLL_CTL_ADD, sfd, ev); err != nil {
-		t.close()
-		return err
-	}
-	if err := t.epollAdd(); err != nil {
-		t.close()
-		return err
-	}
-	s.psiState.armed.Add(1)
-	s.psiState.epollSets.Add(1)
-	return nil
-}
-
-// runSampler ticks at sample_interval and never increases its cadence under
-// pressure (SPEC-03 §3.9 self-observation).
 func (s *Sensors) runSampler(ctx context.Context) {
 	defer s.wg.Done()
 	iv := s.cfg.psi.sampleInterval
@@ -826,17 +683,6 @@ func (s *Sensors) runTrigger(ctx context.Context, t *psiTrigger) {
 	}
 }
 
-func (s *Sensors) signalShutdown(t *psiTrigger) {
-	if t.shutdownFD >= 0 {
-		var one = [8]byte{0, 0, 0, 0, 0, 0, 0, 1}
-		_, _ = unix.Write(t.shutdownFD, one[:])
-	}
-}
-
-// handleWake re-reads the counters before any rule evaluation (P4). A wake that
-// crosses no boundary produces the same sig as the sample it agrees with; a
-// wake whose re-read does not satisfy the rule counts as a spurious wake and
-// changes no incident state.
 func (s *Sensors) handleWake(ctx context.Context, t *psiTrigger) {
 	c, err := readPSI(t.resource)
 	if err != nil {

@@ -891,14 +891,14 @@ func (p *Puller) gitOutput(ctx context.Context, dir string, args ...string) (str
 		cmd.Dir = dir
 	}
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroupAttr()
 	var out, errb strings.Builder
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 	err := cmd.Run()
 	if ctx.Err() == context.DeadlineExceeded {
 		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			_ = killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 		}
 		return "", newErr(types.CodeSkills011, ReasonPullTimeout, "git %s exceeded pull_timeout", strings.Join(args, " "))
 	}

@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/flow"
@@ -1017,9 +1016,5 @@ func scrubBytesOrDefault(d *Daemon, target types.ScrubTarget, projectID string, 
 // (the flow's §3.8 disk gate). An unreadable path reports 0 with the error:
 // the gate refuses rather than guessing.
 func freeDiskBytes(path string) (int64, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		return 0, err
-	}
-	return int64(st.Bavail) * int64(st.Bsize), nil
+	return freeDiskBytesPlatform(path)
 }

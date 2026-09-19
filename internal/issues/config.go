@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -606,11 +605,16 @@ func ReadSecretFile(path string) (string, error) {
 // uid is refused: another user could swap its contents at any time.
 func checkOwner(st os.FileInfo) error {
 	uid := os.Getuid()
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		if int(sys.Uid) != uid {
-			return newErr(types.CodeIssues003, ReasonTokenMode, 0, false,
-				"credential file is owned by uid %d, not the daemon uid %d", sys.Uid, uid)
-		}
+	owner, ok := platOwnerUID(st)
+	if !ok {
+		// NOT APPLICABLE on this platform: there is no POSIX uid, so the
+		// daemon-uid ownership check cannot be expressed (Windows uses ACLs).
+		// This is a KNOWN GAP, stated rather than hidden — see SPEC-12 §3.5a.
+		return nil
+	}
+	if owner != uid {
+		return newErr(types.CodeIssues003, ReasonTokenMode, 0, false,
+			"credential file is owned by uid %d, not the daemon uid %d", owner, uid)
 	}
 	return nil
 }

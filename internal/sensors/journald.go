@@ -60,12 +60,12 @@ type journalResult struct {
 //   - WaitDelay bounds the reap after cancellation.
 func runJournalCmd(ctx context.Context, path string, args ...string) journalResult {
 	cmd := exec.CommandContext(ctx, path, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroupAttr()
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		return killProcessGroup(cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 2 * time.Second
 	var out, errb strings.Builder
@@ -499,7 +499,7 @@ func (s *Sensors) followOnce(ctx context.Context, f *journalFollower, path strin
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	cmd := exec.CommandContext(cctx, path, args...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.SysProcAttr = processGroupAttr()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -557,14 +557,14 @@ func (s *Sensors) superviseChild(cmd *exec.Cmd, cctx context.Context, done <-cha
 		}
 		// The cursor is persisted before the child is signalled on the stop
 		// path, so no entry is re-delivered (SPEC-03 §6 edge case 24).
-		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		_ = killProcessGroup(pid, syscall.SIGTERM)
 		if done == nil {
 			return
 		}
 		select {
 		case <-done:
 		case <-time.After(journalChildJoinBound):
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			_ = killProcessGroup(pid, syscall.SIGKILL)
 		}
 	}()
 }

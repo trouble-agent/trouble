@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/scrub"
@@ -716,16 +715,4 @@ func syncDir(dir string) error {
 	}
 	defer d.Close()
 	return d.Sync()
-}
-
-// fdatasync is fdatasync(2) when requested, fsync(2) otherwise. fdatasync is
-// sufficient for an append-only file (SPEC-01 §2.5 fdatasync=true).
-func fdatasync(f *os.File, useFdatasync bool) error {
-	if useFdatasync {
-		if err := syscall.Fdatasync(int(f.Fd())); err != nil {
-			return err
-		}
-		return nil
-	}
-	return f.Sync()
 }

@@ -19,7 +19,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
@@ -516,10 +515,7 @@ func stampOf(path string) (fileStamp, error) {
 		return fileStamp{}, err
 	}
 	fs := fileStamp{size: st.Size(), mtime: st.ModTime()}
-	if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-		fs.dev = uint64(sys.Dev)
-		fs.inode = uint64(sys.Ino)
-	}
+	fs.dev, fs.inode = platFileID(st)
 	return fs, nil
 }
 

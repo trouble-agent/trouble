@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
-	"syscall"
 
 	"github.com/totalwindupflightsystems/trouble/internal/types"
 )
@@ -105,7 +104,7 @@ func acquireLock(root string, actor types.Actor) (*os.File, error) {
 		return nil, ledgerErr(types.CodeLedger012, ReasonIO,
 			fmt.Sprintf("cannot open %s", path), err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flockAcquire(f); err != nil {
 		body, _ := io.ReadAll(f)
 		f.Close()
 		return nil, ledgerErr(types.CodeLedger005, ReasonWrite,
@@ -130,7 +129,7 @@ func releaseLock(f *os.File) error {
 	if f == nil {
 		return nil
 	}
-	_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+	_ = flockRelease(f)
 	return f.Close()
 }
 

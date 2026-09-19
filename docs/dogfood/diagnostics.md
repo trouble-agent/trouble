@@ -48,9 +48,12 @@ throwaway state roots with no torn ledger lines.
 
 `internal/lifecycle/config.go` holds a `registry()` of every known key with a
 typed setter, which is what `trouble config explain` dumps with provenance
-(`source_ref`: `config.toml vs default`). Unknown *file* keys are fatal
+(each row's `source_ref` is the config path, the `--flag` spelling or the
+`TROUBLE_*` env name that won). Unknown *file* keys are fatal
 (`TROUBLE-LIFECYCLE-001`), unknown *env* keys are ignored with a near-miss hint.
-Precedence: flag > env > file > default.
+Precedence: flag > env > file > default. A value that differs from its compiled
+default is ordinary configuration and records nothing; `TROUBLE-LIFECYCLE-002`
+is reserved for two *operator* sources disagreeing (SPEC-12 §3.1f).
 
 That design is good and is why `config explain` is genuinely useful. Two
 consequences explain the first two traps:

@@ -248,10 +248,14 @@ Rules, pinned:
 - **Conflicts (two sources, different values) ⇒ TROUBLE-LIFECYCLE-002**, recorded once per boot with both
   `source_ref`s, and **never fatal**: the resolved value is the higher-precedence one. The code is class
   `permanent` because a second attempt resolves identically, and non-fatal by decision because env-vs-file
-  divergence is an operator's normal world.
+  divergence is an operator's normal world. **A compiled default is not a source** — it is the absence of one,
+  so a key whose value differs from its builtin default is ordinary configuration, never a conflict; the pairs
+  that can disagree and the row shape are pinned in §3.1f.
 - **Boot snapshot**: one `config` record (kind `config`, SPEC-12-owned) is written at boot and on every
-  SIGHUP reload, carrying the full redacted dump. Any key whose `source` is `env` is recorded with
-  `payload.env_source=true`, so a surprise environment override is always legible in the ledger.
+  SIGHUP reload, carrying the full redacted dump, plus the §3.1f conflict count as `payload.conflicts` — and
+  `payload.conflict_refs` with the rows only when at least one genuine divergence exists. Any key whose
+  `source` is `env` is recorded with `payload.env_source=true`, so a surprise environment override is always
+  legible in the ledger.
 
 ### 3.1a Declaring projects: the `[[projects]]` array of tables
 
@@ -492,6 +496,44 @@ Rules, pinned:
 - **The values reach the plane.** The composition root hands the resolved `ConfigValue` set straight to
   `sensors.New`, side by side with the entries it already reads; `internal/app/sensors_config_test.go`
   asserts that a configured key changes what the plane loads rather than being accepted and ignored.
+
+### 3.1f What counts as a conflict (TROUBLE-LIFECYCLE-002)
+
+The record exists to surface **two operator sources disagreeing about one key**: the case where a value the
+operator wrote in the file is outranked by a value supplied from somewhere else — an environment variable, a
+unit file, a one-off `--flag`. It is not a report that a key was configured at all, and before this sub-section
+it was: a boot whose file set six keys away from their compiled defaults recorded six `permanent`-class 002
+rows, one per key, burying the divergences the code exists to surface.
+
+- **The three sources.** `flag`, `env` and `file` carry values; `default` is a compiled constant that is in
+  force whenever no operator set anything. `default` is therefore never a conflict counterparty on either
+  side: `ingest.bind = "0.0.0.0:7643"` in a file differs from the builtin `127.0.0.1:7643` and records **no**
+  002 row, and a key only the environment sets (`TROUBLE_STATE_ROOT`) records none either — one source is not
+  a disagreement, and a deviation from a default is not one. A stock boot records **zero** 002 rows however
+  many keys the operator configured away from their defaults.
+- **One row per losing operator source.** For a key resolved from `flag` with both a `file` and an `env` value
+  that differ, two rows are recorded — `<--spelling> vs <config path>` and `<--spelling> vs TROUBLE_<KEY>`; the
+  `default` rung contributes none. Two sources holding the SAME value are not a conflict, whichever rungs they
+  are.
+- **Row shape.** A conflict row is a `ConfigValue` with `key` = the key, `source` = `"conflict"`, `value` =
+  `"TROUBLE-LIFECYCLE-002"`, and `source_ref` naming BOTH sides in the `<winner> vs <loser>` form. A source
+  reference is never a value, so `redacted` stays false.
+- **Where it is observable.** `Resolved.Conflicts` is the set; the boot `config` record carries its size as
+  `payload.conflicts` and the rows as `payload.conflict_refs` (the field is present only when the set is
+  non-empty). Nothing is served against: the higher-precedence value is what the `Config` struct holds and the
+  daemon starts either way — the code is class `permanent` because a second attempt resolves identically, and
+  non-fatal by decision (§5).
+- **The deviation-from-default fact stays legible.** It is carried by the ordinary rows, not by 002: every key
+  has exactly one `ConfigValue` naming the surface that set it, so a row whose `source` is not `default` is a
+  key the operator configured, while `trouble config explain` (and a no-source fixture in the tests) shows the
+  compiled value for any key no source set. No override list, no extra payload field and no second key space:
+  "configured" and "conflicting" are one rung of precedence apart, not one record class apart.
+
+Asserted both ways by `internal/lifecycle/config_test.go` (§7): a six-file-key fixture whose every declared
+value sits away from its builtin default, plus one env-only key, resolves with **0** rows and a boot record
+carrying `payload.conflicts = 0`; the same fixture with `TROUBLE_INGEST_BIND` overriding the file's
+`ingest.bind` resolves with **exactly 1** row naming both `source_ref`s, while the remaining six deviations
+still record nothing.
 
 ### 3.2 State root, secret-file modes, bind preflight
 
@@ -1097,7 +1139,7 @@ minted and the range is unchanged.
 | Code | Class | Trigger (enumerated) | Behaviour | Operator remedy |
 |---|---|---|---|---|
 | TROUBLE-LIFECYCLE-001 | permanent | config file unparsable, unknown key, or wrong value type | exit 13, nothing served | fix `config_path`; `trouble config explain` names the key |
-| TROUBLE-LIFECYCLE-002 | permanent | same key resolved from two sources with different values | recorded once per boot with both `source_ref`s, **not fatal**; higher precedence wins | inspect the record; remove the losing source |
+| TROUBLE-LIFECYCLE-002 | permanent | same key resolved from two **operator** sources (`flag`/`env`/`file`) with different values — a value that differs from its compiled default is ordinary configuration, not a conflict (§3.1f) | recorded once per boot with both `source_ref`s, **not fatal**; higher precedence wins | inspect the record; remove the losing source |
 | TROUBLE-LIFECYCLE-003 | permanent | bind preflight refused: address in use, unroutable/empty bind, duplicate listener pair, non-loopback bind with empty `ingest.advertised_host`, public bind without proxy mode | exit 13 before serving; one `boot_refused` record; errno + `ss -tlnp` hint | fix the bind or the auth mode |
 | TROUBLE-LIFECYCLE-004 | permanent | state root missing/unwritable/not owned/on a remote fs/resolving under a forbidden root (`/tmp`, `/var/tmp`), or spool dir likewise | exit 13 | fix the path or the mount |
 | TROUBLE-LIFECYCLE-005 | permanent | state root or a state dir mode is not 0700 (or ownership is not the daemon's) | exit 13 | `trouble install --check` lists every offender |
@@ -1188,7 +1230,7 @@ Files and pass thresholds (all numbers normative regressions):
 
 | Test file | Cases | Threshold |
 |---|---|---|
-| `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0) |
+| `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; the §3.1f conflict semantics in both directions — a fixture whose six file keys all sit away from their builtin defaults plus one env-only key ⇒ **0** 002 rows and a boot `config` record with `payload.conflicts = 0` and no `conflict_refs` key, and the same fixture with `TROUBLE_INGEST_BIND` overriding the file's `ingest.bind` ⇒ **exactly 1** row naming both `source_ref`s (the other six deviations still record nothing) with `payload.conflicts = 1`; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0); 0 spurious 002 rows on a boot that configures seven keys away from their defaults; exactly 1 row per genuine two-source divergence |
 | `internal/lifecycle/flow_bounds_test.go` | the §3.1d `flow.*` keys: the five defaults with NO file, env or flag (256 / 72h / 5 / 5s / 100, each `source=default`/`builtin`); a `[flow]` table resolves and a HALF-specified one leaves the other four at those defaults; flag > env > file > default with the winning `source`/`source_ref` on each row; all five present exactly once in the explain dump (plus the `--key` filter form); a zero, a negative, a `0s`, an empty and an unparsable duration refused through all three sources | 5 defaults + 1 file/1 half-table resolve + 3 precedence rows + 5 explain rows + 16 refusal cases; every refusal 001 AND naming the key; 0 cases resolving to a non-positive bound |
 | `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the eight non-addressable keys asserted by name and reason (five declarations, three refused by the argv scan); a secret-shaped flag value driven through a real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a secret-shaped flag value still exits 13 with 013, and a control value passes the same scan |
 | `internal/lifecycle/sensors_registry_test.go` | the §3.1e sensor surface as registered keys: the key list DERIVED from `internal/sensors`' own decoder `case` labels and compared with the registry in both directions (a key the plane reads but the registry does not know fails, and so does a registered key the plane never reads); every default pinned to the plane's compiled posture; flag > env > file > default with the winning `source`/`source_ref` on duration, integer, bool, list, string and depth keys plus the 002 conflict row; every sensor key present exactly once in the explain dump (and the `--key` filter form); the resolved row TYPES the decoder's readers accept; a file that sets the WHOLE surface (generated from the key list) resolving with no refusal; `sensors.rules.dir` following the resolved state root; `sensors.inotify.paths` refused by name from a flag and from the environment while its file form resolves | every key covered in both directions, 0 unregistered keys the plane reads; 6 precedence cases × 4 sources asserted with provenance; 0 refusals from a file that sets all 33 keys; 0 sensor keys missing from the dump; both scalar refusals 001 AND naming the key |

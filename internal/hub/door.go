@@ -45,6 +45,18 @@ type Door struct {
 
 	mu      sync.Mutex
 	waiters map[string]chan offerResult
+	// pending holds an offer's waiter while its stream entry does not exist
+	// yet: it is registered BEFORE the XADD, because a consumer can read the
+	// entry and call Complete in the window between the XADD returning and the
+	// offer registering `waiters[entryID]` — an answer delivered there used to
+	// be dropped on the floor, and the offer stalled out its whole wait to
+	// answer a spurious TROUBLE-HUB-004 timeout (measured as a -race flake).
+	pending map[string]chan offerResult
+	// entryAnswer parks a completion that fired before the offer could
+	// re-register its waiter under the entry id. The registration consumes
+	// it; one parked after a timed-out or cancelled offer is dropped with the
+	// door itself (a rewire builds a new one), so no unbounded state accrues.
+	entryAnswer map[string]offerResult
 
 	Offers     atomic.Int64
 	Duplicates atomic.Int64
@@ -84,14 +96,16 @@ func NewDoor(c *Client, gate *DedupGate, cfg DoorConfig) *Door {
 		cfg.Wait = DefaultDoorWait
 	}
 	return &Door{
-		c:       c,
-		gate:    gate,
-		route:   cfg.Route,
-		wait:    cfg.Wait,
-		hostID:  cfg.HostID,
-		hubID:   cfg.HubID,
-		ackFn:   cfg.Ack,
-		waiters: map[string]chan offerResult{},
+		c:           c,
+		gate:        gate,
+		route:       cfg.Route,
+		wait:        cfg.Wait,
+		hostID:      cfg.HostID,
+		hubID:       cfg.HubID,
+		ackFn:       cfg.Ack,
+		waiters:     map[string]chan offerResult{},
+		pending:     map[string]chan offerResult{},
+		entryAnswer: map[string]offerResult{},
 	}
 }
 
@@ -100,18 +114,29 @@ func (d *Door) Route() RouteDecision { return d.route }
 
 // Complete is the consumer's completion callback (mount with
 // Consumer.WithCompletion(door.Complete)). It answers the waiting offer, if any.
+//
+// An entry may complete before its offer has registered a waiter under the
+// entry id (the consumer needs no round trip through the sender), so a
+// completion that finds no waiter parks its answer for the registration to
+// pick up — the answer is the offer's only one, and dropping it cost the
+// sender a full door wait for an entry that was already in the ledger.
 func (d *Door) Complete(entryID string, recs []types.Record, err error) {
+	res := offerResult{recs: recs, err: err}
 	d.mu.Lock()
 	ch, ok := d.waiters[entryID]
 	if ok {
 		delete(d.waiters, entryID)
+	} else {
+		// The offer has not registered yet: park the answer where its
+		// registration (or its timeout cleanup) will find it.
+		d.entryAnswer[entryID] = res
 	}
 	d.mu.Unlock()
 	if !ok {
 		return
 	}
 	select {
-	case ch <- offerResult{recs: recs, err: err}:
+	case ch <- res:
 	default:
 	}
 }
@@ -163,8 +188,24 @@ func (d *Door) OfferRoute(ctx context.Context, draft types.RecordDraft, route Ro
 	if d.ackFn != nil {
 		env.Ack = d.ackFn()
 	}
+	ch := make(chan offerResult, 1)
+	// The waiter for this offer exists from BEFORE the XADD to the moment the
+	// answer arrives: a consumer can drain the entry and call Complete the
+	// instant the XADD lands, so the registration must never lag the enqueue.
+	// The entry id is not known yet, so the waiter sits under the offer's
+	// idempotency key; Complete parks an early answer under the ENTRY id, and
+	// the SAME critical section below (which now owns the entry id) moves the
+	// waiter under `waiters[entryID]` and consumes any parked answer — no
+	// window is left in which a completion is dropped.
+	d.mu.Lock()
+	d.pending[key] = ch
+	d.mu.Unlock()
+
 	entryID, err := d.c.EnqueueEntry(ctx, env, route)
 	if err != nil {
+		d.mu.Lock()
+		delete(d.pending, key)
+		d.mu.Unlock()
 		// The sender's 200 was never issued, so the claim must not survive: a
 		// retry with the same idempotency key has to be a fresh acceptance
 		// (SPEC-13 §6.1, "a lost XADD costs nothing").
@@ -172,18 +213,32 @@ func (d *Door) OfferRoute(ctx context.Context, draft types.RecordDraft, route Ro
 		d.Failures.Add(1)
 		return types.Record{}, err
 	}
-	d.Offers.Add(1)
-
-	ch := make(chan offerResult, 1)
 	d.mu.Lock()
+	if answer, ok := d.entryAnswer[entryID]; ok {
+		// The consumer completed the entry while it was being registered:
+		// hand the parked answer to the buffered waiter (the select below
+		// reads it without another trip through the lock).
+		delete(d.entryAnswer, entryID)
+		ch <- answer
+	}
 	d.waiters[entryID] = ch
+	delete(d.pending, key)
 	d.mu.Unlock()
+	d.Offers.Add(1)
 
 	timer := time.NewTimer(d.wait)
 	defer timer.Stop()
 	defer func() {
 		d.mu.Lock()
 		delete(d.waiters, entryID)
+		// EnqueueEntry may never have returned (the caller's context ended
+		// first): the pre-enqueue registration is this offer's to remove.
+		delete(d.pending, key)
+		// The offer is gone; an answer parked for it after this point is
+		// dropped with the door itself (a rewire builds a new one), so the
+		// parked map stays bounded by the entries completing without a live
+		// offer — never by the stream's history.
+		delete(d.entryAnswer, entryID)
 		d.mu.Unlock()
 	}()
 	select {

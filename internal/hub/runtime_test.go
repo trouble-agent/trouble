@@ -225,6 +225,15 @@ func TestRuntimeReconnectRewiresTheConsumer(t *testing.T) {
 	if standalone.Count() != 0 {
 		t.Fatalf("the fallback path was used after the queue came back")
 	}
+	// The record is durable, but the acked watermark (last_acked_id) moves when
+	// the entry's batch XACK returns — strictly AFTER the Append that answered
+	// the offer. Reading it here used to be a race (the row's original strand-A
+	// finding); WaitDrained orders the read on the ack: it holds only when the
+	// batch XACK has emptied the pending list — the same call that advances the
+	// watermark — so the stanza below cannot observe the pre-ack state.
+	if !rt.WaitDrained(ctx, 5*time.Second) {
+		t.Fatalf("the queue never drained (lag 0 / pending 0 = every entry acked)")
+	}
 	st := rt.Status(ctx)
 	if st.Degraded || st.DegradedReason != DegradedNone {
 		t.Fatalf("status still degraded after the rewiring: %+v", st)
@@ -245,6 +254,16 @@ func TestRuntimeReconnectRewiresTheConsumer(t *testing.T) {
 
 // TestRuntimeRefusesIngestionWhenTheQueueIsLost: §4.3's runtime-loss rows — the
 // daemon keeps running and REFUSES (never a silent 200).
+//
+// The loss this test creates has a second observer: the runtime's own recovery
+// supervisor, which markLost pokes and whose rewire runs concurrently with the
+// test's assertions (this is the merged-main strand-B flake: the rewire restored
+// mode=up — whose reason is the empty string — between the test's mode check and
+// its reason read). The rewire is made DETERMINISTIC instead of raced out:
+// failXGroupCreate refuses the replacement group, so every rewire lands on
+// (refusing, redis_unavailable) and mode=up is unreachable. At ANY observation
+// point the degraded reason is therefore redis_unavailable — the empty reason
+// exists only in the (up, "") pair attach stores, and up cannot happen here.
 func TestRuntimeRefusesIngestionWhenTheQueueIsLost(t *testing.T) {
 	f := newFakeStreams()
 	f.info = ServerInfo{AOFEnabled: true, Policy: "noeviction", OptionsChecked: true}
@@ -260,19 +279,23 @@ func TestRuntimeRefusesIngestionWhenTheQueueIsLost(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	defer rt.Close()
-	// Redis dies: XADD fails with a READONLY-style refusal.
+	// Redis dies: XADD fails with a READONLY-style refusal, and the group a
+	// rewire would create on the (still dialable) fake is refused, so the
+	// supervisor's rewire cannot restore mode=up under the test's feet.
 	f.mu.Lock()
 	f.failXAdd = errors.New("READONLY You can't write against a read only replica")
+	f.failXGroupCreate = errors.New("NOGROUP No such key or consumer group")
 	f.mu.Unlock()
 	draft := draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel", nil)
 	if _, err := rt.Ingest(ctx, draft); CodeOf(err) != types.CodeHub004 {
 		t.Fatalf("code = %q want TROUBLE-HUB-004 (%v)", CodeOf(err), err)
 	}
-	if rt.RuntimeMode() != ModeUnavailable {
-		t.Fatalf("mode = %q want unavailable (require_redis=false)", rt.RuntimeMode())
+	st := rt.Status(ctx)
+	if mode := rt.RuntimeMode(); mode != ModeUnavailable && mode != ModeRefusing {
+		t.Fatalf("mode = %q want unavailable (require_redis=false) or refusing (a rewired group that cannot be created)", mode)
 	}
-	if got := rt.Status(ctx).DegradedReason; got != DegradedRedisDown {
-		t.Fatalf("degraded reason = %q want %q", got, DegradedRedisDown)
+	if got := st.DegradedReason; got != DegradedRedisDown {
+		t.Fatalf("degraded reason = %q want %q (mode %q)", got, DegradedRedisDown, rt.RuntimeMode())
 	}
 	// A second request is refused WITHOUT touching the queue at all.
 	before := rt.IngestCounters().Ingested
@@ -468,6 +491,15 @@ func eventRecords(l *fakeLedger) int {
 // and the two ledgers must hold the SAME sequence of records. Nothing about the
 // rule engine or the ladder is involved here; what is asserted is that the hop
 // neither reorders, rewrites nor drops a record.
+//
+// Synchronization note (the row's second strand-A flake): the door returns the
+// ledger's record when the Append lands, but the CONSUMER picks batches up in
+// the background; under load the drain of later drafts can lag the door's
+// per-offer answers, and the drain fallthrough below (waitFor) used to time out
+// at 2s. Every wait here is bounded-fallthrough — poll until the CONDITION is
+// met (with a generous deadline), never a fixed sleep, and the drain deadline
+// scales with the script instead of being a constant, so a slow host slows the
+// deadline and not the semantics.
 func TestProfileInvarianceSameRecordSequence(t *testing.T) {
 	script := []types.RecordDraft{
 		draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", map[string]any{"item_type": "event", "n": 1}),
@@ -483,6 +515,7 @@ func TestProfileInvarianceSameRecordSequence(t *testing.T) {
 	// The light-hub path: the same drafts through the queue.
 	f := newFakeStreams()
 	f.info = hubInfoOK()
+	f.block = 5 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	queued := newFakeLedger(&eventLog{})
@@ -504,18 +537,68 @@ func TestProfileInvarianceSameRecordSequence(t *testing.T) {
 			t.Fatalf("queued ingest (%s): %v", d.Kind, err)
 		}
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for queued.Count() < len(script) && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	// The queue drains in the background: wait for the CONDITION (all script
+	// records appended), never a fixed bound — under load each hop costs
+	// milliseconds, so the deadline scales with the script.
+	waitFor(t, time.Duration(len(script))*2*time.Second, "every scripted record through the queue", func() bool {
+		return queued.Count() >= len(script)
+	})
 	if counters := rt.IngestCounters(); counters.Ingested != int64(len(script)) || counters.Fallbacks != 0 {
 		t.Fatalf("counters = %+v want %d queued ingests and no fallback", counters, len(script))
 	}
 	assertSameSequence(t, "standalone", standalone, "light-hub", queued)
 }
 
+// waitFor is runtime_recovery_test.go's bounded-fallthrough helper; that
+// definition serves this file too (same package).
+
 func hubInfoOK() ServerInfo {
 	return ServerInfo{AOFEnabled: true, Policy: "noeviction", OptionsChecked: true}
+}
+
+// TestDoorCompletesAnOfferThatLostTheRegistrationRace is the deterministic RED
+// proof of the door's early-completion defect (the row's second strand-A
+// finding, the source of the captured "enqueued as … but the consumer did not
+// append within 2s"): a consumer can drain an entry and call Complete in the
+// window between the XADD returning and the offer registering its waiter under
+// the entry id. The fake's postXAdd hook fires the completion INSIDE that
+// window — the entry exists and Complete has been called, but the caller has
+// not yet been handed the entry id — so the interleaving that used to drop the
+// answer on the floor happens on EVERY run, not once in a hundred.
+//
+// No consumer goroutine runs here: the hook IS the consumer, synchronously.
+// Before the door fix this test fails with the production error verbatim
+// ("enqueued as <id> but the consumer did not append within 750ms"); after it,
+// the parked answer is consumed at registration and the offer returns without
+// waiting out the clock.
+func TestDoorCompletesAnOfferThatLostTheRegistrationRace(t *testing.T) {
+	f, _, cs, c, gate := consumerFixture(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.EnsureGroup(ctx); err != nil {
+		t.Fatalf("EnsureGroup: %v", err)
+	}
+	door := NewDoor(c, gate, DoorConfig{Route: RouteA, HostID: "7f3a91c2d4e5b607", Wait: 750 * time.Millisecond})
+	cs.WithCompletion(door.Complete)
+
+	draft := draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", nil)
+	answered := types.Record{RecID: types.NewID(types.PEv), Kind: draft.Kind}
+	// Same goroutine as the Offer below: the assignment is ordered before the
+	// XAdd that reads the hook, no lock needed.
+	f.postXAdd = func(entryID string) {
+		door.Complete(entryID, []types.Record{answered}, nil)
+	}
+
+	rec, err := door.Offer(ctx, draft)
+	if err != nil {
+		t.Fatalf("Offer: %v", err)
+	}
+	if rec.RecID != answered.RecID {
+		t.Fatalf("the early completion's answer was not delivered: got %+v want %+v", rec, answered)
+	}
+	if door.Timeouts.Load() != 0 {
+		t.Fatalf("the offer answered by timeout (%d): the completion beat the waiter registration and was dropped", door.Timeouts.Load())
+	}
 }
 
 // assertSameSequence compares two ledgers' appended records by the identity the

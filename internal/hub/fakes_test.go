@@ -97,6 +97,12 @@ type fakeStreams struct {
 	groupCreateCalled int
 	groupName         string
 
+	// postXAdd, when set, runs inside XAdd after the entry exists and its id
+	// is known but BEFORE the call returns — the exact window in which a
+	// consumer completion can beat the door's waiter registration. The door
+	// regression test uses it to park the fake mid-XAdd deterministically.
+	postXAdd func(entryID string)
+
 	ms  int64
 	seq int
 	log *eventLog
@@ -138,13 +144,16 @@ func (f *fakeStreams) ServerInfo(ctx context.Context) (ServerInfo, error) {
 
 func (f *fakeStreams) XAdd(ctx context.Context, stream string, maxLen int64, values map[string]any) (string, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.failXAdd != nil && f.xaddFailuresLeft == 0 {
-		return "", f.failXAdd
+		err := f.failXAdd
+		f.mu.Unlock()
+		return "", err
 	}
 	if f.xaddFailuresLeft > 0 {
 		f.xaddFailuresLeft--
-		return "", f.failXAdd
+		err := f.failXAdd
+		f.mu.Unlock()
+		return "", err
 	}
 	f.seq++
 	ent := &fakeEntry{id: fmt.Sprintf("%d-%d", f.ms, f.seq), fields: map[string]string{}}
@@ -153,7 +162,17 @@ func (f *fakeStreams) XAdd(ctx context.Context, stream string, maxLen int64, val
 	}
 	f.streams[stream] = append(f.streams[stream], ent)
 	f.log.add("xadd:" + stream + ":" + ent.id)
-	return ent.id, nil
+	entryID := ent.id
+	post := f.postXAdd
+	f.mu.Unlock()
+	// The hook runs OUTSIDE the lock (explicit unlocks above: one deferred
+	// Unlock cannot span a hook that may take the lock again): it is the seam
+	// a test uses to act in the window between the entry existing and the
+	// caller being handed its id — the door's registration-race window.
+	if post != nil {
+		post(entryID)
+	}
+	return entryID, nil
 }
 
 func (f *fakeStreams) XLen(ctx context.Context, stream string) (int64, error) {

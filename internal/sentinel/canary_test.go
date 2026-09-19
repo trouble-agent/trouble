@@ -258,6 +258,18 @@ func mustDigest(t *testing.T, ev *rawEvent) string {
 	return n.sigOfCanonical(canonical).DigestHex()
 }
 
+// pinLedgerClock pins the e2e chain's ledger clock to a fixed instant for the
+// duration of the test. Only the ledger's clock is pinned: the ledger is the
+// side that stamps records (types.TsLayout, millisecond), while the sentinel's
+// own process clock is not part of any window comparison and stays real so
+// Start's first-observation wait keeps a wall-clock deadline.
+func pinLedgerClock(t *testing.T, at time.Time) {
+	t.Helper()
+	prev := e2eLedgerNow
+	e2eLedgerNow = func() time.Time { return at }
+	t.Cleanup(func() { e2eLedgerNow = prev })
+}
+
 // TestCanarySeenInTheLedgerSourceIndex pins §7's canary row pass threshold at
 // the read the verification side is built on: after a canary observation, the
 // ledger's per-source index reports the `sentinel` source — the origin every
@@ -272,11 +284,23 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 	// first commit cannot false-fail it; the observation itself is expected in
 	// the first interval, which is also what Start waits for (§4.2 step 5).
 	const interval = 10 * time.Second
+	// The ledger renders every record TS through types.TsLayout, which TRUNCATES
+	// to the millisecond, and this assertion dates the observation from the boot
+	// instant — so the two sides must share one clock. Reading boot from
+	// time.Now (nanoseconds) against the ledger's millisecond reading made an
+	// observation that landed inside boot's own millisecond compare as up to 1ms
+	// BEFORE boot, i.e. a truncation artifact read as an early canary (~1 run in
+	// 10 of the real-clock suite). The pinned instant sits 500µs past a
+	// millisecond boundary, the phase the truncation crosses: every run now
+	// exercises that boundary instead of depending on where the wall clock was.
+	boot := time.Date(2026, 9, 19, 13, 25, 0, 500_000, time.UTC)
+	pinLedgerClock(t, boot)
 	e := newE2EChain(t, func(c *Config) {
 		c.CanaryProject = "1"
 		c.CanaryInterval = types.Duration(interval.String())
 	})
-	t0 := nowFunc()
+	// Boot as the clock that stamps the observation saw it.
+	t0 := e2eLedgerNow()
 	e.open(t)
 
 	canaryRecords := func() (injections, observations int) {
@@ -300,9 +324,11 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 	// The writer is group-commit: the record pair §3.8 pins (one per injection,
 	// one per observation) and the index row derived from it become readable a
 	// commit after the observation, so both reads are awaited under one deadline.
+	// The deadline is harness wall time on purpose: it must keep bounding this
+	// loop even if a future change pins the sentinel's process clock.
 	var canary types.SourceAge
 	var injections, observations int
-	deadline := nowFunc().Add(5 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		ages, _, err := e.l.Query().Sources()
 		if err != nil {
@@ -318,7 +344,7 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 		if found && canary.CanarySeen && injections == 1 && observations == 1 {
 			break
 		}
-		if nowFunc().After(deadline) {
+		if time.Now().After(deadline) {
 			t.Fatalf("the ledger never showed the canary once committed: sources = %+v, injected = %d, observed = %d",
 				ages, injections, observations)
 		}
@@ -331,10 +357,13 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canary_last_ts %q is not a UTC timestamp: %v", canary.CanaryLastTS, err)
 	}
-	// §7: "canary observation inside canary_interval".
-	if obs.Before(t0) || obs.Sub(t0) > interval {
+	// §7: "canary observation inside canary_interval". Both sides are read at
+	// the ledger's resolution — the stored TS is truncated to the millisecond by
+	// types.TsLayout and boot is floored the same way — so an observation in
+	// boot's own millisecond cannot read as earlier than boot.
+	if !canaryInsideInterval(obs, t0, interval) {
 		t.Fatalf("canary observation at %s is %v after boot, want inside canary_interval (%v)",
-			canary.CanaryLastTS, obs.Sub(t0), interval)
+			canary.CanaryLastTS, obs.Sub(t0.Truncate(time.Millisecond)), interval)
 	}
 	if canary.LastEventTS == "" {
 		t.Error("the sentinel source has no last_event_ts")
@@ -354,6 +383,50 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 		if !strings.Contains(doc, want) {
 			t.Errorf("docs/operations.md §9 does not record the canary antecedent: missing %q", want)
 		}
+	}
+}
+
+// canaryInsideInterval reports whether a ledger-stamped observation timestamp
+// falls inside [boot, boot+interval]. The ledger stamps every record TS through
+// types.TsLayout, which truncates to the millisecond, so boot is floored to
+// that same resolution before the comparison: an observation that landed in
+// boot's own millisecond is inside the window, not up to 1ms before it. The
+// window itself is NOT widened — an observation earlier than the floored boot
+// instant, or later than boot+interval, is still outside.
+func canaryInsideInterval(obs, boot time.Time, interval time.Duration) bool {
+	boot = boot.Truncate(time.Millisecond)
+	return !obs.Before(boot) && obs.Sub(boot) <= interval
+}
+
+// TestCanaryWindowStillRejectsEarlyAndLateObservations keeps the §7 window's
+// teeth: reading both sides at the ledger's resolution must not have turned
+// "canary observation inside canary_interval" into a check that cannot fail.
+func TestCanaryWindowStillRejectsEarlyAndLateObservations(t *testing.T) {
+	// The same instant the ledger-pinned canary test boots at: 500µs past a
+	// millisecond boundary, so the truncation boundary is the case under test.
+	boot := time.Date(2026, 9, 19, 13, 25, 0, 500_000, time.UTC)
+	const interval = 10 * time.Second
+	cases := []struct {
+		name string
+		obs  time.Time
+		want bool
+	}{
+		// The truncation artifact this fix exists for: the ledger can only
+		// store boot's own millisecond, and that reading is not "before boot".
+		{"observation truncated into boot's own millisecond", boot.Truncate(time.Millisecond), true},
+		{"observation at boot exactly", boot, true},
+		{"observation exactly at the interval bound", boot.Truncate(time.Millisecond).Add(interval), true},
+		{"observation one millisecond past the interval", boot.Truncate(time.Millisecond).Add(interval + time.Millisecond), false},
+		{"observation one millisecond before boot", boot.Truncate(time.Millisecond).Add(-time.Millisecond), false},
+		{"observation a second before boot", boot.Add(-time.Second), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := canaryInsideInterval(tc.obs, boot, interval); got != tc.want {
+				t.Errorf("canaryInsideInterval(%s, %s, %v) = %v, want %v",
+					tc.obs.UTC().Format(types.TsLayout), boot.Format(types.TsLayout), interval, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -69,9 +69,10 @@ type flowClock interface {
 
 // Flow is the flow subsystem.
 type Flow struct {
-	cfg   types.FlowConfig
-	deps  Deps
-	gates types.AutonomyGates
+	cfg    types.FlowConfig
+	deps   Deps
+	gates  types.AutonomyGates
+	bounds SpoolBounds
 
 	mu       sync.Mutex
 	boards   map[string]*boardIndex
@@ -80,9 +81,16 @@ type Flow struct {
 	bySig    map[string]types.SpawnRequest
 	queue    []types.SpawnRequest
 	inflight map[string]bool
-	probeTS  time.Time
-	repoMu   map[string]chan struct{}
-	closed   bool
+
+	// spool is the flow-owned durable dispatch queue (§3.9a): non-nil only when
+	// the composition root wired a store this subsystem can REPLAY. A sink that
+	// only implements Enqueue is not durability, and spoolPut says so.
+	spool         spoolQueue
+	spoolInflight map[string]bool
+
+	probeTS time.Time
+	repoMu  map[string]chan struct{}
+	closed  bool
 }
 
 // NewFlow validates the config and returns the subsystem. It performs no I/O:
@@ -92,16 +100,44 @@ func NewFlow(cfg types.FlowConfig, autonomy types.AutonomyGates) (*Flow, error) 
 	if err := validateFlowConfig(c); err != nil {
 		return nil, err
 	}
+	return NewFlowWithBounds(c, autonomy, SpoolBounds{})
+}
+
+// NewFlowWithBounds is NewFlow plus the composition root's §3.9a bound set, so
+// the queue's limits are wiring rather than a compile-time constant.
+func NewFlowWithBounds(cfg types.FlowConfig, autonomy types.AutonomyGates, b SpoolBounds) (*Flow, error) {
+	c := applyFlowDefaults(cfg)
+	if err := validateFlowConfig(c); err != nil {
+		return nil, err
+	}
 	return &Flow{
-		cfg: c, gates: autonomy,
+		cfg: c, gates: autonomy, bounds: b.WithDefaults(),
 		boards: map[string]*boardIndex{}, leases: map[string]types.HotfixLease{},
 		spawnSeq: map[string]types.SpawnRequest{}, bySig: map[string]types.SpawnRequest{},
-		inflight: map[string]bool{}, repoMu: map[string]chan struct{}{},
+		inflight: map[string]bool{}, spoolInflight: map[string]bool{},
+		repoMu: map[string]chan struct{}{},
 	}, nil
 }
 
-// SetDeps binds the collaborators (the composition root).
-func (f *Flow) SetDeps(d Deps) { f.deps = d }
+// SetDeps binds the collaborators (the composition root). A sink that can be
+// replayed is adopted as the flow's own queue; anything else leaves the flow with
+// no durable queue, which every dispatch record then states truthfully.
+func (f *Flow) SetDeps(d Deps) {
+	f.deps = d
+	f.mu.Lock()
+	f.spool = nil
+	if q, ok := d.Spool.(spoolQueue); ok {
+		f.spool = q
+	}
+	f.mu.Unlock()
+}
+
+// SpoolWired reports whether the flow owns a replayable durable queue (§3.9a).
+func (f *Flow) SpoolWired() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.spool != nil
+}
 
 // Config returns the resolved config.
 func (f *Flow) Config() types.FlowConfig { return f.cfg }

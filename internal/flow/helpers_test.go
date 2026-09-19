@@ -140,23 +140,89 @@ func (s *fakeSkills) Refusal(context.Context, types.Incident, types.Evidence, st
 	return nil
 }
 
-// fakeSpool records durable-queue writes.
+// fakeSpool records durable-queue writes. It satisfies spoolQueue, so it is a
+// REPLAYABLE queue (§3.9a): the flow adopts it exactly as it adopts the real
+// store. Tests that need a sink which cannot be replayed use enqueueOnlySink.
 type fakeSpool struct {
 	mu      sync.Mutex
 	entries []types.SpoolEntry
+	drops   []DropEvent
 }
 
 func (s *fakeSpool) Enqueue(_ context.Context, e types.SpoolEntry) error {
+	_, err := s.Put(e)
+	return err
+}
+
+// Put appends and reports any drops the store injected for the test.
+func (s *fakeSpool) Put(e types.SpoolEntry) ([]DropEvent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if e.ID == "" {
+		e.ID = types.NewID(types.PEv)
+	}
+	s.entries = append(s.entries, e)
+	drops := s.drops
+	s.drops = nil
+	return drops, nil
+}
+
+func (s *fakeSpool) List() ([]types.SpoolEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]types.SpoolEntry(nil), s.entries...), nil
+}
+
+func (s *fakeSpool) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.entries {
+		if s.entries[i].ID == id {
+			s.entries = append(s.entries[:i], s.entries[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *fakeSpool) Update(e types.SpoolEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.entries {
+		if s.entries[i].ID == e.ID {
+			s.entries[i] = e
+			return nil
+		}
+	}
 	s.entries = append(s.entries, e)
 	return nil
+}
+
+func (s *fakeSpool) Count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.entries)
 }
 
 func (s *fakeSpool) len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.entries)
+}
+
+// enqueueOnlySink is a sink that can be written but never replayed — the shape
+// the desk adapter has. It is what the refusal half of §3.9a is asserted against.
+type enqueueOnlySink struct {
+	mu   sync.Mutex
+	got  []types.SpoolEntry
+	fail error
+}
+
+func (s *enqueueOnlySink) Enqueue(_ context.Context, e types.SpoolEntry) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.got = append(s.got, e)
+	return s.fail
 }
 
 // fixture bundles everything a flow test needs.

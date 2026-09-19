@@ -48,6 +48,14 @@ type dispatchPayload struct {
 // the router's to report; an ack without one returns "" and the spawn takes
 // the §6.20 timeout path.
 func (f *Flow) DispatchSpawn(ctx context.Context, req types.SpawnRequest) (string, string, error) {
+	return f.dispatchSpawn(ctx, req, true)
+}
+
+// dispatchSpawn is DispatchSpawn with the durable-queue half made explicit. The
+// replay loop calls it with spool=false: the entry it is draining IS the durable
+// record, and re-spooling a failed replay would grow the queue on every attempt
+// instead of counting the attempt against the entry (§3.9a).
+func (f *Flow) dispatchSpawn(ctx context.Context, req types.SpawnRequest, spool bool) (string, string, error) {
 	row := types.BoardRow{
 		ID: req.TaskID, Sig: req.Sig, Inc: req.Inc, Repo: req.Repo,
 		Title: f.titleFor(req), Priority: "P1",
@@ -55,12 +63,19 @@ func (f *Flow) DispatchSpawn(ctx context.Context, req types.SpawnRequest) (strin
 	if row.ID == "" {
 		row.ID = types.NewID(types.PTsk)
 	}
-	ref, err := f.dispatch(ctx, row, types.SevHigh)
+	ref, err := f.dispatchRow(ctx, row, types.SevHigh, spool)
 	return ref, "", err
 }
 
 // dispatch marshals the payload and performs one dispatch attempt sequence.
 func (f *Flow) dispatch(ctx context.Context, row types.BoardRow, severity types.Severity) (string, error) {
+	return f.dispatchRow(ctx, row, severity, true)
+}
+
+// dispatchRow performs one dispatch attempt sequence (the three immediate
+// retries) and, when the immediate path is exhausted, hands the payload to the
+// durable queue unless the caller owns that decision already.
+func (f *Flow) dispatchRow(ctx context.Context, row types.BoardRow, severity types.Severity, spool bool) (string, error) {
 	p := dispatchPayload{
 		IdemKey: row.ID, TaskID: row.ID, BoardPath: f.boardOfRow(row), Repo: row.Repo,
 		Sig: row.Sig, Inc: row.Inc, Title: row.Title, Priority: row.Priority,
@@ -103,7 +118,9 @@ func (f *Flow) dispatch(ctx context.Context, row types.BoardRow, severity types.
 		}
 	}
 	// The immediate path is exhausted: one SpoolEntry for replayed re-dispatch.
-	f.enqueueDispatch(ctx, p)
+	if spool {
+		f.enqueueDispatch(ctx, p)
+	}
 	return "", &flowError{Code: types.CodeFlow005, Msg: fmt.Sprintf("dispatch failed after %d retries: %v", retries, last)}
 }
 
@@ -170,42 +187,28 @@ func (f *Flow) dispatchCLI(ctx context.Context, body []byte) (string, error) {
 	return out.String(), nil
 }
 
-// enqueueDispatch puts a dispatch on the spool (SPEC-12's durable queue).
+// enqueueDispatch puts a dispatch on the durable queue (SPEC-08 §3.9a).
 //
-// The three immediate retries above are the fast path; this is the durable one,
-// bounded drop-oldest with a ledger note (§3.6).
+// The three immediate retries above are the fast path; this is the durable one.
+// It claims durability only when the entry landed on a queue the flow REPLAYS
+// (§3.9a), and names the coupling when it did not — before §3.9a this recorded
+// `dispatch_state="spooled"` for an entry the desk's driver-keyed replay never
+// listed and could not decode.
 func (f *Flow) enqueueDispatch(ctx context.Context, p dispatchPayload) {
-	if f.deps.Spool == nil {
-		f.record(ctx, types.Incident{ID: p.Inc, Sig: p.Sig}, map[string]any{
-			"stage": "dispatch", "decision": "failed", "dispatch_state": "unspooled",
-			"reason": "spool_unwired", "task_id": p.TaskID, "error_code": string(types.CodeFlow005),
-		})
-		return
+	req := types.SpawnRequest{
+		ID: types.NewID(types.PSpawn), TaskID: p.TaskID, Sig: p.Sig, Inc: p.Inc,
+		Repo: p.Repo, PriorityClass: p.Priority, RequestedTS: p.SubmittedTS,
 	}
-	body, err := json.Marshal(p)
-	if err != nil {
-		return
-	}
-	entry := types.SpoolEntry{
-		ID: types.NewID(types.PEv), TS: types.FormatUTC(f.clock().Now()), Kind: "spawn",
-		Payload: body, IdemKey: p.TaskID, NextTryTS: types.FormatUTC(f.clock().Now().Add(3 * time.Second)),
-	}
-	if err := f.deps.Spool.Enqueue(ctx, entry); err != nil {
-		f.record(ctx, types.Incident{ID: p.Inc, Sig: p.Sig}, map[string]any{
-			"stage": "dispatch", "decision": "failed", "dispatch_state": "spool_failed",
-			"reason": err.Error(), "task_id": p.TaskID, "error_code": string(types.CodeFlow005),
-		})
-		return
-	}
-	f.record(ctx, types.Incident{ID: p.Inc, Sig: p.Sig}, map[string]any{
-		"stage": "dispatch", "decision": "dispatched", "dispatch_state": "spooled",
-		"task_id": p.TaskID, "idem_key": p.IdemKey, "router_ref": p.TaskID,
-	})
+	inc := types.Incident{ID: p.Inc, Sig: p.Sig}
+	// spoolPut writes the record: the durable half claims `spooled` only when a
+	// queue this subsystem replays accepted the entry (§3.9a).
+	f.spoolPut(ctx, "dispatch", "spool_not_replayable", req, inc)
 }
 
 // enqueue puts a spawn request on the durable queue (§3.9). The in-memory queue
-// is the fallback when the spool is unwired: a pending spawn is never dropped,
-// and QueueDepth is what the dashboard's first number reports.
+// is the bounded dashboard view: a pending spawn is never dropped, and QueueDepth
+// is what the dashboard's first number reports. The durable half is the flow's
+// own store (§3.9a), which is also what survives a restart.
 func (f *Flow) enqueue(ctx context.Context, sp types.SpawnRequest) {
 	f.mu.Lock()
 	replaced := false
@@ -230,17 +233,14 @@ func (f *Flow) enqueue(ctx context.Context, sp types.SpawnRequest) {
 		})
 	}
 	f.mu.Unlock()
-	if f.deps.Spool == nil {
+	// The durable half. This is a spawn the state machine has just parked, so a
+	// missing queue is recorded as a real loss of durability, not a hint.
+	inc := types.Incident{ID: sp.Inc, Sig: sp.Sig}
+	if !f.spoolPut(ctx, "spawn", "spool_not_replayable", sp, inc) {
 		return
 	}
-	body, err := json.Marshal(sp)
-	if err != nil {
-		return
-	}
-	_ = f.deps.Spool.Enqueue(ctx, types.SpoolEntry{
-		ID: types.NewID(types.PEv), TS: types.FormatUTC(f.clock().Now()), Kind: "spawn",
-		Payload: body, IdemKey: sp.TaskID,
-		NextTryTS: types.FormatUTC(f.clock().Now().Add(5 * time.Second)),
+	f.recordSpawn(ctx, sp, "spawn", sp.State, map[string]any{
+		"reason": "spooled", "dispatch_state": "spooled", "coupling": spoolCoupling,
 	})
 }
 

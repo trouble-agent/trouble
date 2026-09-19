@@ -126,6 +126,22 @@ PY
 printf 'TROUBLE_DASHBOARD_TOKEN=%s\n' "$TOK" > "$ENVF"
 chmod 600 "$ENVF"
 
+say "--output-env writes the 0600 env file itself (TRBL-028, shell-less image seeding)"
+printf 'TROUBLE_HUB_TOKEN=sk_live_smoke\n' >> "$ENVF"
+TOK2=$("$TROUBLE" dashboard token create --config "$CFG" --label dash-read@env --scopes read --output-env "$ENVF" 2>"$BASE/tok2.err")
+[[ "$TOK2" == tdt_* ]] && ok "create --output-env minted and wrote the env line" || bad "create --output-env failed: $(cat "$BASE/tok2.err")"
+grep -q "TROUBLE_DASHBOARD_TOKEN=$TOK2" "$ENVF" && ok "env file carries the fresh token" || bad "env file missing the fresh token"
+grep -q "TROUBLE_DASHBOARD_TOKEN=$TOK$" "$ENVF" && bad "old token line survived" || ok "previous token line replaced"
+grep -q 'TROUBLE_HUB_TOKEN=sk_live' "$ENVF" && ok "unrelated env lines preserved" || true
+grep -q "^TROUBLE_DASHBOARD_TOKEN=" "$ENVF" && [[ $(grep -c "^TROUBLE_DASHBOARD_TOKEN=" "$ENVF") -eq 1 ]] && ok "exactly one token line" || bad "token line count wrong"
+[[ "$(stat -c %a "$ENVF")" == 600 ]] && ok "env file mode 0600 after --output-env" || bad "env file mode drifted"
+TOK3=$("$TROUBLE" dashboard token rotate --config "$CFG" --label dash-read@env --output-env "$ENVF" 2>"$BASE/tok3.err")
+[[ "$TOK3" == tdt_* ]] && ok "rotate --output-env minted and wrote the env line" || bad "rotate --output-env failed: $(cat "$BASE/tok3.err")"
+grep -q "TROUBLE_DASHBOARD_TOKEN=$TOK2\$" "$ENVF" && bad "rotate left the previous token in the env file" || ok "rotate replaced the previous token line"
+grep -q "TROUBLE_DASHBOARD_TOKEN=$TOK3\$" "$ENVF" && ok "env file carries the rotated token" || bad "env file missing the rotated token"
+[[ "$(stat -c %a "$ENVF")" == 600 ]] && ok "env file mode 0600 after rotate" || bad "env file mode drifted after rotate"
+TOK2="" TOK3="" # only the LIVE token ($TOK) is used by the daemon checks below
+
 say "daemon boots on the configured port and serves the health surface"
 "$TROUBLED" --config "$CFG" > "$BASE/troubled.log" 2>&1 &
 DPID=$!

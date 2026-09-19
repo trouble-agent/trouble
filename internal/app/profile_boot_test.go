@@ -8,11 +8,12 @@ package app
 // GATE is what refuses.
 //
 // The profile's runtime half — the Redis stream, the dedup gate and the
-// DuckBrain archival tier — is internal/hub's (SPEC-13 §2.3) and does not exist
-// in this tree, so nothing here asserts queueing, degradation or a /health.json
-// `hub` stanza. What is asserted is the boundary this tree can honour: a
-// light-hub config is refused when it is incomplete, and the refusal costs zero
-// HTTP responses.
+// DuckBrain archival tier — lives in internal/hub and its boot/degradation/health
+// wiring is exercised by hub_boot_test.go (a validated light-hub config opens the
+// queue, mounts it in front of the sentinel's sink and reports the /health.json
+// `hub` stanza). What THIS file asserts is the boundary a boot can decide before a
+// connection exists: a light-hub config is refused when it is incomplete, and the
+// refusal costs zero HTTP responses.
 
 import (
 	"fmt"

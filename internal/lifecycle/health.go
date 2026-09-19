@@ -57,6 +57,19 @@ func Health(cfg Config, in types.HealthInputs) types.HealthResponse {
 		detail["reason"] = "unstamped_build"
 	}
 
+	// The server profile (SPEC-13 §4.3): a degraded queue or archive tier
+	// degrades the ONE health status and names its reason, so a hub that stopped
+	// accepting is never reported as `ok` (rule 4 of SPEC-13 §1: degradation is a
+	// designed state, never a silent success).
+	if in.Hub != nil && in.Hub.Degraded {
+		if status != "stalled" {
+			status = "degraded"
+		}
+		if in.Hub.DegradedReason != "" {
+			detail["reason"] = in.Hub.DegradedReason
+		}
+	}
+
 	for _, r := range in.DegradedReasons {
 		if status != "stalled" {
 			status = "degraded"
@@ -78,6 +91,7 @@ func Health(cfg Config, in types.HealthInputs) types.HealthResponse {
 		Autonomy:      in.Autonomy,
 		Breakers:      in.Breakers,
 		RW:            in.RW,
+		Hub:           in.Hub,
 		Subsystems:    in.Subsystems,
 		Detail:        detail,
 	}

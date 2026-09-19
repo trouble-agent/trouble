@@ -491,7 +491,16 @@ func buildSentinel(d *Daemon, hostID string, projects []types.Project) (*sentine
 		RequireSecret: !d.Cfg.Ingest.Auth.LoopbackDSN,
 		LedgerWait:    types.Duration("2s"),
 	}
-	srv, err := sentinel.NewServer(cfg, sentinelSink{L: d.Ledger, d: d}, d.Scrubber)
+	// The sink is the profile's only plumbing decision (SPEC-13 §4.2): with a
+	// light-hub runtime mounted, ingestion goes scrub → sig → dedup gate → XADD →
+	// consumer → ledger.Append and the door returns the LEDGER's record, so the
+	// sentinel's own group-watermark arithmetic is unchanged; without one, the
+	// in-process path is byte-identical to what it always was.
+	var sink sentinelWriteSink = sentinelSink{L: d.Ledger, d: d}
+	if d.Hub != nil && d.Hub.Enabled() {
+		sink = hubSink{sentinelSink: sentinelSink{L: d.Ledger, d: d}, rt: d.Hub}
+	}
+	srv, err := sentinel.NewServer(cfg, sink, d.Scrubber)
 	if err != nil {
 		return nil, err.Error()
 	}

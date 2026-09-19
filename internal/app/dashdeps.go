@@ -274,6 +274,10 @@ func (d *Daemon) health() types.HealthResponse {
 		// the block: /health.json never reads "ok" for a subsystem it cannot
 		// prove is up.
 		Subsystems: d.Subsystems.Report(),
+		// The server-profile stanza (SPEC-13 §4.1 step 4, SPEC-12 §3.7a): nil
+		// under the standalone profile, and a degraded queue degrades the ONE
+		// health status rather than opening a second surface.
+		Hub: hubHealth(d),
 	}
 	v, sha, bt, unstamped := lifecycle.VersionInfo()
 	in.Version, in.GitSHA, in.BuildTime = v, sha, bt

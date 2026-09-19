@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
+	"github.com/totalwindupflightsystems/trouble/internal/hub"
 	"github.com/totalwindupflightsystems/trouble/internal/ladder"
 	"github.com/totalwindupflightsystems/trouble/internal/ledger"
 	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
@@ -54,6 +55,11 @@ type BootOptions struct {
 	// select each package's defaults; SentinelProjects non-nil (even empty)
 	// is the operator's statement about the sentinel's project set.
 	Subsystems SubsystemOptions
+
+	// HubStreams overrides the Redis command surface the light-hub runtime
+	// dials through (tests inject an in-memory one). Nil dials
+	// server.redis.url, which is what production does.
+	HubStreams hub.Streams
 }
 
 // Daemon is the assembled process.
@@ -73,6 +79,18 @@ type Daemon struct {
 	// nil member means "not built": the reason is one lifecycle record
 	// (stage=subsystem_not_built), never silence.
 	Subsystems *Subsystems
+
+	// Hub is the SPEC-13 light-hub runtime: nil under the standalone profile
+	// (which is the default and touches no queue and no archive tier), non-nil
+	// only when `server.profile=light-hub` resolved and its dependencies were
+	// usable. When it exists it sits in front of the sentinel's ledger sink and
+	// carries the `hub` stanza on /health.json.
+	Hub *hub.Runtime
+
+	// hubStreams is the Redis command surface the runtime dials through. It is
+	// nil in production (the URL is dialled); a test injects an in-memory
+	// implementation so the light-hub boot path is exercisable without a Redis.
+	hubStreams hub.Streams
 
 	log     *slog.Logger
 	notify  *notifier
@@ -210,24 +228,32 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		o.Subsystems.SentinelProjects = declaredProjects
 	}
 
-	// 6c. the server profile gate (SPEC-12 §3.7a rule 2, SPEC-13 §4.1 step 1).
-	// The profile resolves like any other key, and a profile whose required keys
-	// are missing is refused HERE — after the config record, before the bind
-	// preflight holds a listener, so the refusal is worth exactly zero HTTP
-	// responses and the ledger carries one boot_refused record naming the code
-	// (TROUBLE-HUB-001).
-	if err := cfg.CheckServerProfile(); err != nil {
-		d.bootFailure(ctx, types.CodeHub001, err)
-		return nil, err
+	// 6c. the server profile gate and the light-hub runtime (SPEC-12 §3.7a rule
+	// 2, SPEC-13 §4.1 steps 1-4). The profile resolves like any other key; a
+	// profile whose required keys are missing is refused HERE — after the config
+	// record, before the bind preflight holds a listener, so the refusal is worth
+	// exactly zero HTTP responses and the ledger carries one boot_refused record
+	// naming the code (TROUBLE-HUB-001).
+	//
+	// A VALIDATED light-hub profile then opens its queue: dial + PING + INFO
+	// preflight (002/003/015/016), the consumer group (005), and the archival
+	// target (009 pauses archival without touching ingestion). `require_redis`
+	// decides whether a Redis that cannot be reached degrades the start (§4.3 row
+	// one) or refuses the boot (row two) — and it is a decision, not a default.
+	gate, gerr := hub.GateWithPaths(cfg, root.Path, hubLedgerPath(root.Path), l.Status().File)
+	if gerr != nil {
+		d.bootFailure(ctx, types.CodeHub001, gerr)
+		return nil, gerr
 	}
-	if profile := cfg.ServerProfile(); profile.Profile == lifecycle.ProfileLightHub {
-		// The profile's plumbing (Redis queue + consumer group + DuckBrain
-		// archival, SPEC-13 §2.3) is internal/hub's, and that package does not
-		// exist in this tree: a validated light-hub config therefore serves on
-		// the standalone in-process path. Say so out loud instead of letting
-		// "profile = light-hub" imply a queue nobody opened.
-		log.Warn("server.profile=light-hub: the hub runtime (SPEC-13 Redis queue + DuckBrain archival) is not built in this tree; ingestion runs on the standalone in-process path",
-			"profile", profile.Profile)
+	d.hubStreams = o.HubStreams
+	if gate.Enabled {
+		rt, herr := openHubRuntime(ctx, d, hostID, gate, root.Path)
+		if herr != nil {
+			code := hubBootCodeOf(herr)
+			d.bootFailure(ctx, code, herr)
+			return nil, herr
+		}
+		d.Hub = rt
 	}
 
 	// 7. bind preflight (003) — listeners are held, never closed and reopened.
@@ -402,6 +428,15 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		}
 	}()
 
+	// 13a. the light-hub runtime: the consumer starts BEFORE the ingestion
+	// listener accepts traffic (SPEC-13 §4.1 step 3), so no request can be
+	// 200-acked into a queue nobody drains. The ladder exists by now, so a queued
+	// `group` record finds an admission path exactly as the local path does.
+	if err := startHubRuntime(ctx, d); err != nil {
+		d.bootFailure(ctx, hubBootCodeOf(err), err)
+		return nil, err
+	}
+
 	// 13b. the sentinel, on the ingest listener the preflight held. Serve is
 	// mounted here so the boot order stays: ledger → scrub → sensors → ladder
 	// → sentinel (a group record arriving before the ladder exists would find
@@ -501,6 +536,10 @@ func (d *Daemon) drain() error {
 	if d.sentinelLn != nil {
 		_ = d.sentinelLn.Close()
 	}
+	// The queue stops after ingest and before the ledger closes: the consumer's
+	// last batch must land in the same ledger the drain then fsyncs (SPEC-13
+	// §3.3 — the ack-after-fsync rule is what makes that ordering safe).
+	closeHubRuntime(d)
 	if d.Subsystems != nil {
 		if d.Subsystems.Flow != nil {
 			_ = d.Subsystems.Flow.Stop(ctx)

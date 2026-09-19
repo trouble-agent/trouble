@@ -89,3 +89,69 @@ func init() {
 		CodeClass[code] = class
 	}
 }
+
+// RedisStreamOffsets is the live queue state of SPEC-TYPES §3.15.11: the zero
+// value is exactly what a standalone profile reports (SPEC-13 §3.3 reports the
+// same fields in /health.json every heartbeat).
+type RedisStreamOffsets struct {
+	Stream          string `json:"stream"`
+	Group           string `json:"group"`
+	Consumer        string `json:"consumer"`
+	StreamLen       int64  `json:"stream_len"`
+	Pending         int64  `json:"pending"`
+	Lag             int64  `json:"lag"`
+	LastDeliveredID string `json:"last_delivered_id"`
+	LastAckedID     string `json:"last_acked_id"`
+	Reclaims        int64  `json:"reclaims"`
+	DedupHits       int64  `json:"dedup_hits"`
+	DedupMisses     int64  `json:"dedup_misses"`
+	DedupConflicts  int64  `json:"dedup_conflicts"`
+	AOF             bool   `json:"aof"`
+	Policy          string `json:"policy"`
+	EvictedKeys     int64  `json:"evicted_keys"`
+	OptionsChecked  bool   `json:"options_checked"`
+	DedupWindow     string `json:"dedup_window"`
+	Backpressure    int64  `json:"backpressure_total"`
+	Degraded        bool   `json:"degraded"`
+	DegradedReason  string `json:"degraded_reason"`
+	Since           string `json:"since"`
+}
+
+// HubStatus is the server profile's stanza in the one health surface
+// (SPEC-TYPES §3.15.11, SPEC-13 §4.1 step 4). It is present only when a profile
+// with a runtime is in force; `Enabled=false` is the standalone answer.
+type HubStatus struct {
+	Enabled        bool               `json:"enabled"`
+	Profile        string             `json:"profile"`
+	Since          string             `json:"since"`
+	Redis          RedisStreamOffsets `json:"redis"`
+	ArchiveQueue   int64              `json:"archive_queue"`
+	ArchiveLastTS  string             `json:"archive_last_ts"`
+	ArchivedFiles  int64              `json:"archived_files"`
+	DroppableGens  int                `json:"droppable_generations"`
+	MarkerPending  int64              `json:"marker_pending"`
+	RouteCounters  map[string]int64   `json:"route_counters"`
+	Degraded       bool               `json:"degraded"`
+	DegradedReason string             `json:"degraded_reason"`
+}
+
+// LedgerArchiveMarker is one append-only object per generation transition
+// (SPEC-TYPES §3.15.11, SPEC-13 §3.5). State ∈ pending|exported|verified|dropped|failed.
+type LedgerArchiveMarker struct {
+	MarkerID   string `json:"marker_id"`
+	File       string `json:"file"`
+	Namespace  string `json:"namespace"`
+	ObjectKey  string `json:"object_key"`
+	Bytes      int64  `json:"bytes"`
+	GzipBytes  int64  `json:"gzip_bytes"`
+	Sha256     string `json:"sha256"`
+	Records    int64  `json:"records"`
+	FirstSeq   uint64 `json:"first_seq"`
+	LastSeq    uint64 `json:"last_seq"`
+	MinTS      string `json:"min_ts"`
+	MaxTS      string `json:"max_ts"`
+	State      string `json:"state"`
+	VerifiedTS string `json:"verified_ts"`
+	ErrorCode  string `json:"error_code"`
+	TS         string `json:"ts"`
+}

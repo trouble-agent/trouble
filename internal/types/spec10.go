@@ -24,6 +24,11 @@ type HealthResponse struct {
 	Autonomy      AutonomyGates     `json:"autonomy"`
 	Breakers      []Breaker         `json:"breakers"`
 	RW            RuntimeWatermarks `json:"runtime_watermarks"`
+	// Hub is the server-profile stanza (SPEC-13 §4.1 step 4, SPEC-TYPES §3.12
+	// field table). It is nil — and therefore absent from the JSON — under the
+	// standalone profile, which is the only profile that has no hub runtime to
+	// describe.
+	Hub *HubStatus `json:"hub,omitempty"`
 	// Subsystems is the per-subsystem built/refused block (SPEC-12 §3.3a). The
 	// key is always present: a health surface that cannot say whether its
 	// subsystems were built is how an instance whose ingest plane is absent

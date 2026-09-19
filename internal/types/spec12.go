@@ -66,6 +66,11 @@ type HealthInputs struct {
 	// Subsystems is the built/refused block of §3.3a, read from the composition
 	// root's live subsystem set (never re-derived here: one truth per question).
 	Subsystems []SubsystemHealth
+	// Hub is the server-profile stanza (SPEC-13 §4.1 step 4). Nil means the
+	// standalone profile: the field is absent from /health.json rather than
+	// zeroed, so "no profile runtime" is distinguishable from "a runtime with
+	// nothing to report".
+	Hub *HubStatus
 
 	// DegradedReasons is a list of machine-readable causes (e.g. "unstamped_build",
 	// "forward_refused", "cgroup_v1"); any entry makes the response "degraded".

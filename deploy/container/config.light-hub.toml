@@ -18,17 +18,18 @@
 # registration this file was refused with TROUBLE-LIFECYCLE-001 (unknown file
 # key) — see TRBL-027 and docs/operations.md §14.
 #
-# The profile's RUNTIME — the Redis stream and consumer group, the dedup gate
-# and the DuckBrain archival tier (SPEC-13 §2.3) — is internal/hub's and is NOT
-# built in this tree. A light-hub boot therefore serves on the standalone
-# in-process path and says so with a startup warning; nothing here queues an
-# event yet, and /health.json carries no `hub` stanza.
-#
-# The compose default still mounts config.toml (standalone) for that reason, and
-# the redis service in docker-compose.yml runs under the SPEC-13 preflight
-# constraints (appendonly yes, maxmemory-policy noeviction) ready for the
-# runtime to land. Switch the compose volume source to this file when it does;
-# do not delete the keys to make a boot pass.
+# The profile's RUNTIME — the Redis stream and consumer group, the dedup gate,
+# the degradation state machine and the DuckBrain archival tier (SPEC-13 §2.3) —
+# IS built as of TRBL-029: a light-hub boot opens the queue, mounts it in front
+# of the sentinel's ledger sink, and /health.json carries a `hub` stanza
+# (aof/policy/evicted_keys from the INFO preflight, stream_len, pending, lag,
+# dedup counters, archive queue, route counters). With server.duckbrain.endpoint
+# left empty the archival tier pauses with TROUBLE-HUB-009 while ingestion keeps
+# serving — set it to enable archival. The compose default still mounts
+# config.toml (standalone) for a zero-dependency first boot, and the redis
+# service in docker-compose.yml runs under the SPEC-13 preflight constraints
+# (appendonly yes, maxmemory-policy noeviction). Switch the compose volume
+# source to this file to run the hub; do not delete the keys to make a boot pass.
 # ============================================================================
 #
 # SPEC-13 behaviour this file is written to exercise: with Redis unavailable

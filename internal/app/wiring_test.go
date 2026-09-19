@@ -241,3 +241,52 @@ func TestAdmissionThroughTheWiringOpensOneIncident(t *testing.T) {
 		t.Errorf("the admitted incident has no timeline rows")
 	}
 }
+
+// TestDraftWriterCarriesTheLedgerWatermark is TRBL-010: lifecycle's heartbeat
+// reads ledger_last_seq/ledger_last_ts through an optional Seq/LastRecordTS type
+// assertion on the writer it is handed. The daemon hands it DraftWriter, so the
+// adapter must expose both — without them the periodic heartbeat and the
+// shutdown heartbeat both wrote 0/"" on a live instance with records.
+func TestDraftWriterCarriesTheLedgerWatermark(t *testing.T) {
+	s, _ := testStore(t)
+	ctx := context.Background()
+	w := DraftWriter{s}
+
+	// The assertion lifecycle performs must succeed on the adapter itself.
+	seam, ok := any(w).(interface {
+		Seq() uint64
+		LastRecordTS() string
+	})
+	if !ok {
+		t.Fatal("DraftWriter does not expose the Seq/LastRecordTS watermark seam the heartbeat reads")
+	}
+
+	// Opening a ledger files its own boot records, so a live instance already
+	// reports a watermark: both halves must be real, not the zeroes the
+	// heartbeat used to write.
+	openSeq := seam.Seq()
+	openTS := seam.LastRecordTS()
+	if openSeq == 0 || openTS == "" {
+		t.Fatalf("the ledger reports no watermark right after open (%d/%q) — heartbeat.json would carry zeros", openSeq, openTS)
+	}
+	if _, err := types.ParseUTC(openTS); err != nil {
+		t.Errorf("LastRecordTS() = %q, not a parseable stamp: %v", openTS, err)
+	}
+
+	rec, err := s.Append(ctx, types.KEvent, "psi\x1fio-pressure\x1fhost1", "", map[string]any{"message": "io pressure"})
+	if err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := s.Flush(ctx); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	if got := seam.Seq(); got < rec.Seq || got <= openSeq {
+		t.Errorf("Seq() = %d after appending seq %d (was %d) — the adapter is not reading the live index", got, rec.Seq, openSeq)
+	}
+
+	// A nil store degrades honestly instead of panicking.
+	var zero DraftWriter
+	if zero.Seq() != 0 || zero.LastRecordTS() != "" {
+		t.Errorf("nil-store writer = %d/%q, want 0/\"\"", zero.Seq(), zero.LastRecordTS())
+	}
+}

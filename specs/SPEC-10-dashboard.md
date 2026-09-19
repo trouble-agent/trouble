@@ -325,11 +325,38 @@ embedded files, so `'self'` suffices with no inline script and no inline style.
 | Read / write / idle timeouts | 10 s / 10 s / 60 s (`WriteTimeout` sized for 100 concurrent partial renders) | connection closed |
 | Read-scope requests | `dashboard.rate.read_rps` = 20/s, burst 60, per token **and** per client IP | **429** + `Retry-After` + TROUBLE-DASHBOARD-012 |
 | Write requests | `dashboard.rate.write_rps` = 5/s, burst 10, per token | 429 + `Retry-After` + TROUBLE-DASHBOARD-012 |
-| Auth failures | 10 failures from one client IP inside 60 s → that IP is throttled for 60 s | 429 + `Retry-After` + TROUBLE-DASHBOARD-012 |
+| Auth failures | 10 failures for one presented credential inside 60 s → that credential is throttled for 60 s (a request presenting no grammar-valid credential is counted and throttled per client IP — §2.8a) | 429 + `Retry-After` + TROUBLE-DASHBOARD-012 |
 | Metadata in responses | never the token, its hash, the CSRF secret, or a DSN key | — |
 
 Retry-After is the integer seconds until the bucket refills (≥1). Two phones polling seven partials on the
 2 s/1 s schedule consume ≈9 req/s, comfortably inside the read bucket.
+
+### 2.8a Auth-failure throttle identity (amendment)
+
+The auth-failure throttle counts failures per **throttle identity**, resolved per request in this order:
+
+1. A request that carries exactly one credential carrier value (the `Authorization: Bearer` header or the
+   `trouble_dash` cookie) whose value satisfies the §2.2 token grammar `^tdt_[A-Za-z0-9_-]{43}$` is keyed on
+   **that credential** (`sha256(value)[:8]`, hex — the plaintext is never retained).
+2. Every other request — no material at all, a value that cannot be a token, or two carriers with different
+   values — is keyed on the **client IP** (§2.4 resolves the peer, trusted-proxy `X-Forwarded-For` included).
+
+`auth_fail_limit` failures for one identity inside `auth_fail_window` throttle **that identity** for the
+window; a throttled identity answers **429 + `Retry-After` + TROUBLE-DASHBOARD-012**
+(`detail:"auth_failure_throttle"`), which is distinguishable from the **401** an auth rejection carries, and a
+successful authentication clears its identity's failure history. Two consequences are normative:
+
+* **A valid token is never throttled by failures it did not make.** Ten failures from a mistyped or rotated
+  token throttle that token, never the client IP — an operator holding a good token on the same phone, behind
+  the same proxy or the same NAT keeps serving. (Pre-amendment, one bad token locked the whole IP out for 60 s
+  with a 429 that read like an auth rejection.)
+* **An unauthenticated flood is still throttled**, because a request that presents no grammar-valid credential
+  is counted against, and blocked by, its client IP.
+
+Residual, stated rather than implied: failures spread across many *distinct* grammar-valid credentials are not
+IP-throttled. The token space (§3.2, 32 random bytes) is what makes that a non-threat; the throttle is a
+brake on repetition, not a credential-search bound. The failure map is bounded (`maxThrottleKeys`) and pruned
+by window, so credential-keyed entries cannot grow without limit (§2.9).
 
 ### 2.9 Memory budget and the no-scan rule
 
@@ -410,6 +437,19 @@ type healthStrip struct { Seq uint64; StallS float64; Status, Mode string; Kill 
 type stallState struct { LastSeq uint64; Repeat int; LastOK string; Banner bool }
 ```
 
+### 3.1a First paint and the footer stamp (amendment)
+
+A page is rendered once and then kept live by the §2.6 polls, so the FIRST response must already be
+self-consistent — a value a poll later corrects is a lie on the operator's screen:
+
+* **The budget panel is seeded on every page render** from the same source row 18 polls
+  (`RuntimeWatermarks` + the version accessor, §2.1 row 18). A render that cannot read a watermark still
+  renders the panel (empty field, never a fabricated number), but it never renders zeroes for counters the
+  page's own header block is showing in the same response.
+* **The footer's build stamp reads the version accessor the health surface reports** (§2.9, `/health.json`'s
+  `version`/`git_sha`). It is never a template field left unpopulated: an empty stamp in a footer means the
+  build is genuinely unstamped, exactly as `/health.json` says.
+
 ### 3.2 Token store (hashed at rest, 0600, plaintext shown once)
 
 `dashboard.token_file` default `~/.config/trouble/dashboard-tokens.json` — deliberately **not** inside the
@@ -486,7 +526,7 @@ It is the same struct `/` renders and the stall checker parses; there is no seco
 | `dashboard.max_body_bytes` | `4096` | POST body cap |
 | `dashboard.rate.read_rps` / `read_burst` | `20` / `60` | read bucket |
 | `dashboard.rate.write_rps` / `write_burst` | `5` / `10` | write bucket |
-| `dashboard.auth_fail_limit` / `auth_fail_window` | `10` / `60s` | per-IP auth-failure throttle |
+| `dashboard.auth_fail_limit` / `auth_fail_window` | `10` / `60s` | auth-failure throttle, keyed by credential when one is presented and by client IP otherwise (§2.8a) |
 | `dashboard.mem_pressure_pct` | `80` | share of `MemoryHigh` that sheds poll load |
 
 ## 4. Wiring
@@ -566,7 +606,7 @@ code outside the range is emitted. Classes are as cataloged. Cross-area codes re
 | TROUBLE-DASHBOARD-009 | permanent | 404 | no `(method,path)` row matches (including wrong method on a known path) | static HTML (browser) / JSON (API), never echoes the path |
 | TROUBLE-DASHBOARD-010 | permanent | 403 / 409 | `read_only`, kill-switch clearing without `allow_resume`, `mode:"full"` without `allow_full`, or a stale-view CAS mismatch (409, `detail:"stale_view"`) | JSON + refreshed fragment on 409 |
 | TROUBLE-DASHBOARD-011 | permanent | 413 | POST body > `dashboard.max_body_bytes` | JSON + `Retry-After` omitted (not a rate condition) |
-| TROUBLE-DASHBOARD-012 | transient | 429 | read/write bucket empty, or the per-IP auth-failure throttle is active | JSON + `Retry-After: <seconds ≥1>` |
+| TROUBLE-DASHBOARD-012 | transient | 429 | read/write bucket empty, or the §2.8a auth-failure throttle is active for this request's identity | JSON + `Retry-After: <seconds ≥1>` |
 | TROUBLE-DASHBOARD-013 | permanent | 503 | identity seam impl absent, token store unreadable/unparsable (fail-closed per §3.2) | JSON; loopback `/health.json` keeps serving |
 
 Ledger mirror rule (SPEC-INDEX §5.3): a refusal that reaches a subsystem is recorded by that subsystem in its
@@ -620,10 +660,10 @@ All tests are `internal/dashboard` package tests plus one end-to-end test that s
 | Test file | Cases | Pass thresholds |
 |---|---|---|
 | `routes_test.go` | table completeness (21 rows, each row has a scope or is the documented health exemption); every `(method,path)` reachable through a real `http.ServeMux`; duplicate registration fails; **every route answers 404 for a query-string token** (`?token=`, `?sdt=` etc.); no route accepts a token in a path segment | 0 unregistered rows; 0 routes reachable with a URL-borne token (**AC-19/AC-16** basis) |
-| `auth_test.go` | matrix: absent token (001), 6 malformed forms (002), revoked (002), 3 scope refusals (003), both carriers equal, both carriers different (002), loopback health exemption on/off, non-loopback request on a loopback listener (006), ingestion-key-equal token (002), identity impl absent (013), token store unreadable (013, and `/health.json` still 200 on loopback) | 30+ cases, all codes/statuses exact |
+| `auth_test.go` | matrix: absent token (001), 6 malformed forms (002), revoked (002), 3 scope refusals (003), both carriers equal, both carriers different (002), loopback health exemption on/off, non-loopback request on a loopback listener (006), ingestion-key-equal token (002), identity impl absent (013), token store unreadable (013, and `/health.json` still 200 on loopback), the §2.8a throttle: 10 failures for one credential then a **valid** token on the same client IP (200), an unseen credential still 401, a no-material flood throttled per client IP | 30+ cases, all codes/statuses exact |
 | `csrf_test.go` | missing header, wrong header, cookie≠header, value from 3 hours ago, value bound to a different token ID, Origin mismatch, Bearer+cookie mixture, correct browser POST, correct curl Bearer POST | every failure → 403 + 004 with no state change; both legal paths → 200 |
 | `partials_test.go` | each of the 7 partials returns its exact root `id`, carries `data-seq`/`data-rendered-ts`/`data-stall-s`, contains no `<html>`/`<body>`/`<script>`, and is ≤8 KB with 200 rows of fixtures; the whitelist rejects an unknown name (008) | 7/7 exact; 0 inline scripts |
-| `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates |
+| `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML; first-paint budget: the server-rendered panel's `incidents open`/`groups open` equal the page's own header counters and its byte/rate/version rows equal what `/partials/budget` serves; the footer stamp on all seven pages equals the `version`/`git_sha` **`/health.json` reports** | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates; 0 zero-valued first-paint rows; footer stamp identical to the health surface |
 | `live_test.go` | **AC-19 timing**: trigger a fixture incident, poll `/partials/incidents?since=` at the real intervals, record `ts_response − ts_trigger` of the first fragment containing the ID; 20 iterations; assert p100 ≤2000 ms and p50 ≤1100 ms; assert the strip-accelerator-off variant still passes p95 ≤2000 ms; assert the stall banner appears when the writer is paused ≥`stall_alert_s` | p100 ≤2000 ms (**AC-19**), p95 ≤2000 ms without the accelerator |
 | `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; RSS delta sampled every 250 ms; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB), p99 render ≤20 ms, 0 ledger file opens |
 | `integration/e2e_dashboard_test.go` | start the daemon, ack/close/autonomy against the mock ladder + lifecycle, assert the recorded `Actor{kind:human, id:<token label>}` and the ledger record kind; `read`-scope token can hit every GET and partial and gets 003 on all three POSTs; `/health.json` parsed into `HealthResponse` with `ledger_last_seq` advancing | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |

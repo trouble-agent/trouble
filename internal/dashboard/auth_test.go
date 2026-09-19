@@ -407,17 +407,25 @@ func TestIdentitySeamAbsent(t *testing.T) {
 	}
 }
 
-// TestAuthFailureThrottle is §2.8: 10 failures from one IP inside 60s throttle
-// that IP for 60s with 429 + Retry-After ≥ 1.
-func TestAuthFailureThrottle(t *testing.T) {
-	env := newEnv(t, envOptions{noRefresh: true, cfg: func(c *Config) {
-		c.AuthFailLimit = 10
-		c.AuthFailWindow = types.Duration("60s")
-		c.ReadRPS = 1000
-		c.ReadBurst = 1000
-	}})
+// throttleRates keeps the §2.8 auth-failure throttle at its shipped limit while
+// removing the read bucket, so the requests the throttle cases make are never
+// confused with the rate limiter's own 429.
+func throttleRates(cfg *Config) {
+	cfg.ReadRPS = 1e9
+	cfg.ReadBurst = 1_000_000
+	cfg.AuthFailLimit = 10
+	cfg.AuthFailWindow = types.Duration("60s")
+}
 
-	bad := "tdt_" + strings.Repeat("D", 43)
+// TestAuthFailureThrottle is §2.8/§2.8a: 10 failures for ONE credential inside
+// 60s throttle that credential for 60s with 429 + Retry-After ≥ 1 — and a VALID
+// token is never throttled by failures it did not make (TRBL-010 defect 3,
+// where a mistyped/rotated token throttled every request from the client IP,
+// including ones carrying a good token).
+func TestAuthFailureThrottle(t *testing.T) {
+	env := newEnv(t, envOptions{cfg: throttleRates})
+
+	bad, _ := tokenFor(9) // grammar-valid, absent from the store
 	throttled := false
 	for i := 0; i < 12; i++ {
 		resp, body := env.get("/", bad)
@@ -427,29 +435,92 @@ func TestAuthFailureThrottle(t *testing.T) {
 			if eb.Error.Code != string(types.CodeDashboard012) {
 				t.Fatalf("throttle code = %s, want %s", eb.Error.Code, types.CodeDashboard012)
 			}
+			if eb.Detail != "auth_failure_throttle" {
+				t.Fatalf("throttle detail = %q, want auth_failure_throttle", eb.Detail)
+			}
 			ra := resp.Header.Get("Retry-After")
 			if ra == "" || ra == "0" {
 				t.Fatalf("Retry-After = %q, want an integer ≥ 1", ra)
 			}
 			break
 		}
+		// Before the limit the invalid credential is REJECTED, not throttled:
+		// 401 + 002 is a different answer from the 429 the throttle gives.
 		if resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("attempt %d: status = %d, want 401 before the limit", i, resp.StatusCode)
 		}
+		eb := decodeError(t, body)
+		if eb.Error.Code != string(types.CodeDashboard002) {
+			t.Fatalf("attempt %d: code = %s, want %s", i, eb.Error.Code, types.CodeDashboard002)
+		}
 	}
 	if !throttled {
-		t.Fatal("11 auth failures did not throttle the IP")
+		t.Fatal("11 auth failures did not throttle the credential")
 	}
 
-	// A good token from the same (throttled) IP is refused too: the throttle is
-	// per client IP, not per credential.
-	resp, body := env.get("/", env.readPlain)
+	// The credential that failed is still refused for the rest of the window —
+	// and answered 429, which is distinguishable from its own 401.
+	resp, body := env.get("/", bad)
 	wantStatus(t, resp, body, http.StatusTooManyRequests)
 
-	// After the window it recovers.
-	env.clock.advance(61 * time.Second)
+	// A VALID token from the same client IP serves normally: it is throttled by
+	// its own failures only, and it has none.
 	resp, body = env.get("/", env.readPlain)
 	wantStatus(t, resp, body, http.StatusOK)
+	for _, path := range []string{"/incidents", "/partials/budget", "/health.json"} {
+		resp, body = env.get(path, env.readPlain)
+		wantStatus(t, resp, body, http.StatusOK)
+	}
+
+	// A second, different credential is unaffected: it has made no failures.
+	other, _ := tokenFor(8)
+	resp, body = env.get("/", other)
+	wantStatus(t, resp, body, http.StatusUnauthorized)
+	if eb := decodeError(t, body); eb.Error.Code != string(types.CodeDashboard002) {
+		t.Fatalf("unseen credential code = %s, want %s (it must be 401, never the throttle's 429)", eb.Error.Code, types.CodeDashboard002)
+	}
+
+	// The throttle is a window, not a ban: after it the credential is answered
+	// 401 again, and the valid token keeps working.
+	env.clock.advance(61 * time.Second)
+	resp, body = env.get("/", bad)
+	wantStatus(t, resp, body, http.StatusUnauthorized)
+	resp, body = env.get("/", env.readPlain)
+	wantStatus(t, resp, body, http.StatusOK)
+}
+
+// TestThrottleAnonymousFloodStaysPerIP is the other half of §2.8a: a request
+// that presents no grammar-valid credential is counted and throttled per client
+// IP (an unauthenticated flood is still answered 429 instead of being handed to
+// the identity seam for free) — while a valid credential from that same IP is
+// never collateral damage.
+func TestThrottleAnonymousFloodStaysPerIP(t *testing.T) {
+	env := newEnv(t, envOptions{cfg: throttleRates})
+
+	// No Authorization header and no cookie at all: 401 + 001 for the first
+	// auth_fail_limit requests, then the IP is throttled.
+	var last int
+	for i := 0; i < 12; i++ {
+		resp, _ := env.get("/", "")
+		last = resp.StatusCode
+	}
+	if last != http.StatusTooManyRequests {
+		t.Fatalf("anonymous flood #12 status = %d, want 429", last)
+	}
+
+	// A grammar-invalid value is also IP-keyed (§2.8a): still 429.
+	resp, body := env.get("/", "not-a-token")
+	wantStatus(t, resp, body, http.StatusTooManyRequests)
+
+	// The valid token presents a credential, so it is keyed on that credential
+	// and serves — the operator is not locked out by someone else's flood.
+	resp, body = env.get("/", env.readPlain)
+	wantStatus(t, resp, body, http.StatusOK)
+
+	// Once the window passes, the anonymous path is answered 401 again.
+	env.clock.advance(61 * time.Second)
+	resp, body = env.get("/", "")
+	wantStatus(t, resp, body, http.StatusUnauthorized)
 }
 
 // TestReadBucketAndFairness is §2.8/edge case 10: the read bucket is keyed by

@@ -587,6 +587,12 @@ Staleness: `now - ts > lifecycle.heartbeat_stale_after` (90s) ⇒ TROUBLE-LIFECY
 **secondary** signal and never the alarm by itself: a wedged ledger writer keeps heartbeating happily, which
 is exactly why the primary signal is sequence advance.
 
+`ledger_last_seq` / `ledger_last_ts` are read from the writer's `Seq()` / `LastRecordTS()` seam **on every
+beat** — the same optional seam the shutdown heartbeat reads — so a beat always carries the watermark the
+ledger holds at that moment, and the writer the daemon hands over (the `Store` draft adapter) must expose it.
+A writer without the seam reports `0` / `""`: never a stale cached value, and never an invented one. The same
+timestamp is the input to the idle-tick rule below.
+
 **Sequence advance is made unconditional (the idle-tick rule).** On a quiet host the ledger can legitimately
 produce no records for hours, which would make "seq not advancing" a false alarm. The daemon therefore writes
 one `lifecycle` record with `payload:{"stage":"idle_tick"}` whenever `now - last_seq_ts >=

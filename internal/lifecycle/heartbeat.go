@@ -13,7 +13,9 @@ import (
 
 // HeartbeatLoop writes heartbeat.json atomically every cfg.Lifecycle.HeartbeatInterval
 // and emits an idle_tick lifecycle record when the ledger has been quiet
-// (SPEC-12 §3.3). It never blocks on the ledger writer.
+// (SPEC-12 §3.3). It never blocks on the ledger writer. The ledger watermark
+// (ledger_last_seq/ledger_last_ts) is read from the writer's optional
+// Seq/LastRecordTS seam on every write; a writer without it reports zero.
 func HeartbeatLoop(ctx context.Context, cfg Config, w RecordWriter, sensors func() map[string]string) error {
 	path := cfg.Lifecycle.HeartbeatPath
 	interval := cfg.Lifecycle.HeartbeatInterval.Std()
@@ -26,19 +28,35 @@ func HeartbeatLoop(ctx context.Context, cfg Config, w RecordWriter, sensors func
 	}
 
 	v, sha, _, _ := VersionInfo()
-	lastSeq := uint64(0)
-	lastSeqTS := ""
+
+	// The ledger watermark is read from the writer on every write — the same
+	// optional seam WriteShutdownHeartbeat uses. It used to be a pair of locals
+	// initialised to zero and never updated, so heartbeat.json carried
+	// ledger_last_seq=0 / ledger_last_ts="" on a live instance with records (and
+	// the idle_tick below could never fire, because the timestamp it tests was
+	// permanently empty). A writer without the seam reports zero honestly.
+	watermark := func() (uint64, string) {
+		if r, ok := w.(interface {
+			Seq() uint64
+			LastRecordTS() string
+		}); ok {
+			return r.Seq(), r.LastRecordTS()
+		}
+		return 0, ""
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	write := func(stage string) error {
+		seq, seqTS := watermark()
 		hb := types.Heartbeat{
 			TS:            types.NowUTC(),
 			PID:           os.Getpid(),
 			Version:       v,
 			GitSHA:        sha,
-			LedgerLastSeq: lastSeq,
-			LedgerLastTS:  lastSeqTS,
+			LedgerLastSeq: seq,
+			LedgerLastTS:  seqTS,
 			Stage:         stage,
 			Sensors:       sensors(),
 		}
@@ -56,6 +74,7 @@ func HeartbeatLoop(ctx context.Context, cfg Config, w RecordWriter, sensors func
 			return ctx.Err()
 		case <-ticker.C:
 			now := time.Now().UTC()
+			_, lastSeqTS := watermark()
 			if w != nil && lastSeqTS != "" {
 				ts, err := time.Parse(time.RFC3339Nano, lastSeqTS)
 				if err == nil && now.Sub(ts) >= idleInterval {

@@ -121,20 +121,33 @@ func (l *limiter) reap(now time.Time) {
 	}
 }
 
-// ipThrottle is the per-IP auth-failure throttle (§2.8): auth_fail_limit
-// failures from one client IP inside auth_fail_window → that IP is throttled
-// for the window. Once throttled, requests from the IP answer 429 + 012.
-type ipThrottle struct {
+// authThrottle is the auth-failure throttle (§2.8, §2.8a): auth_fail_limit
+// failures for one THROTTLE IDENTITY inside auth_fail_window → that identity is
+// throttled for the window. The identity is the credential the request
+// presented (see throttleKey): a valid token is therefore never throttled by
+// failures it did not make — the defect TRBL-010 fixed — while a request that
+// presents no grammar-valid credential is still counted and throttled per
+// client IP, which keeps an unauthenticated flood off the identity seam.
+//
+// Once an identity is throttled its requests answer 429 + 012 (never 401): the
+// refusal is distinguishable from an auth rejection by status and code alone.
+type authThrottle struct {
 	limit  int
 	window time.Duration
 
 	mu    sync.Mutex
 	fails map[string][]time.Time
-	block map[string]time.Time // ip → blocked until
+	block map[string]time.Time // identity → blocked until
 }
 
-func newThrottle(cfg Config) *ipThrottle {
-	return &ipThrottle{
+// maxThrottleKeys bounds the failure map. Credential-keyed entries are
+// attacker-influenced (a distinct value per request), so the map is pruned once
+// it exceeds this many keys instead of growing with the request stream (§2.9:
+// the dashboard's steady RSS is a budget, not a hope).
+const maxThrottleKeys = 4096
+
+func newThrottle(cfg Config) *authThrottle {
+	return &authThrottle{
 		limit:  cfg.AuthFailLimit,
 		window: cfg.AuthFailWindow.Std(),
 		fails:  map[string][]time.Time{},
@@ -142,30 +155,30 @@ func newThrottle(cfg Config) *ipThrottle {
 	}
 }
 
-// blocked reports whether the IP is inside its throttle window.
-func (t *ipThrottle) blocked(ip string, now time.Time) bool {
-	if t == nil || ip == "" {
+// blocked reports whether the identity is inside its throttle window.
+func (t *authThrottle) blocked(key string, now time.Time) bool {
+	if t == nil || key == "" {
 		return false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if until, ok := t.block[ip]; ok && now.Before(until) {
+	if until, ok := t.block[key]; ok && now.Before(until) {
 		return true
 	}
-	delete(t.block, ip)
+	delete(t.block, key)
 	return false
 }
 
-// fail records one auth failure at now; returns true when the limit is crossed
-// (the IP is now throttled).
-func (t *ipThrottle) fail(ip string, now time.Time) bool {
-	if t == nil || ip == "" || t.limit <= 0 {
+// fail records one auth failure for the identity at now; returns true when the
+// limit is crossed (the identity is now throttled).
+func (t *authThrottle) fail(key string, now time.Time) bool {
+	if t == nil || key == "" || t.limit <= 0 {
 		return false
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cut := now.Add(-t.window)
-	f := t.fails[ip]
+	f := t.fails[key]
 	kept := f[:0]
 	for _, ts := range f {
 		if ts.After(cut) {
@@ -173,21 +186,42 @@ func (t *ipThrottle) fail(ip string, now time.Time) bool {
 		}
 	}
 	kept = append(kept, now)
-	t.fails[ip] = kept
+	t.fails[key] = kept
 	if len(kept) > t.limit {
-		t.block[ip] = now.Add(t.window)
-		delete(t.fails, ip)
+		t.block[key] = now.Add(t.window)
+		delete(t.fails, key)
 		return true
+	}
+	if len(t.fails) > maxThrottleKeys {
+		t.pruneLocked(now)
 	}
 	return false
 }
 
-// success clears the failure history on a successful authentication.
-func (t *ipThrottle) success(ip string) {
-	if t == nil || ip == "" {
+// pruneLocked drops identities with no failure inside the current window. It
+// runs only once the map is over its bound, so the steady path pays nothing.
+func (t *authThrottle) pruneLocked(now time.Time) {
+	cut := now.Add(-t.window)
+	for key, ts := range t.fails {
+		fresh := false
+		for _, v := range ts {
+			if v.After(cut) {
+				fresh = true
+				break
+			}
+		}
+		if !fresh {
+			delete(t.fails, key)
+		}
+	}
+}
+
+// success clears the failure history of the identity that just authenticated.
+func (t *authThrottle) success(key string) {
+	if t == nil || key == "" {
 		return
 	}
 	t.mu.Lock()
-	delete(t.fails, ip)
+	delete(t.fails, key)
 	t.mu.Unlock()
 }

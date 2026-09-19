@@ -15,7 +15,9 @@ import (
 //     here (§2.2: evaluated before authentication).
 //  2. Live bind re-check: a non-loopback request on a loopback listener is
 //     refused 503 + 006 (§2.4).
-//  3. Auth-failure throttle: an IP inside its 60s throttle answers 429 + 012.
+//  3. Auth-failure throttle: an identity inside its 60s throttle answers 429 +
+//     012. The identity is the presented credential (§2.8a); a request
+//     presenting no grammar-valid credential counts against its client IP.
 //  4. Identify via the §2.5 seam; the /health.json loopback exemption skips
 //     all of this.
 //  5. Scope check → 403 + 003 with X-Trouble-Required-Scope.
@@ -38,9 +40,12 @@ func (s *server) authenticate(r *http.Request, required types.Scope) (principal,
 	ip := s.clientIP(r)
 	ipKey := ipString(ip)
 	now := s.now()
+	// The throttle identity is the credential this request presents (with the
+	// client IP as the fallback for a request that presents none) — §2.8a.
+	tKey := throttleKey(r, ipKey)
 
-	// Step 3: auth-failure throttle (§2.8).
-	if s.throttle.blocked(ipKey, now) {
+	// Step 3: auth-failure throttle (§2.8/§2.8a).
+	if s.throttle.blocked(tKey, now) {
 		s.counters.rl.Add(1)
 		return principal{}, &dashError{Code: types.CodeDashboard012, HTTP: 429, Message: "rate limited", Detail: "auth_failure_throttle"}
 	}
@@ -64,15 +69,15 @@ func (s *server) authenticate(r *http.Request, required types.Scope) (principal,
 		de := s.errIdentity(err)
 		if de.Code == types.CodeDashboard001 || de.Code == types.CodeDashboard002 {
 			s.counters.denied.Add(1)
-			if s.throttle.fail(ipKey, now) {
-				// The failure that crosses the limit throttles the IP.
+			if s.throttle.fail(tKey, now) {
+				// The failure that crosses the limit throttles this identity.
 				s.counters.rl.Add(1)
 				return principal{}, &dashError{Code: types.CodeDashboard012, HTTP: 429, Message: "rate limited", Detail: "auth_failure_throttle"}
 			}
 		}
 		return principal{}, de
 	}
-	s.throttle.success(ipKey)
+	s.throttle.success(tKey)
 
 	// Step 5: scope.
 	if required != "" && !p.Scopes.has(required) {

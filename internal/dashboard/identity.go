@@ -1,6 +1,8 @@
 package dashboard
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net"
 	"net/http"
@@ -96,6 +98,46 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+}
+
+// throttleKey is the identity the §2.8a auth-failure throttle counts against:
+// the credential THIS request presents when it carries exactly one value that
+// satisfies the token grammar, and the client IP otherwise (no material at all,
+// a value that cannot be a token, or two carriers that disagree).
+//
+// Two consequences are load-bearing. A credential is throttled only by its own
+// failures, so a valid token is never refused by failures it did not make —
+// the defect TRBL-010 fixed, where a mistyped or rotated token throttled the
+// whole client IP. And a request that presents no grammar-valid credential
+// still counts against its client IP, so an unauthenticated flood stays
+// throttled instead of being handed to the identity seam.
+//
+// The key is a truncated sha256 of the presented value: the plaintext is never
+// held in the map, never logged and never rendered, exactly like the store's
+// own token hashes.
+func throttleKey(r *http.Request, ipKey string) string {
+	bearer := bearerToken(r)
+	cookie := ""
+	if c, err := r.Cookie(cookieAuthName); err == nil {
+		cookie = c.Value
+	}
+	switch {
+	case bearer == "" && cookie == "":
+		return "ip:" + ipKey
+	case bearer != "" && cookie != "" && bearer != cookie:
+		// Two carriers, two values (§2.2): the failure is the malformed
+		// carrier pair, not one named credential.
+		return "ip:" + ipKey
+	}
+	value := bearer
+	if value == "" {
+		value = cookie
+	}
+	if !tokenGrammar.MatchString(value) || len(value) != tokenPlainLen {
+		return "ip:" + ipKey
+	}
+	sum := sha256.Sum256([]byte(value))
+	return "cred:" + hex.EncodeToString(sum[:8])
 }
 
 // identityFor selects the provider per cfg.Identity (§2.5). Selecting the

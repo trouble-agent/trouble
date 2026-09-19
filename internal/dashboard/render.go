@@ -245,6 +245,12 @@ func (s *server) newPage(r *http.Request, title, nav string) *pageData {
 		AllowResume: s.cfg.AllowResume,
 		AllowFull:   s.cfg.AllowFull,
 	}
+	// The budget panel is seeded from the same source row 18 polls
+	// (/partials/budget → budgetData): the page a browser paints first must not
+	// show zeroes the next poll contradicts (TRBL-010 defect 2), and the footer
+	// version stamp reads the same accessor the health surface reports
+	// (TRBL-010 defect 1).
+	d.Budget = s.budgetData()
 	if s.deps.Autonomy != nil {
 		g := s.deps.Autonomy.Gates()
 		d.KillSwitch = g.KillSwitch

@@ -382,7 +382,8 @@ A failed healthcheck does exactly this, in order:
    outlet failure as non-fatal — the incident stays at rung `outlets` with its state (`recorded` or
    `verifying`) unchanged, the verify window is unaffected, the quiet-close clock is unaffected, no escalation
    is triggered (a driver outage is not an incident failure), no agent run is started, and the pending
-   operation is spooled. The rung is marked `issues:degraded` in the incident payload.
+   operation is spooled (§3.7 — that spool holds the desk's own operations, and a foreign payload has no
+   entry point there). The rung is marked `issues:degraded` in the incident payload.
 4. The local anchor stays authoritative: `Incident.IssueID` is `""` until a driver confirms a ref, and the
    dashboard renders the sig as `issue: pending (driver down)` from the ledger's `result:"spooled"` record.
 5. On recovery (`fail→ok`) the desk drains the spool (§3.7) before accepting new work, and the ladder is not
@@ -395,13 +396,15 @@ Storage: `~/.local/state/trouble/spool/issues/<driver>/<ev_ULID>.json`, one JSON
 written atomically (temp file → `fsync` → `rename` → `fsync` dir), so a torn entry can never be replayed.
 `SpoolEntry` (SPEC-TYPES §3.14) is the on-disk and in-memory shape, with `Kind="issue"`:
 
-**This spool is the DESK's queue, keyed by driver, and it is the only queue its replay lists.** A
-collaborator that hands work over must own the store and the loop that drains it: SPEC-08 §3.9a is the
-flow's own queue for exactly this reason — this section's `Replay` walks the configured driver names, so
-a foreign entry written here is never listed, this section's `DecodePayload` accepts only the operation
-shape below, and the desk's shipped posture (OFF, §3.4a) refuses a foreign enqueue outright. `EnqueueSpool`
-remains the export for a collaborator that HAS an enabled desk to replay through; it is not a generic
-durability service.
+**This spool is the DESK's own queue, keyed by driver, and it holds the desk's operations only.** One path
+writes it: an `EnsureBySig`, `Comment` or `Close` call classified transient (§3.5) leaves that operation
+here, under the driver name that attempted it. `Replay` lists exactly the configured driver names and
+nothing else, so an entry written under any other key is never listed, and the operation shape below is the
+only payload `DecodePayload` accepts. The desk therefore exposes **no entry point for a foreign payload**:
+enqueueing a payload the desk did not attempt is the FLOW's job, and the flow owns both the store and the
+loop that drains it (`<state_root>/spool/flow/spawn/`, drained by `Flow.Run` — SPEC-08 §3.9a). Handing a
+foreign payload to this spool would make it durable in name only, which is exactly the claim SPEC-08 §3.9a
+exists to make impossible.
 
 ```json
 {"id":"ev_01J9Z6Q0M2X4T8V1K7B3N5R8WP","ts":"2026-09-16T09:16:04.221Z","kind":"issue","payload":"eyJvcCI6ImVuc3VyZSIsImRyaXZlciI6ImdpdGh1YiIsInNpZyI6InNlbnRpbmVsOnNoYTI1NnYxOjlmMmMxZDNlNGI1YTZjN2QifQ==","attempts":2,"idem_key":"issue_ensure|github|sentinel:sha256v1:9f2c1d3e4b5a6c7d|inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE|ev_01J9Z6Q0M2X4T8V1K7B3N5R8WM","next_try_ts":"2026-09-16T09:16:34.221Z"}

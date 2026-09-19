@@ -5,10 +5,12 @@ package app
 // This is the test the defect needed: it drives `flowDeps` — the REAL wiring the
 // daemon boots with — with the issue desk OFF (the shipped posture, SPEC-09
 // §3.4a) and asserts the flow still has a durable dispatch queue it can replay.
-// Before §3.9a the same call handed the flow `deskSpool`, whose `Enqueue` reaches
-// `issues.Desk.EnqueueSpool`, which REFUSES with TROUBLE-ISSUES-003 while the desk
-// is off — so a spawn dispatch could be neither delivered nor durably queued, and
-// the flow had no drain of its own to notice.
+// Before §3.9a the same call handed the flow `deskSpool`, whose `Enqueue` reached
+// a foreign-payload entry point on `issues.Desk`, which REFUSES with
+// TROUBLE-ISSUES-003 while the desk is off — so a spawn dispatch could be neither
+// delivered nor durably queued, and the flow had no drain of its own to notice.
+// (That entry point is gone: TRBL-041 deleted it, because the desk's replay walks
+// the configured DRIVER names and so never listed what it wrote.)
 
 import (
 	"context"

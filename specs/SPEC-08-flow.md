@@ -448,9 +448,9 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
   beside the registration probe. SPEC-09's desk spool is **not** this queue and must not be wired as it:
   its replay walks the configured DRIVER names (`github`/`duckbrain`), so no loop lists a foreign tree;
   its `DecodePayload` accepts the desk's own operation shape, so a flow dispatch payload is undecodable
-  there; and its shipped posture (the desk is OFF, SPEC-09 §3.4a) refuses a foreign enqueue with
-  TROUBLE-ISSUES-003. A dispatch queued there is durable in name only, which is exactly the claim this
-  section exists to make impossible.
+  there; and the desk takes no foreign payload at all — it exposes no entry point for one (SPEC-09 §3.7),
+  so a dispatch left there could not even be offered for replay. A dispatch queued there is durable in
+  name only, which is exactly the claim this section exists to make impossible.
 - **Format.** One JSON object per file, one entry per file, mode `0600`, written atomically: temp file in
   the SAME directory → `fsync` file → `rename` → `fsync` directory, so a torn entry can never be
   replayed. The entry is `SpoolEntry` (SPEC-TYPES §3.14) with `Kind = "spawn"`; its `payload` is the

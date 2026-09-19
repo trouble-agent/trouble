@@ -40,7 +40,7 @@ services:
       # A compose `secrets:` entry is the third trap: it mounts 0444 root-owned.
       # Seed once, as documented in docs/operations.md §14.
     healthcheck:
-      test: ["CMD", "/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json"]
+      test: ["CMD", "/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json", "--config", "/etc/trouble/config.toml"]
       interval: 30s
       timeout: 10s
       retries: 3

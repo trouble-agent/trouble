@@ -105,8 +105,15 @@ EXPOSE 7643 7644
 # HEALTHCHECK: distroless has neither shell nor curl, so the health probe is
 # the CLI itself (`trouble check-stall`), which is the SPEC-05 external stall
 # checker and therefore exactly the thing a container healthcheck should ask.
+#
+# --config is NOT optional: without it the CLI resolves builtin defaults, looks
+# for the health/heartbeat surfaces at the default (home) paths and answers
+# exit 8 / TROUBLE-LIFECYCLE-008 "health and heartbeat unreadable" against a
+# daemon that is serving perfectly — measured: the identical command without
+# --config returns exit 8 while `curl /health.json` returns 200; with
+# --config /etc/trouble/config.toml it returns exit 0.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD ["/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json"]
+    CMD ["/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json", "--config", "/etc/trouble/config.toml"]
 
 # Daemon entry point: bin/troubled --config <path>. The config path is the
 # default; compose and `docker run` override it with their own mounted file.

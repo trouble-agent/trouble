@@ -1005,9 +1005,13 @@ http://127.0.0.1:7644/health.json --json` — which is the SPEC-05 external stal
 checker: it reads the ledger sequence out of `/health.json` and alarms on stall,
 not on process liveness. It authenticates from `TROUBLE_DASHBOARD_TOKEN` in
 `secrets.environment_file`, so that file must exist and be `0600` or the
-container reports unhealthy while the daemon is fine. Without a token file the
-daemon still serves and logs `dashboard token store is empty ... reason=missing`,
-and every request fails closed with `401`.
+container reports unhealthy while the daemon is fine. Pass the container config
+explicitly (`--config /etc/trouble/config.toml`): without it the CLI resolves
+builtin defaults, looks for the health/heartbeat surfaces at the default paths
+and answers exit 8 `TROUBLE-LIFECYCLE-008 "health and heartbeat unreadable"`
+against a daemon that is serving perfectly. Without a token file the daemon still
+serves and logs `dashboard token store is empty ... reason=missing`, and every
+request fails closed with `401`.
 
 **Redis degradation (SPEC-13).** With the standalone profile the daemon does not
 consult Redis at all, so `docker compose stop redis` changes nothing: `trouble`

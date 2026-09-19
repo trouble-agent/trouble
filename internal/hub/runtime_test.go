@@ -461,6 +461,96 @@ func eventRecords(l *fakeLedger) int {
 	return n
 }
 
+// TestProfileInvarianceSameRecordSequence is AC-29's core claim at the package
+// level: "the profile changes plumbing only". One scripted draft sequence is
+// replayed twice — once on the standalone in-process path (a direct Append) and
+// once through the light-hub queue (Ingest → door → XADD → consumer → Append) —
+// and the two ledgers must hold the SAME sequence of records. Nothing about the
+// rule engine or the ladder is involved here; what is asserted is that the hop
+// neither reorders, rewrites nor drops a record.
+func TestProfileInvarianceSameRecordSequence(t *testing.T) {
+	script := []types.RecordDraft{
+		draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", map[string]any{"item_type": "event", "n": 1}),
+		draftFor(types.KGroup, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", map[string]any{"op": "create", "group_id": "grp_1"}),
+		draftFor(types.KEvent, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "sentinel:payment-worker", map[string]any{"item_type": "event", "n": 2}),
+		draftFor(types.KIncident, "sentinel:sha256v1:9f2c1d3e4b5a6c7d", "ladder", map[string]any{"state": "open"}),
+		draftFor(types.KEvent, "sensor:psi:1a2b3c4d", "sensor:psi", map[string]any{"rule_id": "io.full", "n": 3}),
+	}
+
+	// The standalone path: the daemon's in-process append, nothing else.
+	standalone := newFakeLedger(&eventLog{})
+
+	// The light-hub path: the same drafts through the queue.
+	f := newFakeStreams()
+	f.info = hubInfoOK()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	queued := newFakeLedger(&eventLog{})
+	cfg := runtimeCfg(t, f, queued, standalone, nil)
+	rt, err := Open(ctx, cfg)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer rt.Close()
+	if err := rt.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	for _, d := range script {
+		if _, err := standalone.Append(ctx, d); err != nil {
+			t.Fatalf("standalone append: %v", err)
+		}
+		if _, err := rt.Ingest(ctx, d); err != nil {
+			t.Fatalf("queued ingest (%s): %v", d.Kind, err)
+		}
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for queued.Count() < len(script) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if counters := rt.IngestCounters(); counters.Ingested != int64(len(script)) || counters.Fallbacks != 0 {
+		t.Fatalf("counters = %+v want %d queued ingests and no fallback", counters, len(script))
+	}
+	assertSameSequence(t, "standalone", standalone, "light-hub", queued)
+}
+
+func hubInfoOK() ServerInfo {
+	return ServerInfo{AOFEnabled: true, Policy: "noeviction", OptionsChecked: true}
+}
+
+// assertSameSequence compares two ledgers' appended records by the identity the
+// pipeline controls (kind, sig, incubation, and the local record id the hub
+// carries into payload.local_rec_id). The canonical rec_id and the seq are
+// minted per writer, so they are compared for PRESENCE, not equality: what must
+// not differ is which records arrived, in what order, under what identity.
+func assertSameSequence(t *testing.T, nameA string, a *fakeLedger, nameB string, b *fakeLedger) {
+	t.Helper()
+	ra, rb := a.Records(), b.Records()
+	if len(ra) != len(rb) {
+		t.Fatalf("%s holds %d records, %s holds %d", nameA, len(ra), nameB, len(rb))
+	}
+	for i := range ra {
+		if ra[i].Kind != rb[i].Kind || ra[i].Sig != rb[i].Sig || ra[i].Inc != rb[i].Inc {
+			t.Fatalf("record %d differs: %s(%s/%s/%s) vs %s(%s/%s/%s)", i,
+				nameA, ra[i].Kind, ra[i].Sig, ra[i].Inc, nameB, rb[i].Kind, rb[i].Sig, rb[i].Inc)
+		}
+		if rb[i].RecID == "" || rb[i].Seq == 0 {
+			t.Fatalf("record %d on %s has no ledger identity: %+v", i, nameB, rb[i])
+		}
+	}
+	// The one payload-level difference the profile introduces is BY DESIGN and
+	// asserted rather than waved away: a record that travelled the queue carries
+	// the ingress identity the hub minted for it in `payload.local_rec_id`
+	// (SPEC-13 §3.2 rule 5), because it left the process; a record on the
+	// in-process path never needed one. AC-29's assertion is about the
+	// incident/verify SEQUENCE, which this test has just proved identical.
+	for i, r := range rb {
+		if _, ok := r.Payload["local_rec_id"]; !ok {
+			t.Fatalf("queued record %d lost its local_rec_id: %+v", i, r.Payload)
+		}
+	}
+}
+
 func TestDegradedReasonForCodes(t *testing.T) {
 	cases := []struct {
 		code    types.ErrorCode

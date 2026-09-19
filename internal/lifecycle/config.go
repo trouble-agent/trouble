@@ -465,7 +465,7 @@ func absorbTables(fileVals map[string]any, docs map[string]string, known map[str
 type Resolved struct {
 	Config     Config
 	Values     []types.ConfigValue
-	Conflicts  []types.ConfigValue // one row per conflict (code 002)
+	Conflicts  []types.ConfigValue // one row per conflict (code 002): only two operator sources can disagree
 	UnknownEnv []types.ConfigValue // unknown TROUBLE_* env vars with optional hint
 	Warnings   []error
 }
@@ -1724,15 +1724,14 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 		lower := lowerSources(win.Source)
 		for _, src := range lower {
 			if src == "default" {
-				if !equalValues(win.Value, known[k].defaultVal) {
-					resolved.Conflicts = append(resolved.Conflicts, types.ConfigValue{
-						Key:       k,
-						Value:     "TROUBLE-LIFECYCLE-002",
-						Source:    "conflict",
-						SourceRef: fmt.Sprintf("%s vs default", win.SourceRef),
-						Redacted:  false,
-					})
-				}
+				// A compiled default is not a source: it is the absence of one
+				// (SPEC-12 §3.1f). A file that sets `ingest.bind` away from the
+				// builtin default is ordinary configuration, not a two-source
+				// disagreement, so `default` is never a conflict counterparty.
+				// The deviation is legible on the ordinary ConfigValue row
+				// instead: its `source` names the source that set the key and
+				// `trouble config explain` shows the builtin value for any key
+				// no source set.
 				continue
 			}
 			var other types.ConfigValue
@@ -1814,6 +1813,10 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	return resolved, nil
 }
 
+// lowerSources returns the precedence ladder below src — including `default`,
+// which sits at the bottom of the ladder but is not a source: the conflict scan
+// skips it, because a value that differs from its compiled default is ordinary
+// configuration (SPEC-12 §3.1f).
 func lowerSources(src string) []string {
 	switch src {
 	case "flag":

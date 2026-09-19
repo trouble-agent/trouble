@@ -2192,7 +2192,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-SKILLS-013 | permanent | skill refused on this host (refusal record written) | SPEC-11 |
 | TROUBLE-SKILLS-014 | transient | local skill stats write failed | SPEC-11 |
 | TROUBLE-LIFECYCLE-001 | permanent | config file invalid | SPEC-12 |
-| TROUBLE-LIFECYCLE-002 | permanent | config precedence conflict (same key from two sources with different values → flag wins, recorded) | SPEC-12 |
+| TROUBLE-LIFECYCLE-002 | permanent | config precedence conflict (same key from two operator sources — flag/env/file, never a compiled default — with different values → flag wins, recorded) | SPEC-12 |
 | TROUBLE-LIFECYCLE-003 | permanent | bind preflight: port already in use → fail loud | SPEC-12 |
 | TROUBLE-LIFECYCLE-004 | permanent | state root not writable | SPEC-12 |
 | TROUBLE-LIFECYCLE-005 | permanent | state root mode wrong (must be 0700) | SPEC-12 |

@@ -430,6 +430,17 @@ func (f *fakeStreams) has(key string) bool {
 	return ok && time.Now().Before(e.expiresAt)
 }
 
+// dropClaims forgets every dedup claim: what FLUSHALL, a dataset-less failover
+// or a replacement container does to the gate's key space, and the reason the
+// ledger's idempotency index (SPEC-13 §2.1.1 rule 5a) is load-bearing at all.
+// `flush` alone leaves the claims behind, so a test that wants the cold-server
+// shape has to say both.
+func (f *fakeStreams) dropClaims() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.kv = map[string]kvEntry{}
+}
+
 func cloneFields(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
@@ -515,13 +526,42 @@ func (l *fakeLedger) localIDs() []string {
 	return out
 }
 
+// fakeLedgerIndex is the READ half of the fake ledger (SPEC-13 §2.1.1 rule 5a's
+// LedgerIndex): a re-warm in a test reads exactly the records that test's own
+// ingest appended, which is what the production composition root does with the
+// real ledger.
+type fakeLedgerIndex struct{ l *fakeLedger }
+
+func (i fakeLedgerIndex) ScanFrom(from uint64, yield func(types.Record) bool) error {
+	for _, rec := range i.l.Records() {
+		if rec.Seq < from {
+			continue
+		}
+		if !yield(rec) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (i fakeLedgerIndex) LastSeq() uint64 {
+	recs := i.l.Records()
+	if len(recs) == 0 {
+		return 0
+	}
+	return recs[len(recs)-1].Seq
+}
+
 // entryFor builds a stream entry for a draft as the door would enqueue it.
 func entryFor(t interface{ Fatalf(string, ...any) }, f *fakeStreams, draft types.RecordDraft, route RouteDecision, hostID string) string {
 	key, err := IdemKeyForDraft(draft, hostID)
 	if err != nil {
 		t.Fatalf("idemKey: %v", err)
 	}
-	rec := localRecord(draft, hostID)
+	// The door records the claim with the record (SPEC-13 §2.1.1 rule 5a), so the
+	// fixture does too: an entry built without it would not be the entry the door
+	// enqueues.
+	rec := localRecord(draft, hostID, key)
 	env := StreamEnvelope{
 		ForwardEnvelope: types.ForwardEnvelope{
 			ProtocolVersion: 1,

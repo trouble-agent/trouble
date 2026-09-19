@@ -106,15 +106,20 @@ type RedisStreamOffsets struct {
 	DedupHits       int64  `json:"dedup_hits"`
 	DedupMisses     int64  `json:"dedup_misses"`
 	DedupConflicts  int64  `json:"dedup_conflicts"`
-	AOF             bool   `json:"aof"`
-	Policy          string `json:"policy"`
-	EvictedKeys     int64  `json:"evicted_keys"`
-	OptionsChecked  bool   `json:"options_checked"`
-	DedupWindow     string `json:"dedup_window"`
-	Backpressure    int64  `json:"backpressure_total"`
-	Degraded        bool   `json:"degraded"`
-	DegradedReason  string `json:"degraded_reason"`
-	Since           string `json:"since"`
+	// DedupRestored is the size of the ledger idempotency index the gate was
+	// re-warmed with at the last (re)wire (SPEC-13 §2.1.1 rule 5a; the same
+	// number dedup.state persists as `restored_keys`). 0 means the
+	// `server.redis.failover_grace` window is not warm.
+	DedupRestored  int64  `json:"dedup_restored"`
+	AOF            bool   `json:"aof"`
+	Policy         string `json:"policy"`
+	EvictedKeys    int64  `json:"evicted_keys"`
+	OptionsChecked bool   `json:"options_checked"`
+	DedupWindow    string `json:"dedup_window"`
+	Backpressure   int64  `json:"backpressure_total"`
+	Degraded       bool   `json:"degraded"`
+	DegradedReason string `json:"degraded_reason"`
+	Since          string `json:"since"`
 }
 
 // HubStatus is the server profile's stanza in the one health surface

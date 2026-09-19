@@ -62,6 +62,11 @@ type RuntimeConfig struct {
 	// Target overrides the archival target (tests and embedders). Nil resolves
 	// it from Archive through NewTarget.
 	Target Target
+	// LedgerIndex is the READ half of the ledger the dedup gate re-warms from at
+	// every (re)wire (SPEC-13 §2.1.1 rule 5a). The composition root passes the
+	// same ledger it passes as Ledger; nil means "no index", and the gate then
+	// reports restored_keys=0 rather than pretending the window is warm.
+	LedgerIndex LedgerIndex
 	// AckCursor stamps the envelope's ack cursor (the ledger's last seq).
 	AckCursor func() uint64
 	// Streams overrides the Redis command surface (tests). Nil dials the URL.
@@ -225,6 +230,34 @@ func (r *Runtime) dial(ctx context.Context) (*Client, error) {
 	return OpenRedis(ctx, r.redis)
 }
 
+// rewarmGate seeds a freshly attached gate from the ledger's idempotency index
+// (SPEC-13 §2.1.1 rule 5a) and reports how many keys it restored.
+//
+// It is called by attach, i.e. by BOTH ways the queue is wired: the boot of §4.1
+// step 3 and the reconnect of §4.3's "Redis returns" row. A ledger with no read
+// seam, or one whose walk fails, leaves the gate with restored_keys=0 — the
+// window is then simply not warm, which is reported (`redis.dedup_restored`,
+// dedup.state's `restored_keys`) instead of being hidden behind a healthy
+// looking gate. Nothing here is fatal: the ledger is the record and the gate is
+// an optimisation over it (§3.4), so a re-warm that cannot run must never keep
+// the queue from being wired.
+func (r *Runtime) rewarmGate(gate *DedupGate) int {
+	if gate == nil || r.cfg.LedgerIndex == nil {
+		return 0
+	}
+	keys, err := ledgerIdemKeys(r.cfg.LedgerIndex, r.hostID(), gate.cfg.DedupLRU)
+	if err != nil {
+		r.cfg.Log("hub: the ledger's idempotency index could not be read (%v): the gate starts with restored_keys=0", err)
+	}
+	if len(keys) == 0 {
+		return 0
+	}
+	gate.Restore(keys)
+	r.cfg.Log("hub: dedup gate re-warmed from the ledger's idempotency index (restored_keys=%d, failover_grace=%s)",
+		len(keys), r.redis.FailoverGrace)
+	return len(keys)
+}
+
 // attach wires a live client: gate → door → consumer. The group is created here
 // and a TROUBLE-HUB-005 refusal is returned, never swallowed: a queue nobody
 // drains must not accept traffic (SPEC-13 §5).
@@ -239,6 +272,17 @@ func (r *Runtime) attach(ctx context.Context, c *Client) error {
 		return err
 	}
 	gate := NewDedupGate(r.redis, c)
+	// The gate measures the `server.redis.failover_grace` window on the
+	// runtime's clock, so an embedder (or a test) that drives time drives the
+	// window too, and the window and the runtime's own `since` cannot disagree.
+	if r.now != nil {
+		gate.now = r.now
+	}
+	// The re-warm of SPEC-13 §2.1.1 rule 5a, BEFORE the gate can be used: the
+	// gate this (re)wire installs is the ledger's index, not a fresh one, so a
+	// duplicate that arrives right after a recovery is suppressed by the tier
+	// rather than re-appended.
+	r.rewarmGate(gate)
 	door := NewDoor(c, gate, DoorConfig{
 		Route:  RouteA,
 		HostID: r.hostID(),

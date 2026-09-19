@@ -81,6 +81,21 @@ type DedupGate struct {
 	conflicts      int64
 	lastDegradeErr string
 
+	// restored is the ledger's idempotency index as the gate holds it:
+	// `Restore` REPLACES it at every (re)wire with the keys the ledger's tail
+	// holds (SPEC-13 §2.1.1 rule 5a). It is what makes the re-warm a behaviour
+	// rather than a count: a key in this set was already appended, so a claim on
+	// it is a replay.
+	restored map[string]struct{}
+	// trustUntil is the end of the `server.redis.failover_grace` window opened by
+	// the last Restore. Until it passes, the keys in `restored` are TRUSTED (the
+	// gate answers from the index without a Redis round trip); afterwards the
+	// gate claims through Redis again and the ledger's own idempotency check is
+	// the arbiter of §3.4's priced duplicate.
+	trustUntil time.Time
+	// grace is the resolved window length (RedisConfig.FailoverGrace).
+	grace time.Duration
+
 	now func() time.Time
 }
 
@@ -90,7 +105,41 @@ type DedupGate struct {
 // hidden.
 func NewDedupGate(cfg RedisConfig, c *Client) *DedupGate {
 	cfg = cfg.WithDefaults()
-	return &DedupGate{cfg: cfg, c: c, fallback: newLRUPhases(cfg.DedupLRU), now: time.Now}
+	return &DedupGate{
+		cfg:      cfg,
+		c:        c,
+		fallback: newLRUPhases(cfg.DedupLRU),
+		restored: map[string]struct{}{},
+		grace:    cfg.FailoverGrace,
+		now:      time.Now,
+	}
+}
+
+// trusted reports whether key is inside the failover_grace window opened by the
+// last Restore (SPEC-13 §2.1.1 rule 5a): the ledger's idempotency index says the
+// key was already appended, and the window is still open, so the gate answers
+// from the index instead of asking a Redis that a failover may have emptied.
+func (g *DedupGate) trusted(key string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.trustUntil.IsZero() || !g.now().Before(g.trustUntil) {
+		return false
+	}
+	_, ok := g.restored[key]
+	return ok
+}
+
+// Restored reports the size of the ledger index the gate holds and whether the
+// failover_grace window that trusts it is still open. It is what /health.json
+// prints as `redis.dedup_restored` (and what dedup.state calls `restored_keys`),
+// so a gate that was re-warmed is distinguishable from one that was not.
+func (g *DedupGate) Restored() (keys int64, windowOpen bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.trustUntil.IsZero() && g.now().Before(g.trustUntil) {
+		windowOpen = true
+	}
+	return g.restoredKeys, windowOpen
 }
 
 // Dedup is SPEC-13 §2.3's function: the `SET NX EX` claim of §3.4 on the key
@@ -113,10 +162,21 @@ func Dedup(ctx context.Context, c *Client, sig types.Sig, normVersion int, hostI
 // the bounded LRU for the window, the degradation is recorded once per window,
 // and `dedup_window` on the health surface says "lru" so a smaller window is
 // never mistaken for the full 24h one (SPEC-13 §3.4).
+//
+// A key the ledger's idempotency index restored — inside the
+// `server.redis.failover_grace` window a (re)wire opens (SPEC-13 §2.1.1 rule
+// 5a) — is answered `present` WITHOUT claiming in Redis: the key was already
+// appended, so the claim is a replay, and the index is the one piece of
+// evidence that survived the failover that emptied Redis. After the window the
+// trust is gone and this is the plain `SET NX` of §3.4 again, which is what
+// makes a lost claim cost the one duplicate §3.4 prices.
 func (g *DedupGate) Claim(ctx context.Context, key string) (bool, error) {
 	g.mu.Lock()
 	g.misses++
 	g.mu.Unlock()
+	if g.trusted(key) {
+		return false, nil
+	}
 	if g.c != nil {
 		fresh, err := g.c.s.SetNX(ctx, key, PhaseEnqueued, g.cfg.DedupTTL)
 		if err == nil {
@@ -181,7 +241,16 @@ func (g *DedupGate) markAppendedRemote(ctx context.Context, key string) error {
 
 // State reports what the gate knows about a key (phase-aware, per the constants
 // above). A Redis failure degrades to the LRU and says so.
+//
+// A key inside the failover_grace window opened by the last Restore (SPEC-13
+// §2.1.1 rule 5a) answers `appended`: the ledger's idempotency index is the
+// evidence that it is already in the record, and a Redis that lost its dataset
+// would answer "absent" for it — which is exactly the answer that turns a
+// crash-between-Append-and-XACK re-delivery into a second ledger record.
 func (g *DedupGate) State(ctx context.Context, key string) (DedupState, error) {
+	if g.trusted(key) {
+		return DedupAppended, nil
+	}
 	// While the window is degraded the LRU is authoritative: asking Redis would
 	// answer "absent" for every key the fallback has been serving, and a missing
 	// answer must never be mistaken for "never seen" (that is the duplicate the
@@ -287,16 +356,43 @@ func (g *DedupGate) DegradeError() string {
 // of the fallback LRU"). The source of the keys is the ledger's own identity
 // fields; the composition root supplies them, and a boot with no source reports
 // restored_keys=0 truthfully rather than pretending the window is warm.
+//
+// It is also the re-warm of SPEC-13 §2.1.1 rule 5a, and that is what gives
+// `server.redis.failover_grace` its reader: the call REPLACES the gate's index
+// with the keys this (re)wire read out of the ledger and OPENS the trust window,
+// so from here until the window closes a claim or a re-delivery check on one of
+// those keys is answered from the index instead of from a Redis that a failover
+// may have emptied. Replace-not-accumulate is deliberate: the ledger's tail as
+// of THIS (re)wire is the evidence in force, which is also what bounds the
+// structure — the walk that feeds it is capped at `hub.dedup_lru` keys.
 func (g *DedupGate) Restore(keys []string) {
+	g.mu.Lock()
+	if g.restored == nil {
+		g.restored = map[string]struct{}{}
+	}
+	next := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		if k == "" {
+			continue
+		}
+		next[k] = struct{}{}
+	}
+	g.restored = next
+	g.restoredKeys = int64(len(next))
+	if g.grace > 0 {
+		g.trustUntil = g.now().Add(g.grace)
+	}
+	g.mu.Unlock()
+	// The LRU mirror is written outside the gate's own lock (its `put` takes the
+	// LRU's): the two structures are independent, and the mirror is what serves
+	// the gate while a Redis window is DEGRADED (that window has no TTL of its
+	// own, so it keeps the union of what has been claimed and restored).
 	for _, k := range keys {
 		if k == "" {
 			continue
 		}
 		g.fallback.put(k, PhaseAppended)
 	}
-	g.mu.Lock()
-	g.restoredKeys = int64(len(keys))
-	g.mu.Unlock()
 }
 
 // dedupStateFile is the JSON of <state_root>/hub/dedup.state (SPEC-13 §3.1).

@@ -395,6 +395,14 @@ Storage: `~/.local/state/trouble/spool/issues/<driver>/<ev_ULID>.json`, one JSON
 written atomically (temp file → `fsync` → `rename` → `fsync` dir), so a torn entry can never be replayed.
 `SpoolEntry` (SPEC-TYPES §3.14) is the on-disk and in-memory shape, with `Kind="issue"`:
 
+**This spool is the DESK's queue, keyed by driver, and it is the only queue its replay lists.** A
+collaborator that hands work over must own the store and the loop that drains it: SPEC-08 §3.9a is the
+flow's own queue for exactly this reason — this section's `Replay` walks the configured driver names, so
+a foreign entry written here is never listed, this section's `DecodePayload` accepts only the operation
+shape below, and the desk's shipped posture (OFF, §3.4a) refuses a foreign enqueue outright. `EnqueueSpool`
+remains the export for a collaborator that HAS an enabled desk to replay through; it is not a generic
+durability service.
+
 ```json
 {"id":"ev_01J9Z6Q0M2X4T8V1K7B3N5R8WP","ts":"2026-09-16T09:16:04.221Z","kind":"issue","payload":"eyJvcCI6ImVuc3VyZSIsImRyaXZlciI6ImdpdGh1YiIsInNpZyI6InNlbnRpbmVsOnNoYTI1NnYxOjlmMmMxZDNlNGI1YTZjN2QifQ==","attempts":2,"idem_key":"issue_ensure|github|sentinel:sha256v1:9f2c1d3e4b5a6c7d|inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE|ev_01J9Z6Q0M2X4T8V1K7B3N5R8WM","next_try_ts":"2026-09-16T09:16:34.221Z"}
 ```

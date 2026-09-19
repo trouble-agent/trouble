@@ -403,9 +403,12 @@ func (d *Desk) EnqueueSpool(ctx context.Context, e types.SpoolEntry) error {
 	if err := d.requireEnabled("EnqueueSpool"); err != nil {
 		// A disabled desk runs no replay loop (Run returns early before any
 		// driver timer), so an entry accepted here would be "spooled" forever.
-		// The SPEC-08 flow's durable dispatch queue IS this spool (the
-		// composition root passes deskSpool), and a caller that gets nil records
-		// the dispatch as durably queued — refusing keeps that record honest.
+		// This spool is the DESK's queue, keyed by driver: Replay walks
+		// d.order, so it lists no other tree, and DecodePayload accepts only
+		// the desk's own operation shape. A collaborator with its own durable
+		// queue owns that queue and the loop that drains it — SPEC-08 §3.9a is
+		// the flow's, for exactly this reason. Refusing keeps every caller's
+		// record honest.
 		return err
 	}
 	drops, err := d.spool.Put("issue", e)

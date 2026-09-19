@@ -275,8 +275,10 @@ stdin, JSON on stdout. The wire payload is the same in both modes:
   spool flush). **429** → transient, honours `Retry-After`. **4xx other** → permanent
   (TROUBLE-FLOW-005, recorded with the body's error string, no retry). **5xx, timeout, connection
   refused** → transient: immediate retry × `retries` with 1 s/3 s/9 s backoff, then a `SpoolEntry`
-  (kind `spawn`, `IdemKey=task_id`) for replayed re-dispatch (SPEC-12 spool, bounded drop-oldest with
-  a ledger note) → TROUBLE-FLOW-005 + a `flow` record with `dispatch_state="spooled"`.
+  (kind `spawn`, `IdemKey=task_id`) for replayed re-dispatch (bounded drop-oldest with a ledger note)
+  → TROUBLE-FLOW-005 + a `flow` record with `dispatch_state="spooled"`. That entry's store, its bounds
+  and the loop that drains it are §3.9a: the flow owns both, and `dispatch_state="spooled"` is written
+  only when the entry landed on the queue §3.9a describes.
 - **Driver choice.** `board-jsonl` is the hot-fix lane's driver (the row must exist even when the
   router is down: the fleet's own `spawn_pending` path is what carries the work forward) and is the
   default for any incident at or above `high`. `task-router` is the doctrine for normal filing
@@ -399,11 +401,12 @@ requested ──ack──► accepted ──worktree within spawn_worktree_timeo
 
 - `requested` is written **before** the router call; `spawn_pending` is written whenever the call does
   not produce an acknowledgement inside `spawn_ack_timeout`, and a `SpoolEntry` (kind `spawn`) is
-  enqueued with `IdemKey = task_id`. **A spawn failure is never silent**: the failing path is exactly
+  enqueued with `IdemKey = task_id` (§3.9a names that store and the loop that drains it). **A spawn
+  failure is never silent**: the failing path is exactly
   the path the fleet walks when it is sick, and a silent degradation there is the worst outcome for
   this feature.
 - Bounded retry: attempts 1..5 at 5 s / 15 s / 45 s / 2 m / 5 m; after attempt 5 the entry stays in the
-  durable queue (spool, ≤256 MB, drop-oldest-with-ledger-note), the `spawn` record stays
+  flow's durable queue (§3.9a, bounded drop-oldest-with-ledger-note), the `spawn` record stays
   `spawn_pending`, and the incident escalates one rung with TROUBLE-FLOW-011. The reconciled
   `spawn_pending` count is the first number of the dashboard's budget panel (SPEC-10 §2.1 row 18).
 - `failed` (permanent router refusal: repo rejected by the admission gate, unknown priority class) is
@@ -431,6 +434,88 @@ present in the scheduler's admission registry (probed at boot; absent → TROUBL
 because an unadmitted class degrades silently to the default lane). trouble records the class and the
 attempt count in the `spawn` payload, so hot-fix work competing with fleet foremen for slots is
 auditable, and it never bypasses the scheduler's `max_concurrent`.
+
+### 3.9a The flow-owned dispatch queue and its own replay loop
+
+§3.6 and §3.9 hand every dispatch that cannot be delivered to a `SpoolEntry` (kind `spawn`,
+`IdemKey = task_id`) for replayed re-dispatch. This section says **where that entry lives, which loop
+drains it, and what the record may claim about it** — the seam where SPEC-08 §3.6/§3.9 meets SPEC-09
+§3.6/§3.7.
+
+- **The queue is the flow's own, and so is the drain.** The store is
+  `<state_root>/spool/flow/spawn/<ev_ULID>.json` (SPEC-12 §3.2's `spool/` subtree, in a subdirectory no
+  other subsystem lists). The loop is `Flow.Run` (`internal/flow`), which drains it on its own cadence
+  beside the registration probe. SPEC-09's desk spool is **not** this queue and must not be wired as it:
+  its replay walks the configured DRIVER names (`github`/`duckbrain`), so no loop lists a foreign tree;
+  its `DecodePayload` accepts the desk's own operation shape, so a flow dispatch payload is undecodable
+  there; and its shipped posture (the desk is OFF, SPEC-09 §3.4a) refuses a foreign enqueue with
+  TROUBLE-ISSUES-003. A dispatch queued there is durable in name only, which is exactly the claim this
+  section exists to make impossible.
+- **Format.** One JSON object per file, one entry per file, mode `0600`, written atomically: temp file in
+  the SAME directory → `fsync` file → `rename` → `fsync` directory, so a torn entry can never be
+  replayed. The entry is `SpoolEntry` (SPEC-TYPES §3.14) with `Kind = "spawn"`; its `payload` is the
+  marshalled `SpawnRequest`, already scrubbed (SPEC-02), so the queue is not a leak surface. The
+  directory is `0700` and is proved writable when the store is built: a store that cannot be built is a
+  recorded refusal and leaves the flow with no queue rather than an in-memory illusion.
+- **Bounds.** Every bound has a default taken from the number this suite already pins, and every eviction
+  is recorded — the bound costs evidence, never silence.
+
+| Bound | Default | Behaviour at the bound |
+|---|---|---|
+| `max_entries` | 256 (the §3.9 in-memory bound) | evict the OLDEST entry — never the incoming one — and record the eviction |
+| `spool_ttl` | 72 h (SPEC-09 §3.7's TTL) | drop the entry with `{"stage":"dispatch","decision":"failed","dispatch_state":"dropped","drop_reason":"ttl"}` |
+| `max_attempts` | 5 (§3.9's bounded retry budget) | drop the entry with `drop_reason:"attempts"` |
+| an undecodable `payload` | — | drop the entry with `drop_reason:"corrupt"` (a shape this build cannot read is not a retryable failure) |
+| replay cadence | 5 s | the drain tick; a queue with nothing due costs one directory listing |
+| `replay_batch` | 100 entries | entries per drain |
+
+- **Replay rules.** Order is `(next_try_ts asc, ts asc, id asc)`. One in-flight dispatch per `IdemKey`,
+  so a replay can never race the original attempt or a second replay of the same entry. Re-dispatch goes
+  through the EXISTING §3.6 `DispatchSpawn` with the **same** `IdemKey`, which is what makes a replay
+  idempotent: the router's own `task_id` dedup (409/`duplicate:true` = accepted) is the guard, so no
+  second spawn is created for work the first attempt already placed. On success the entry is **deleted**;
+  on failure the attempt is counted **against that entry** (never a fresh entry — a failed replay that
+  re-enqueues would grow the queue on every attempt) and `next_try_ts` is shifted along §3.9's schedule
+  (5 s / 15 s / 45 s / 2 m / 5 m).
+- **Every state is a ledger record**, each carrying `inc` + `sig` + `task_id`: request → retries
+  exhausted → `dispatch_state="spooled"`; replay success → `"replayed"` + a `spawn` record at `leased`;
+  replay failure → `"replay_failed"` with `attempts` and `next_try_ts`; drop → `"dropped"` with
+  `drop_reason` **and** a `spawn` record naming the state. Drops are written as `flow` + `spawn` records:
+  `gap` is not this subsystem's kind (SPEC-INDEX §3.4).
+- **Durability is claimed only when it exists.** `dispatch_state="spooled"` is written **only** when the
+  entry landed on a queue this subsystem replays. A sink that can be written but not replayed (an
+  `Enqueue`-only adapter), a store that refused the write, and a flow with no store at all are each
+  recorded as `dispatch_state="unspooled"` or `"spool_failed"` with a `reason` **and** a `coupling` field
+  naming `SPEC-08 §3.6/§3.9 × SPEC-09 §3.6/§3.7`, so an operator reads the coupling from the record
+  instead of reconstructing the wiring. This is the AC1 choice: a dispatch that cannot be delivered is
+  EITHER durably queued in a place that is actually replayed OR refused with a code and a record that
+  names the coupling — never a silent drop, and never a durability claim the loop cannot honour.
+- **The in-memory queue is the dashboard view, not the durable one.** `f.queue` (≤256,
+  drop-oldest-with-a-ledger-note, §3.9) remains the reconciled `spawn_pending` count the budget panel
+  reports (SPEC-10 §2.1 row 18). It does not survive a restart; the store above does, and that is the
+  half that keeps a pending spawn alive across one.
+- **Wiring.** The composition root builds the store (`newFlowSpool`, under the resolved `state_root`) and
+  passes it as `flow.Deps.Spool`; `Flow.SetDeps` adopts it only if it can be replayed, and a nil store is
+  passed as a nil INTERFACE — a typed-nil pointer satisfies the replay assertion behind the interface and
+  panics on the first dispatch, so it is refused as "no queue" rather than adopted. The daemon starts the
+  loop beside `Flow.Start` (`go Flow.Run(ctx)`). The desk's own spool and replay semantics are untouched:
+  this section adds a queue, it does not change SPEC-09.
+- **No codes of its own.** §3.9a introduces no new `TROUBLE-FLOW-*` code. It reuses TROUBLE-FLOW-005 for
+  a dispatch that could not be delivered, TROUBLE-FLOW-011 for a spawn still pending past the retry
+  budget, TROUBLE-FLOW-010 for a failed replay attempt, and TROUBLE-LIFECYCLE-015 for a bound-driven
+  drop (the cross-area code §5 already lists for the spool budget).
+- **Test.** `internal/flow/spool_test.go` asserts both halves of AC1 and the whole drain, with no
+  wall-clock budget except the one loop test: an `Enqueue`-only sink produces EXACTLY ONE outcome — an
+  honest `unspooled` record naming the coupling — and zero `spooled` claims in the run; a typed-nil store
+  is not adopted; with the flow's own store the parked spawn is one `0600` file under the §3.9a path and
+  the record says `spooled`; a drain re-dispatches with the SAME idem key against a real HTTP router,
+  deletes the entry on success, does nothing on a second pass, and leaves an empty queue after a
+  simulated restart; an entry written by one store instance is listed, decoded and replayed by a second
+  one; attempts, `ttl`, `corrupt` and overflow each drop the entry with a record pair and zero `gap`
+  records; overflow evicts the OLDEST entry and never the incoming one. `internal/app/flow_spool_wiring_test.go`
+  asserts the composition root: with the issue desk OFF (the shipped posture) `flowDeps` still hands the
+  flow a queue it can replay, the wired sink writes one `0600` entry under the state root, and a store
+  that cannot be built leaves the flow reporting "no queue" instead of claiming durability.
 
 ### 3.10 One-fix-per-sig lease
 
@@ -813,6 +898,7 @@ All tests are `internal/flow` package tests plus one end-to-end harness; `-count
 | `contract_test.go` | SPEC-06 conformance for `flow.create_task/comment_task/spawn_foreman/promote/rollback`: double-apply idempotency, check_mode returns the true diff without writing, schema violation rejected at validate | passes the shipped testkit; double-apply → one appended line total |
 | `flow_e2e_test.go` | **AC-21**: scripted bad line in an allowed repo, `hotfix.enabled=true` → direct row + spawn within 60 s, patch lands in the worktree only (`git -C <main> status --porcelain` empty), window passes → promotion prompt, recurrence → rollback + reopen. **AC-9**: both drivers file a row and the router path round-trips. **AC-19**: the timeline function returns filed → foreman → patch → verify → promote with PR link. **AC-26**: `full` + `auto-after-verify` runs detection → row → spawn → verify → promote → skill candidate with zero human actions, and the kill-switch before the spawn yields exactly one parked stage and no spawn | AC-21 `trig_to_spawn_ms ≤ 60 000` (asserted on the recorded value); main checkout diff empty; AC-19 timeline complete and ordered; AC-26 zero human actors in the ledger slice |
 | `testdata/` | strict board (10 000 rows), non-strict legacy board, empty board, foreign-rewrite board, config set (valid, `/tmp` base, `max_concurrent=5`, unknown priority class) | fixtures reused by every test above |
+| `spool_test.go` | §3.9a on the shipped store: an `Enqueue`-only sink (the desk adapter's shape) yields EXACTLY ONE outcome — an honest `unspooled` record naming the coupling — and zero `spooled` claims; a typed-nil store is not adopted; with the flow's own store a parked spawn is one `0600` file under `<state_root>/spool/flow/spawn/` and the record says `spooled`; a drain re-dispatches with the SAME idem key against a real HTTP router, deletes the entry on success, re-drains to zero, and leaves an empty queue after a simulated restart; an entry written by one store instance is listed, decoded and replayed by a second one; `attempts`, `ttl`, `corrupt` and overflow each drop the entry with a `flow` + `spawn` record pair and zero `gap` records; overflow evicts the OLDEST entry, never the incoming one; `Flow.Run` drains the queue on its ticker. `flow_spool_wiring_test.go` (internal/app) drives the REAL `flowDeps` with the issue desk OFF (the shipped posture): the flow still receives a replayable queue, the wired sink writes one `0600` entry under the state root, and a store that cannot be built leaves the flow reporting "no queue" | 0 `spooled` records while no replayable queue is wired; exactly 1 file per entry, mode `0600`, directory `0700`; queue depth 0 after a successful replay and 0 after the restart; 2 overflow drops for 4 writes at a bound of 2; the loop test's deadline is generous by design (wall-clock driven), every other assertion is clock-injected |
 
 Regression numbers carried from the judges' measurements: worktree creation cost is a full checkout
 (68 MB / 242 MB / 464 MB / 8.9 GB measured) so the disk gate and cap are exercised with those sizes
@@ -827,7 +913,8 @@ the number the ≤30 s worktree budget must never approach in a test.
   `hotfix.go` (gate chain, priority class, disk/mutex gates), `spawn.go` (state machine, durable
   queue, reconcile), `lease.go` (sig leases), `promote.go` (promotion, rollback, skill hand-off),
   `brief.go` (`ForemanBrief` assembly + caps), `budget.go` (the 60 s clock and per-spawn measurement),
-  `timeline.go` (dashboard read model).
+  `timeline.go` (dashboard read model), `spool.go` + `replay.go` (§3.9a: the flow-owned dispatch queue,
+  its bounds and the drain `Flow.Run` owns).
 - **Fan-out:** `internal/flow` imports `internal/types` (all shared types) and calls
   `internal/ledger` (record append), `internal/issues` (EnsureBySig/Comment), `internal/research`
   (brief read), `internal/skills` (candidate/refusal), `internal/registry` (module registration for

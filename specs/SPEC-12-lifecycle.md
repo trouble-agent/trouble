@@ -369,7 +369,9 @@ can contain a credential.
 │   ├── forward/                   0700
 │   │   ├── 0000000001.fwd         0600   append-only segments of SpoolEntry
 │   │   └── forward.state          0600   {ack_hub_seq, ack_local_seq, local_map(lru≤4096), dropped_total, bytes}
-│   └── issues/                    0700   (SPEC-09 spool-and-replay)
+│   ├── issues/                    0700   (SPEC-09 spool-and-replay)
+│   └── flow/                      0700   (SPEC-08 §3.9a — the flow's own dispatch queue)
+│       └── spawn/                 0700   0600 files: <ev_ULID>.json, one per pending dispatch
 ├── worktrees-meta/                0700   (metadata only — NEVER a worktree base)
 │   └── <tsk_id>.json              0600   {pid, worktree, task_id, branch, started_ts, state}
 ├── skills-local/                  0700   (candidates/ + pulls/, SPEC-11)

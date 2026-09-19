@@ -7,6 +7,7 @@
 
 GO ?= go
 BIN ?= bin
+DIST ?= dist
 
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 GIT_SHA    ?= $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
@@ -18,7 +19,16 @@ LDFLAGS = -s -w \
 	-X $(LIFECYCLE_PKG).GitSHA=$(GIT_SHA) \
 	-X $(LIFECYCLE_PKG).BuildTime=$(BUILD_TIME)
 
-.PHONY: all build bin test race vet fmt schema schema-check conformance check smoke clean
+# The release matrix (TRBL-002): exactly these four (goos/goarch) pairs, both
+# shipped binaries each, plus a checksum manifest. A release without checksums is
+# not a release, so `release` writes $(DIST)/manifest.json and exits non-zero if
+# any target failed to build.
+RELEASE_TARGETS = linux/amd64 linux/arm64 darwin/arm64 windows/amd64
+
+# sha256sum on Linux, shasum on the BSDs/macOS. Resolved once at parse time.
+SHA256 := $(shell command -v sha256sum 2>/dev/null || command -v shasum 2>/dev/null || echo sha256sum)
+
+.PHONY: all build bin release test race vet fmt schema schema-check conformance check smoke smoke-e2e ac-matrix clean
 
 all: build
 
@@ -31,6 +41,62 @@ bin:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/troubled ./cmd/troubled
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN)/trouble ./cmd/trouble
 	@echo "built $(BIN)/troubled $(BIN)/trouble $(VERSION) $(GIT_SHA)"
+
+# The cross-platform release matrix (TRBL-002). One deterministic tree —
+# $(DIST)/<goos>-<goarch>/<binary>[.exe] — for the four targets above, stamped
+# exactly like `bin` (SPEC-12 §3.4: CGO_ENABLED=0, -trimpath, -ldflags).
+# Sequential on purpose: no make -j, no shell backgrounding. Every target is
+# attempted so the log names all failures, the recipe still exits non-zero, and
+# the manifest is written ONLY when every target built (a partial manifest would
+# read like a release). The unstamped-build invariant is untouched: GIT_SHA stays
+# `unknown` at HEAD-less builds and /health.json keeps reporting degraded.
+release:
+	@set -u; \
+	rm -rf $(DIST); \
+	mkdir -p $(DIST); \
+	failed=""; \
+	for t in $(RELEASE_TARGETS); do \
+	  goos=$${t%/*}; goarch=$${t#*/}; \
+	  out=$(DIST)/$$goos-$$goarch; \
+	  ext=""; if [ "$$goos" = windows ]; then ext=".exe"; fi; \
+	  mkdir -p $$out; \
+	  if CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $$out/troubled$$ext ./cmd/troubled \
+	     && CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch $(GO) build -trimpath -ldflags="$(LDFLAGS)" -o $$out/trouble$$ext ./cmd/trouble; then \
+	    echo "release: ok   $$goos/$$goarch -> $$out/troubled$$ext $$out/trouble$$ext"; \
+	  else \
+	    echo "release: FAIL $$goos/$$goarch (go build exited non-zero)"; \
+	    failed="$$failed $$t"; \
+	  fi; \
+	done; \
+	if [ -n "$$failed" ]; then \
+	  echo "release: FAILED (no manifest written) for:$$failed"; \
+	  exit 1; \
+	fi; \
+	mf=$(DIST)/manifest.json; \
+	{ \
+	  echo '{'; \
+	  echo "  \"version\": \"$(VERSION)\","; \
+	  echo "  \"git_sha\": \"$(GIT_SHA)\","; \
+	  echo "  \"build_time\": \"$(BUILD_TIME)\","; \
+	  echo '  "artifacts": ['; \
+	} > $$mf; \
+	first=1; \
+	for t in $(RELEASE_TARGETS); do \
+	  goos=$${t%/*}; goarch=$${t#*/}; \
+	  out=$(DIST)/$$goos-$$goarch; \
+	  ext=""; if [ "$$goos" = windows ]; then ext=".exe"; fi; \
+	  for b in troubled trouble; do \
+	    f=$$out/$$b$$ext; \
+	    sha=$$($(SHA256) $$f | cut -d' ' -f1); \
+	    sz=$$(wc -c < $$f | tr -d ' '); \
+	    if [ $$first -eq 0 ]; then echo ',' >> $$mf; fi; \
+	    first=0; \
+	    printf '    {"name": "%s", "goos": "%s", "goarch": "%s", "path": "%s", "sha256": "%s", "size": %s}' \
+	      "$$b$$ext" "$$goos" "$$goarch" "$$f" "$$sha" "$$sz" >> $$mf; \
+	  done; \
+	done; \
+	printf '\n  ]\n}\n' >> $$mf; \
+	echo "release: wrote $$mf ($$(grep -c '"name"' $$mf) artifacts, $(VERSION) $(GIT_SHA))"
 
 test:
 	CGO_ENABLED=0 $(GO) test -count=1 ./...
@@ -83,4 +149,4 @@ ac-matrix:
 	python3 specs/tools/ac_matrix.py
 
 clean:
-	rm -rf $(BIN)
+	rm -rf $(BIN) $(DIST)

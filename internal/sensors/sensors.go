@@ -102,6 +102,7 @@ type Sensors struct {
 
 	errMu     sync.Mutex
 	errSeen   map[types.ErrorCode]time.Time
+	absent    map[string]bool
 	gapOpen   map[string]*gapEpisode
 	startTS   time.Time
 	lastDepth atomic.Int64
@@ -196,6 +197,7 @@ func New(vals []types.ConfigValue, emit EmitFunc, redact RedactFunc, now func() 
 		stab:     newStabilizer(),
 		cool:     newCooldownTable(),
 		errSeen:  map[types.ErrorCode]time.Time{},
+		absent:   map[string]bool{},
 		gapOpen:  map[string]*gapEpisode{},
 		stopCh:   make(chan struct{}),
 		reloadCh: make(chan struct{}, 1),
@@ -423,6 +425,17 @@ func (s *Sensors) Stop(ctx context.Context) error {
 func (s *Sensors) Reload(ctx context.Context) error {
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
+	// SPEC-03 §3.7b: an absent rules directory is not a failure, here any more
+	// than at boot. There is no new set to install (the shipped defaults, or the
+	// set installed before the directory was removed, stay authoritative), so the
+	// reload is a documented no-op with the absence NAMED — never a
+	// TROUBLE-SENSORS-017/019 refusal, and never a reload strike. Striking here
+	// would let a normal first-run state disable the §3.7 hot-reload trigger
+	// after three SIGHUPs.
+	if _, err := os.Stat(s.cfg.rulesDir); err != nil && os.IsNotExist(err) {
+		s.noteWatchPathAbsent(s.cfg.rulesDir, true)
+		return nil
+	}
 	started := s.now()
 	type result struct {
 		set      *ruleSet
@@ -804,6 +817,73 @@ var capabilityCodes = map[types.ErrorCode]bool{
 	types.CodeSensors005: true, types.CodeSensors006: true,
 	types.CodeSensors009: true, types.CodeSensors013: true,
 	types.CodeSensors016: true, types.CodeSensors025: true,
+}
+
+// recNote writes one informational `event` record about a condition that did NOT
+// fail (SPEC-03 §3.7b). It carries no TROUBLE-SENSORS-* code — an absent path is
+// not a refusal, and a consumer scanning `payload.error_code` must never see one
+// — and it never fires a rule (`fire = false`, the same shape recError uses for
+// its sensor_error records). It is emitted at most once per key per boot, so a
+// re-check cannot turn "nothing to watch yet" into a record storm.
+func (s *Sensors) recNote(sensor types.SensorKind, key, path, detail string) {
+	s.errMu.Lock()
+	if s.absent == nil {
+		s.absent = map[string]bool{}
+	}
+	seen := s.absent[key]
+	s.absent[key] = true
+	s.errMu.Unlock()
+	if seen {
+		return
+	}
+	ctx := context.Background()
+	payload := map[string]any{
+		"kind":       "sensor_note",
+		"sensor":     string(sensor),
+		"error_code": "",
+		"path":       path,
+		"detail":     detail,
+		"degraded":   false,
+		"sig_keyed":  false,
+		"fire":       false,
+	}
+	d := types.RecordDraft{
+		Kind:    types.KEvent,
+		Sig:     sigFor(sensor.SigSource(), "sensor_note", key).String(),
+		Origin:  types.Origin{HostID: s.hostID, HubID: s.cfg.hubID, Source: string(sensor.SigSource())},
+		Actor:   s.actor,
+		Payload: payload,
+	}
+	_, _ = s.emit(ctx, d)
+}
+
+// noteWatchPathAbsent publishes an absent watch path without degrading the sensor
+// (SPEC-03 §3.7b). Visibility is two-sided and honest: one informational record
+// naming the path, and a SensorHealth Reason that names it too, so /health.json
+// carries the condition while its status stays `ok`. An absent directory is not a
+// capability failure: the shipped defaults are active for `rules.d`, and a
+// configured path that is not there yet has nothing to watch.
+func (s *Sensors) noteWatchPathAbsent(path string, isRules bool) {
+	if isRules {
+		s.setNote(types.SenInotify, fmt.Sprintf("rules dir %s absent; the shipped defaults are active (SPEC-03 §3.7b)", path))
+		s.recNote(types.SenInotify, "rules_dir_absent:"+path, path,
+			fmt.Sprintf("the rules directory %s does not exist: nothing to watch yet, the shipped defaults are active", path))
+		return
+	}
+	s.setNote(types.SenInotify, fmt.Sprintf("watch path %s absent; nothing to watch yet (SPEC-03 §3.7b)", path))
+	s.recNote(types.SenInotify, "watch_path_absent:"+path, path,
+		fmt.Sprintf("the watch path %s does not exist: nothing to watch yet", path))
+}
+
+// setNote publishes a non-degrading informational reason on a sensor. It never
+// touches Degraded, and it never overwrites a degradation reason: a sensor that
+// is already degraded keeps the reason that explains why.
+func (s *Sensors) setNote(k types.SensorKind, note string) {
+	rt := s.rt[k]
+	if rt == nil || rt.degraded.Load() {
+		return
+	}
+	s.setReason(k, note)
 }
 
 // recError records one error code with its once-per-boot dedup for the

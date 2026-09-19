@@ -538,6 +538,38 @@ fingerprint.
   nothing changed (one-file and multi-file directories), and add/remove of a rule file each moving
   the fingerprint. No sleep shorter than one poll interval decides the verdict.
 
+### 3.7b An absent rules directory is not a failure
+
+`rules.d` defaults to `<state_root>/../config/rules.d` (§4) and is created by `trouble install` or by the
+operator, so on a first boot it does not exist. Absence is a normal state, not a capability failure:
+
+- **Absence ≠ refusal.** A `rules.d` that does not exist leaves the shipped defaults active (§4 step 3)
+  and the `inotify` sensor **enabled and not degraded**: `/health.json` keeps `status = "ok"`, and the
+  condition is NAMED twice — one informational `event` record (`payload.kind = "sensor_note"`, with
+  `path`, `detail`, `error_code = ""`, `fire = false`, at most one per path per boot) and a non-empty
+  `SensorHealth.Reason` (`rules dir <path> absent; the shipped defaults are active`) that holds while
+  the directory stays absent.
+- **TROUBLE-SENSORS-025 is reserved for a path that EXISTS and cannot be watched** — `EACCES` on
+  `stat`/`inotify_add_watch`, a symlink loop, an unparseable configured mask, or no inotify in the
+  kernel. That is a capability or configuration failure and still degrades the sensor with the path
+  named. A `rules.d` that exists but is malformed is unchanged: it refuses through §3.5/§3.7
+  (TROUBLE-SENSORS-017/018) and the previous set stays authoritative.
+- **The watch is deferred, not dropped.** The rules directory stays the always-on trigger (§3.3): the
+  watch is (re)established by the `15m` recheck the moment the directory exists, and until then the
+  `60s` content fingerprint sweep (§3.7a) is what notices its creation — a directory that appears is a
+  changed fingerprint, which triggers the unchanged §3.7 reload.
+- **Reload follows the same rule.** `trouble rules reload` and `SIGHUP` against an absent directory keep
+  the current set, emit the same informational record, and **do not** strike the §3.7 loop guard: a
+  first-run host has no rule directory to fix, and three strikes there must not disable the inotify
+  trigger.
+- **No new code.** §3.7b introduces no `TROUBLE-SENSORS-*` code: absence is informational, and every
+  failure it does not cover travels the existing refusal path.
+- **Test.** `internal/sensors/rules_absent_test.go` pins both sides (absent → enabled, not degraded,
+  shipped defaults installed, path named, no code emitted; an unreadable directory and a symlink loop →
+  TROUBLE-SENSORS-025 with `Degraded: true`) and `internal/app/missing_rules_dir_test.go` pins the boot:
+  a state root with no sibling `config/rules.d` serves `/health.json` with `status = "ok"`, the shipped
+  defaults as the live rule set, and no TROUBLE-SENSORS-025 record in the boot's ledger.
+
 ### 3.8 Storm breakers and caps (AC-4)
 
 Scopes are the shared `Breaker.Scope` strings: `rule:<name>`, `sig:<sig>`, `source:<kind>`, `global`.

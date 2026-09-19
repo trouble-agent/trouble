@@ -49,9 +49,11 @@ func (s *Sensors) startInotify(ctx context.Context) error {
 	s.inoState.byPath = map[string]int32{}
 	s.setSensor(types.SenInotify, true, false, "")
 
-	// The rules directory is watched unconditionally.
-	rulesMask := uint32(unix.IN_CLOSE_WRITE | unix.IN_MOVED_TO | unix.IN_DELETE)
-	s.addWatch(s.cfg.rulesDir, rulesMask, false, 0, "", true)
+	// The rules directory is watched unconditionally (SPEC-03 §3.3) — but a
+	// directory that does not exist yet is a normal first-run state, not a
+	// failure (SPEC-03 §3.7b), so the watch is established by
+	// ensureRulesWatch and retried by the 15m recheck.
+	s.ensureRulesWatch()
 	for _, p := range s.cfg.inotify.paths {
 		mask, ok := parseInotifyMask(p.mask)
 		if !ok {
@@ -78,6 +80,28 @@ func (s *Sensors) startInotify(ctx context.Context) error {
 	return nil
 }
 
+// ensureRulesWatch establishes the always-on rules.d watch, once, when the
+// directory exists (SPEC-03 §3.3, §3.7b). A directory that does not exist yet is
+// NAMED and not degraded, and the watch is retried by the 15m recheck — so the
+// hot-reload trigger is established the moment the operator creates the directory
+// instead of being lost for the life of the process. Until then the §3.7a
+// content fingerprint sweep is what notices the directory's creation.
+func (s *Sensors) ensureRulesWatch() {
+	if s.rulesWatchArmed() {
+		return
+	}
+	mask := uint32(unix.IN_CLOSE_WRITE | unix.IN_MOVED_TO | unix.IN_DELETE)
+	s.addWatch(s.cfg.rulesDir, mask, false, 0, "", true)
+}
+
+// rulesWatchArmed reports whether the rules directory is already in the watch set.
+func (s *Sensors) rulesWatchArmed() bool {
+	s.inoState.mu.Lock()
+	defer s.inoState.mu.Unlock()
+	_, ok := s.inoState.byPath[s.cfg.rulesDir]
+	return ok
+}
+
 func parseInotifyMask(spec string) (uint32, bool) {
 	if strings.TrimSpace(spec) == "" {
 		spec = defaultInotifyMask
@@ -102,6 +126,14 @@ func parseInotifyMask(spec string) (uint32, bool) {
 func (s *Sensors) addWatch(path string, mask uint32, recursive bool, maxDepth int, rule string, isRules bool) {
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// SPEC-03 §3.7b: a path that is not there is a STATE (nothing to
+			// watch yet), not a capability failure. TROUBLE-SENSORS-025 is kept
+			// for a path that exists and cannot be watched — permission denied,
+			// a symlink loop, an unparseable mask, no inotify on the host.
+			s.noteWatchPathAbsent(path, isRules)
+			return
+		}
 		s.recError(types.SenInotify, types.CodeSensors025, fmt.Sprintf("watch path %s: %v", path, err))
 		return
 	}
@@ -205,8 +237,13 @@ func (s *Sensors) runInotifyRecheck(ctx context.Context) {
 			return
 		case <-tk.C:
 			s.checkWatchLimit(ctx)
-			s.sensorOK(types.SenInotify)
+			// The recheck is where a deferred condition is re-derived: a stale
+			// reason is dropped, the always-on rules.d watch is (re)established
+			// the moment the directory exists, and an absent directory is NAMED
+			// again without degrading (SPEC-03 §3.7b).
 			s.clearReason(types.SenInotify)
+			s.ensureRulesWatch()
+			s.sensorOK(types.SenInotify)
 		}
 	}
 }

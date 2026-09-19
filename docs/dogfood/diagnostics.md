@@ -92,16 +92,23 @@ in `/tmp` — put dogfood state roots under `~/dogfood-<name>/state` instead.
 `internal/sensors/config.go:144` derives `rulesDir` as
 `filepath.Join(filepath.Dir(stateRoot), "config", "rules.d")`, and
 `internal/sensors/rules.go:118` notes the directory is "Installed to
-`<config>/rules.d/10-defaults.toml` by `trouble install`". This is the third
-trap: **boot the daemon without `trouble install` and no rules.d exists**, so the
-inotify sensor reports
+`<config>/rules.d/10-defaults.toml` by `trouble install`". This is the third trap: **boot the daemon without `trouble install` and no rules.d
+exists**, so on this build the inotify sensor reported
 `TROUBLE-SENSORS-025: watch path .../config/rules.d: no such file or directory`
-and `/health.json` says `degraded`. The shipped defaults are compiled in, so the
+and `/health.json` said `degraded`. The shipped defaults are compiled in, so the
 daemon still detects — but the file-watch sensor is dead. The right way for a
 hand-rolled instance: copy `examples/rules/*.toml` into
 `<state_root>/../config/rules.d/` before boot (or run `trouble install`, which
 does it for you). Verified: with the rules installed the same config reports
 `status:"ok"` and all six sensors `degraded=false`.
+
+**That health alarm was itself a defect, and TRBL-022 removed it** (SPEC-03
+§3.7b): the absence of `rules.d` is a first-run state, not a capability failure,
+so the inotify sensor now stays up with the shipped defaults active, names the
+absent path in its `reason` and writes one informational record
+(`payload.kind = "sensor_note"`, no `error_code`). `TROUBLE-SENSORS-025` is kept
+for a path that EXISTS and cannot be watched. The rest of this section stands:
+copying the rule files in is what arms the file-watch trigger.
 
 ### 2.4 Subsystems are best-effort by design — which is how the product goes missing
 
@@ -229,7 +236,7 @@ ledger's `actor` carries the same values.
 |---|---|---|---|
 | 1 | `TROUBLE-LIFECYCLE-001: key "verify.zone_windows": bad zone_windows pair "{"` | inline-table TOML in the example vs the SPEC-12 string form | use `zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"` (TRBL-005) |
 | 2 | `TROUBLE-LIFECYCLE-004: state_root ".../tmp" resolves under forbidden root "/tmp"` | deliberate refusal of world-writable parents | keep the state root under `$HOME`, `0700` |
-| 3 | `TROUBLE-SENSORS-025: watch path .../config/rules.d: no such file or directory` | `rulesDir = <state_root>/../config/rules.d`, installed only by `trouble install` | copy `examples/rules/*.toml` there, or run `trouble install` |
+| 3 | `TROUBLE-SENSORS-025: watch path .../config/rules.d: no such file or directory` | `rulesDir = <state_root>/../config/rules.d`, installed only by `trouble install`; on this build the absence degraded `/health.json` (fixed by TRBL-022, SPEC-03 §3.7b — absence is named, not degraded) | copy `examples/rules/*.toml` there to arm the file-watch trigger, or run `trouble install` |
 | 4 | `401 {"code":"TROUBLE-DASHBOARD-002","message":"authentication failed"}` with a token the CLI just minted | literal `~` in the default token path → missing file → empty (fail-closed) token set | set an absolute `dashboard.token_file` (TRBL-006) |
 | 5 | `POST http://127.0.0.1:7643/api/1/event/` → connection refused | sentinel not built: no projects configured, and no operator surface to configure them | read the `subsystem_not_built` ledger records; enabling ingest is currently a code change (TRBL-007) |
 | 6 | `429 {"code":"TROUBLE-DASHBOARD-012","detail":"auth_failure_throttle"}` on a **valid** token | IP-keyed failure throttle (10 / 60 s) | space out retries; do not loop on auth failures (TRBL-010) |

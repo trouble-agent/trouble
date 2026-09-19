@@ -114,6 +114,17 @@ matrix of §4.3:
    the dedup gate re-warms from the ledger's idempotency index (boot-time restore, §3.1
    `dedup.state`), and `trouble hub status` reports `redis.state = "cold"` until the first
    acknowledged entry.**
+6. **Loss classification: a lost queue is only ever inferred from a failure attributable to Redis.**
+   The rows of §4.3 move the daemon's degraded state on a Redis refusal (002), an unreachable server
+   (003) or a failed stream operation (004), and on a server that no longer knows the consumer group
+   (rule 5's cold-server case). They never move it for a sender whose request ended — a cancelled
+   request context, or that request's own deadline — and never for a draft refused on its own content
+   (007). A client that disconnects mid-request is no evidence about Redis: the daemon keeps the
+   consumer it has, the entry the sender already enqueued stays drainable, and no `redis_lost`
+   lifecycle record is written, because a record naming a Redis loss for it would name a failure that
+   did not happen (one with an empty `error_code` and an empty `reason` names nothing at all). An
+   error that cannot be attributed to Redis leaves the state machine as it is and is logged; the
+   liveness probe of rule 5 decides that case on its next pass, with an error of its own.
 
 | Key (new) | Default | Meaning |
 |---|---|---|

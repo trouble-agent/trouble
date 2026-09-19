@@ -1,0 +1,34 @@
+# Build context hygiene (TRBL-002). The image needs go.mod/go.sum, the Go
+# sources, examples/ and deploy/ — nothing else. A 2 MB HTML spec review, a
+# 111 MB worktree tree and live SQLite state must never ride the context.
+
+# Local/agent state and history that is not part of the build.
+.coding-hermes/
+.gitreins/
+.worktrees/
+skills/
+*.db
+*.db-shm
+*.db-wal
+dagger.db*
+
+# Rendered/local artefacts.
+docs/specs-review.html
+*.log
+*.out
+coverage.txt
+
+# Built binaries: the image builds them from source inside the builder stage.
+bin/
+# ...including the stray copies `make bin` can drop in the repo root.
+/trouble
+/troubled
+
+# Local secret material (dashboard token store, env file): mounted at run time,
+# never baked into the context.
+deploy/container/secrets/
+
+# NOTE: .git is deliberately NOT excluded — when no --build-arg GIT_SHA is
+# supplied the Dockerfile derives it with `git rev-parse --short=7 HEAD` in the
+# build context (SPEC-12 §3.4, TRBL-002). Excluding .git would force the
+# fallback placeholder sha on every local build.

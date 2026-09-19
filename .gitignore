@@ -22,3 +22,6 @@ dist/
 .gitreins/history/
 .gitreins/verdicts/
 .gitreins/usage.jsonl
+
+# Container secret material (mounted at run time, never committed).
+deploy/container/secrets/

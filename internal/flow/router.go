@@ -55,7 +55,19 @@ func (f *Flow) DispatchSpawn(ctx context.Context, req types.SpawnRequest) (strin
 // replay loop calls it with spool=false: the entry it is draining IS the durable
 // record, and re-spooling a failed replay would grow the queue on every attempt
 // instead of counting the attempt against the entry (§3.9a).
+//
+// It is the PRE-SEAL path only: a `spawn` request that failed before any payload
+// existed. A request that did reach the wire is re-dispatched from its sealed
+// entry payload instead (§3.9b), so its body is never rendered twice.
 func (f *Flow) dispatchSpawn(ctx context.Context, req types.SpawnRequest, spool bool) (string, string, error) {
+	ref, err := f.dispatchRow(ctx, f.spawnRow(req), types.SevHigh, spool)
+	return ref, "", err
+}
+
+// spawnRow is the board row a spawn request dispatches. The immediate attempt and
+// the §3.9a sealed entry are rendered from this one shape, which is what makes the
+// payload a replay delivers the payload the first attempt would have sent.
+func (f *Flow) spawnRow(req types.SpawnRequest) types.BoardRow {
 	row := types.BoardRow{
 		ID: req.TaskID, Sig: req.Sig, Inc: req.Inc, Repo: req.Repo,
 		Title: f.titleFor(req), Priority: "P1",
@@ -63,8 +75,21 @@ func (f *Flow) dispatchSpawn(ctx context.Context, req types.SpawnRequest, spool 
 	if row.ID == "" {
 		row.ID = types.NewID(types.PTsk)
 	}
-	ref, err := f.dispatchRow(ctx, row, types.SevHigh, spool)
-	return ref, "", err
+	return row
+}
+
+// wirePayload renders the §3.6 wire body for one board row. It is the ONLY place
+// the body is built: the immediate attempt and the §3.9a sealed entry both call
+// it, which is what lets a replay deliver the bytes the entry was written with
+// instead of a payload re-derived from whatever the config says now.
+func (f *Flow) wirePayload(row types.BoardRow, severity types.Severity) dispatchPayload {
+	return dispatchPayload{
+		IdemKey: row.ID, TaskID: row.ID, BoardPath: f.boardOfRow(row), Repo: row.Repo,
+		Sig: row.Sig, Inc: row.Inc, Title: row.Title, Priority: row.Priority,
+		Complexity: row.Complexity, CapabilityTag: defaultSlice(row.CapabilityTags),
+		Severity: string(severity), HostID: f.deps.Actors.HostID,
+		SubmittedTS: types.FormatUTC(f.clock().Now()),
+	}
 }
 
 // dispatch marshals the payload and performs one dispatch attempt sequence.
@@ -73,16 +98,28 @@ func (f *Flow) dispatch(ctx context.Context, row types.BoardRow, severity types.
 }
 
 // dispatchRow performs one dispatch attempt sequence (the three immediate
-// retries) and, when the immediate path is exhausted, hands the payload to the
-// durable queue unless the caller owns that decision already.
+// retries) and, when the immediate path is exhausted, hands the RENDERED payload
+// to the durable queue unless the caller owns that decision already.
 func (f *Flow) dispatchRow(ctx context.Context, row types.BoardRow, severity types.Severity, spool bool) (string, error) {
-	p := dispatchPayload{
-		IdemKey: row.ID, TaskID: row.ID, BoardPath: f.boardOfRow(row), Repo: row.Repo,
-		Sig: row.Sig, Inc: row.Inc, Title: row.Title, Priority: row.Priority,
-		Complexity: row.Complexity, CapabilityTag: defaultSlice(row.CapabilityTags),
-		Severity: string(severity), HostID: f.deps.Actors.HostID,
-		SubmittedTS: types.FormatUTC(f.clock().Now()),
+	p := f.wirePayload(row, severity)
+	ref, err := f.attempt(ctx, p)
+	if err == nil {
+		return ref, nil
 	}
+	// The immediate path is exhausted: ONE SpoolEntry carrying THIS payload, sealed
+	// as it stands, so a replayed dispatch cannot mutate under a config change
+	// (§3.9b).
+	if spool {
+		f.enqueueDispatch(ctx, p)
+	}
+	return "", err
+}
+
+// attempt performs the §3.6 attempt sequence for an ALREADY-RENDERED payload: the
+// three immediate retries at 1 s / 3 s / 9 s, 429 and 5xx retryable, any other 4xx
+// permanent and never retried. Rendering is the caller's, so the same sequence
+// delivers a fresh dispatch and a replayed one.
+func (f *Flow) attempt(ctx context.Context, p dispatchPayload) (string, error) {
 	body, err := json.Marshal(p)
 	if err != nil {
 		return "", err
@@ -116,10 +153,6 @@ func (f *Flow) dispatchRow(ctx context.Context, row types.BoardRow, severity typ
 		if asFlowError(err, &fe) && !isRetryable(fe) {
 			return "", err // a permanent 4xx: no retry, recorded with the body
 		}
-	}
-	// The immediate path is exhausted: one SpoolEntry for replayed re-dispatch.
-	if spool {
-		f.enqueueDispatch(ctx, p)
 	}
 	return "", &flowError{Code: types.CodeFlow005, Msg: fmt.Sprintf("dispatch failed after %d retries: %v", retries, last)}
 }
@@ -187,22 +220,18 @@ func (f *Flow) dispatchCLI(ctx context.Context, body []byte) (string, error) {
 	return out.String(), nil
 }
 
-// enqueueDispatch puts a dispatch on the durable queue (SPEC-08 §3.9a).
+// enqueueDispatch puts the dispatch that just failed on the durable queue
+// (SPEC-08 §3.9a). The three immediate retries above are the fast path; this is
+// the durable one, and the entry carries the payload THE ATTEMPT SENT — sealed,
+// not a request from which a later replay re-derives a new body (§3.9b).
 //
-// The three immediate retries above are the fast path; this is the durable one.
-// It claims durability only when the entry landed on a queue the flow REPLAYS
-// (§3.9a), and names the coupling when it did not — before §3.9a this recorded
+// It claims durability only when the entry landed on a queue the flow REPLAYS,
+// and names the coupling when it did not — before §3.9a this recorded
 // `dispatch_state="spooled"` for an entry the desk's driver-keyed replay never
 // listed and could not decode.
 func (f *Flow) enqueueDispatch(ctx context.Context, p dispatchPayload) {
-	req := types.SpawnRequest{
-		ID: types.NewID(types.PSpawn), TaskID: p.TaskID, Sig: p.Sig, Inc: p.Inc,
-		Repo: p.Repo, PriorityClass: p.Priority, RequestedTS: p.SubmittedTS,
-	}
 	inc := types.Incident{ID: p.Inc, Sig: p.Sig}
-	// spoolPut writes the record: the durable half claims `spooled` only when a
-	// queue this subsystem replays accepted the entry (§3.9a).
-	f.spoolPut(ctx, "dispatch", "spool_not_replayable", req, inc)
+	f.spoolWrite(ctx, "dispatch", "spool_not_replayable", sealDispatch(p, sourceDispatch), inc)
 }
 
 // enqueue puts a spawn request on the durable queue (§3.9). The in-memory queue
@@ -234,7 +263,9 @@ func (f *Flow) enqueue(ctx context.Context, sp types.SpawnRequest) {
 	}
 	f.mu.Unlock()
 	// The durable half. This is a spawn the state machine has just parked, so a
-	// missing queue is recorded as a real loss of durability, not a hint.
+	// missing queue is recorded as a real loss of durability, not a hint. The
+	// payload is rendered ONCE, here, and sealed (§3.9b): the request never
+	// reached the wire, so this render is the payload the replay must deliver.
 	inc := types.Incident{ID: sp.Inc, Sig: sp.Sig}
 	if !f.spoolPut(ctx, "spawn", "spool_not_replayable", sp, inc) {
 		return

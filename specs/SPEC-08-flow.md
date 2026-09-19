@@ -454,9 +454,10 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
 - **Format.** One JSON object per file, one entry per file, mode `0600`, written atomically: temp file in
   the SAME directory → `fsync` file → `rename` → `fsync` directory, so a torn entry can never be
   replayed. The entry is `SpoolEntry` (SPEC-TYPES §3.14) with `Kind = "spawn"`; its `payload` is the
-  marshalled `SpawnRequest`, already scrubbed (SPEC-02), so the queue is not a leak surface. The
-  directory is `0700` and is proved writable when the store is built: a store that cannot be built is a
-  recorded refusal and leaves the flow with no queue rather than an in-memory illusion.
+  **sealed dispatch envelope** of §3.9b — `{"sealed":true,"source":"dispatch"|"spawn","task_id","inc",
+  "sig","payload":{… the §3.6 wire body …}}` — already scrubbed (SPEC-02), so the queue is not a leak
+  surface. The directory is `0700` and is proved writable when the store is built: a store that cannot be
+  built is a recorded refusal and leaves the flow with no queue rather than an in-memory illusion.
 - **Bounds.** Every bound is an operator-tunable registry key — the five `flow.*` keys of SPEC-12 §3.1d
   (`flow.spool_max_entries`, `flow.spool_ttl`, `flow.spool_max_attempts`, `flow.replay_every`,
   `flow.replay_batch`) — and every bound has a default taken from the number this suite already pins, which
@@ -478,18 +479,20 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
 | `replay_batch` | `flow.replay_batch` | 100 entries | entries per drain |
 
 - **Replay rules.** Order is `(next_try_ts asc, ts asc, id asc)`. One in-flight dispatch per `IdemKey`,
-  so a replay can never race the original attempt or a second replay of the same entry. Re-dispatch goes
-  through the EXISTING §3.6 `DispatchSpawn` with the **same** `IdemKey`, which is what makes a replay
-  idempotent: the router's own `task_id` dedup (409/`duplicate:true` = accepted) is the guard, so no
-  second spawn is created for work the first attempt already placed. On success the entry is **deleted**;
+  so a replay can never race the original attempt or a second replay of the same entry. Re-dispatch
+  delivers the entry's **sealed payload** (§3.9b) through the same §3.6 attempt sequence with the **same**
+  `IdemKey` — the body is never rendered a second time — which is what makes a replay idempotent: the
+  router's own `task_id` dedup (409/`duplicate:true` = accepted) is the guard, so no second spawn is
+  created for work the first attempt already placed. On success the entry is **deleted**;
   on failure the attempt is counted **against that entry** (never a fresh entry — a failed replay that
   re-enqueues would grow the queue on every attempt) and `next_try_ts` is shifted along §3.9's schedule
   (5 s / 15 s / 45 s / 2 m / 5 m).
 - **Every state is a ledger record**, each carrying `inc` + `sig` + `task_id`: request → retries
-  exhausted → `dispatch_state="spooled"`; replay success → `"replayed"` + a `spawn` record at `leased`;
-  replay failure → `"replay_failed"` with `attempts` and `next_try_ts`; drop → `"dropped"` with
-  `drop_reason` **and** a `spawn` record naming the state. Drops are written as `flow` + `spawn` records:
-  `gap` is not this subsystem's kind (SPEC-INDEX §3.4).
+  exhausted → `dispatch_state="spooled"`; replay success → `"replayed"` + a `spawn` record at `leased`
+  + the §3.9b delivery fields (`payload_origin`, `payload_sha256`, `delivered`, and `diverged_fields`
+  when the live inputs have moved); replay failure → `"replay_failed"` with `attempts`, `next_try_ts`
+  and `payload_origin`; drop → `"dropped"` with `drop_reason` **and** a `spawn` record naming the state.
+  Drops are written as `flow` + `spawn` records: `gap` is not this subsystem's kind (SPEC-INDEX §3.4).
 - **Durability is claimed only when it exists.** `dispatch_state="spooled"` is written **only** when the
   entry landed on a queue this subsystem replays. A sink that can be written but not replayed (an
   `Enqueue`-only adapter), a store that refused the write, and a flow with no store at all are each
@@ -520,7 +523,8 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
   deletes the entry on success, does nothing on a second pass, and leaves an empty queue after a
   simulated restart; an entry written by one store instance is listed, decoded and replayed by a second
   one; attempts, `ttl`, `corrupt` and overflow each drop the entry with a record pair and zero `gap`
-  records; overflow evicts the OLDEST entry and never the incoming one. `internal/app/flow_spool_wiring_test.go`
+  records; overflow evicts the OLDEST entry and never the incoming one. §3.9b adds its own file,
+  `internal/flow/replay_seal_test.go`. `internal/app/flow_spool_wiring_test.go`
   asserts the composition root: with the issue desk OFF (the shipped posture) `flowDeps` still hands the
   flow a queue it can replay, the wired sink writes one `0600` entry under the state root, and a store
   that cannot be built leaves the flow reporting "no queue" instead of claiming durability.
@@ -533,6 +537,59 @@ drains it, and what the record may claim about it** — the seam where SPEC-08 �
   keeps four, and a two-hour-old entry is dropped with `drop_reason:"ttl"` under `flow.spool_ttl = 1h` where
   the compiled default never TTL-drops it. Reverting either half of the wiring — the projection or the
   flow's construction — makes that test fail, which is what makes it evidence rather than a restatement.
+
+### 3.9b A replayed dispatch delivers its SEALED payload
+
+§3.9a's entry is written for a dispatch that could not be delivered. What that entry CARRIES decides what
+a later replay sends, and the queue outlives a config change, a board move and a rebuild: the payload is
+therefore sealed at write time and re-delivered, not re-derived. This sub-§ states the rule, the fields a
+replay may not invent, and what the ledger says about the two.
+
+- **The payload is rendered ONCE, at write time, and sealed.** `wirePayload` is the only renderer of the
+  §3.6 body; both write seams call it exactly once and store the result in the entry: `enqueueDispatch`
+  seals the payload the failed attempt just sent, and the §3.9 `spawn_pending` path — which never reached
+  the wire — renders the payload it *would* have sent and seals that. A replay unmarshals the sealed
+  envelope and delivers the body it carries through the same §3.6 attempt sequence. Consequence: no
+  config change, board move, registration flip or rebuild on another host retro-mutates a queued
+  dispatch, so `board_path`, `title`, `priority`, `complexity`, `capability_tags`, `severity` and
+  `host_id` describe the REQUEST that produced the entry rather than whatever the config says when the
+  queue finally drains. Choosing this posture over documented re-derivation is deliberate: re-derivation
+  is not merely hard to read in the ledger, it can dispatch a queued incident's work at a board the
+  incident was never filed to.
+- **Idempotency is untouched.** The stable fields are `idem_key`, `task_id`, `inc` and `sig` — sealed with
+  the payload and re-checked against the entry's own `idem_key` — so the router's `task_id` dedup
+  (409/`duplicate:true` = accepted) still makes a replay idempotent, and one in-flight dispatch per
+  `idem_key` (§3.9a) still keeps two drains from racing. `submitted_ts` is the **seal stamp** (when the
+  payload was rendered), not the moment of delivery; the delivery instant is the replay record's own
+  timestamp.
+- **Requested vs delivered is readable from the ledger.** A replay of a sealed entry records
+  `payload_origin:"sealed"`, `payload_sha256` over the delivered bytes, and `delivered` — the field set
+  above as a flat map, so it diffs field by field in a ledger query. When the live inputs have moved
+  since the entry was written, the same record carries `diverged_fields` (every field where a
+  re-derivation would have produced something else) and `live_fields` (what that re-derivation would
+  have sent). The divergence is therefore visible in the evidence trail instead of silent in the wire
+  body, and the delivered payload is unaffected by it: a reader can always tell what was requested from
+  what was delivered.
+- **An entry written before this sub-§ stays drainable, and says what it is.** A payload that is the bare
+  marshalled `SpawnRequest` (the above shape's predecessor, with no `sealed` marker) is **decoded**, never
+  dropped as `corrupt`: its replay re-derives the body from live state — the posture §3.9b replaces — and
+  the record states `payload_origin:"rederived"` plus `rederived_fields` naming the eight fields that
+  render is taken from (`board_path`, `title`, `priority`, `complexity`, `capability_tags`, `severity`,
+  `host_id`, `submitted_ts`). An upgrade therefore loses no queued dispatch AND never passes a
+  re-derivation off as a delivered-as-written payload. Only a payload this build cannot decode at all is
+  dropped, and it is dropped with `drop_reason:"corrupt"` (§3.9a's bound table).
+- **No codes of its own.** §3.9b mints no `TROUBLE-FLOW-*` code: a sealed delivery that fails is
+  TROUBLE-FLOW-005 through the §3.6 path, and a failed replay is TROUBLE-FLOW-010 (as in §3.9a).
+- **Test.** `internal/flow/replay_seal_test.go` reproduces the mutation and then pins the posture: one
+  §3.6 dispatch 500s and parks, the project's board path MOVES and the daemon reports another `host_id`
+  while the entry is queued, and the replay's body is then byte-identical to the failed attempt's — the
+  same `<sha>`-pinned field set, the same `submitted_ts`, the same `idem_key`/`task_id` — with the record
+  carrying `payload_origin:"sealed"`, `delivered` and `diverged_fields` naming `board_path`, `priority`,
+  `complexity`, `capability_tags`, `severity` and `host_id` (the fields the pre-§3.9b path mutated on
+  exactly that input change: the RED run shows the replay sending the moved board path, `P1` for `P3`,
+  `high` for `low`, no tags and the new host id while the task id stayed stable). A second drain
+  dispatches nothing. A pre-§3.9b entry (the bare marshalled `SpawnRequest`) is replayed — delivered, not
+  dropped — with `payload_origin:"rederived"` and `rederived_fields` present.
 
 ### 3.10 One-fix-per-sig lease
 
@@ -916,6 +973,7 @@ All tests are `internal/flow` package tests plus one end-to-end harness; `-count
 | `flow_e2e_test.go` | **AC-21**: scripted bad line in an allowed repo, `hotfix.enabled=true` → direct row + spawn within 60 s, patch lands in the worktree only (`git -C <main> status --porcelain` empty), window passes → promotion prompt, recurrence → rollback + reopen. **AC-9**: both drivers file a row and the router path round-trips. **AC-19**: the timeline function returns filed → foreman → patch → verify → promote with PR link. **AC-26**: `full` + `auto-after-verify` runs detection → row → spawn → verify → promote → skill candidate with zero human actions, and the kill-switch before the spawn yields exactly one parked stage and no spawn | AC-21 `trig_to_spawn_ms ≤ 60 000` (asserted on the recorded value); main checkout diff empty; AC-19 timeline complete and ordered; AC-26 zero human actors in the ledger slice |
 | `testdata/` | strict board (10 000 rows), non-strict legacy board, empty board, foreign-rewrite board, config set (valid, `/tmp` base, `max_concurrent=5`, unknown priority class) | fixtures reused by every test above |
 | `spool_test.go` | §3.9a on the shipped store: an `Enqueue`-only sink (the desk adapter's shape) yields EXACTLY ONE outcome — an honest `unspooled` record naming the coupling — and zero `spooled` claims; a typed-nil store is not adopted; with the flow's own store a parked spawn is one `0600` file under `<state_root>/spool/flow/spawn/` and the record says `spooled`; a drain re-dispatches with the SAME idem key against a real HTTP router, deletes the entry on success, re-drains to zero, and leaves an empty queue after a simulated restart; an entry written by one store instance is listed, decoded and replayed by a second one; `attempts`, `ttl`, `corrupt` and overflow each drop the entry with a `flow` + `spawn` record pair and zero `gap` records; overflow evicts the OLDEST entry, never the incoming one; `Flow.Run` drains the queue on its ticker. `flow_spool_wiring_test.go` (internal/app) drives the REAL `flowDeps` with the issue desk OFF (the shipped posture): the flow still receives a replayable queue, the wired sink writes one `0600` entry under the state root, and a store that cannot be built leaves the flow reporting "no queue" | 0 `spooled` records while no replayable queue is wired; exactly 1 file per entry, mode `0600`, directory `0700`; queue depth 0 after a successful replay and 0 after the restart; 2 overflow drops for 4 writes at a bound of 2; the loop test's deadline is generous by design (wall-clock driven), every other assertion is clock-injected |
+| `replay_seal_test.go` | §3.9b, reproduction first and the posture second: one §3.6 dispatch 500s and parks; the project's board path MOVES and the daemon reports another `host_id` while the entry is queued; the replay's body is then byte-identical to the failed attempt's, and the record carries `payload_origin:"sealed"`, `delivered` and `diverged_fields` naming `board_path`, `priority`, `complexity`, `capability_tags`, `severity` and `host_id`; a second drain dispatches nothing; a pre-§3.9b entry (the bare marshalled `SpawnRequest`) still replays — delivered, `payload_origin:"rederived"` + `rederived_fields` — instead of being dropped as corrupt | the replayed body equals the failed attempt's on the canonical (key-sorted) JSON; 2 router requests for 2 attempts, both carrying the same `idem_key`; 0 further dispatches on a second drain; RED against the pre-§3.9b code shows the replay mutating 6 secondary fields (`board_path` moved, `P1` for `P3`, `high` for `low`, no tags, empty complexity, the new `host_id`) plus `title`/`submitted_ts` while `idem_key`/`task_id` stayed stable |
 | `internal/app/flow_bounds_wiring_test.go` | the §3.9a bounds as resolved SPEC-12 §3.1d keys at the composition root: `flowSpoolBounds` over a config file with `[flow] spool_max_entries = 3` carries 3 and the §3.9a defaults for the four undeclared keys; four `Put`s through `newFlowSpool` leave three entries, report exactly one `overflow` drop for the OLDEST id and leave it off disk — where the same four writes with no `[flow]` table leave four; a two-hour-old, undecodable entry is dropped with `drop_reason:"ttl"` through `newFlowSubsystem` + `Replay` under `flow.spool_ttl = 1h`, and never with `"ttl"` under the compiled default | 2 eviction cases (configured 3 → depth 3 + oldest gone; default → depth 4); the TTL case is a 2-row table whose control row must NOT produce a `ttl` drop; reverting either the projection or the flow's construction fails the suite |
 
 Regression numbers carried from the judges' measurements: worktree creation cost is a full checkout
@@ -932,7 +990,8 @@ the number the ≤30 s worktree budget must never approach in a test.
   queue, reconcile), `lease.go` (sig leases), `promote.go` (promotion, rollback, skill hand-off),
   `brief.go` (`ForemanBrief` assembly + caps), `budget.go` (the 60 s clock and per-spawn measurement),
   `timeline.go` (dashboard read model), `spool.go` + `replay.go` (§3.9a: the flow-owned dispatch queue,
-  its bounds and the drain `Flow.Run` owns).
+  its bounds and the drain `Flow.Run` owns; §3.9b: the sealed entry payload a replay delivers, and the
+  divergence record that tells a delivered payload from a re-derived one).
 - **Fan-out:** `internal/flow` imports `internal/types` (all shared types) and calls
   `internal/ledger` (record append), `internal/issues` (EnsureBySig/Comment), `internal/research`
   (brief read), `internal/skills` (candidate/refusal), `internal/registry` (module registration for

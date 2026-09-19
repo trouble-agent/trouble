@@ -114,8 +114,8 @@ injects the resulting `Actor` into the ledger writer constructor (§8).
 `a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b-c`. Env vars are read only with the `TROUBLE_` prefix. A dot
 becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secrets.environment_file` is
 `--secrets-environment_file`, `lifecycle.unit_name` is `--lifecycle-unit_name`. Every registered key of §3.1
-is flag-addressable in that form except the eight §2.5a names — five of them are declarations rather than
-scalars, and three cannot cross a command line at all. A flag source beats env, file and default (§3.1).
+is flag-addressable in that form except the six §2.5a names — five of them are declarations rather than
+scalars, and one cannot cross a command line at all. A flag source beats env, file and default (§3.1).
 
 The shipped unit's `ExecStart` renders exactly one argument pair, `--config <path>`; `RenderUnits` scans every
 argument it renders with the SPEC-02 mandatory rule set and refuses an `ExecStart` that carries secret-shaped
@@ -145,17 +145,31 @@ Rules, pinned:
 - **`--config` is consumed before resolution and nothing else is.** The file is an input to resolution rather
   than a key resolution can already have read. Its mechanical twin `--config_path` selects the file *and*
   stays a resolved row, so `trouble config explain` shows that a flag — not the file — chose the path.
-- **Eight keys cannot be set from argv.** Five of them are declarations rather than scalars: the four
+- **Six keys cannot be set from argv.** Five of them are declarations rather than scalars: the four
   tables — `projects` (§3.1a), `issues` and `skills` (§3.1b) and `llm` (§3.1c) — plus the one list of
   tables on the SPEC-03 §4 sensor surface, `sensors.inotify.paths` (§3.1e), whose rows carry the
   `path`/`mask`/`recursive`/`max_depth`/`rule` of each watched path. A scalar value for any of the five
-  is refused by name with 001. The other three are refused by the argv-secret control of §3.2 rule 2
-  before the daemon can serve: `dashboard.token_file`, `hub.token` and `server.redis.password_env`.
-  Their flag NAMES match the mandatory `cli_flag_secret` rule (SPEC-02 §3.3 rule 9) and the value that
-  follows the name is taken as its value, so a path, a token and an environment-variable name are
-  indistinguishable to that rule. All three are set from the file or the environment
-  (`TROUBLE_DASHBOARD_TOKEN_FILE`, `TROUBLE_HUB_TOKEN`, `TROUBLE_SERVER_REDIS_PASSWORD_ENV`), which is
-  what the shipped unit does with `EnvironmentFile=`.
+  is refused by name with 001. The sixth is `server.redis.password_env`: its value is the NAME of an
+  environment variable, which is not a path and is no more separable from a credential than a token is,
+  so the argv-secret control of §3.2 rule 2 refuses it before the daemon can serve. It is set from the
+  file or the environment (`TROUBLE_SERVER_REDIS_PASSWORD_ENV`), which is what the shipped unit does
+  with `EnvironmentFile=`.
+- **The two token-STORE keys ride argv with a path value, and only with one.** `dashboard.token_file` and
+  `hub.token` are addressable: the mandatory `cli_flag_secret` rule (SPEC-02 §3.3 rule 9) leaves an
+  explicitly path-shaped VALUE alone — `/…`, `~/…`, `./…` or `../…` in the path alphabet, an absolute
+  value carrying path structure (a separator or an extension) as well — and counts it exempt instead of
+  redacting it, because a token store path is a locator and not a secret. `--dashboard-token_file
+  /home/user/.config/trouble/dashboard-tokens.json` and `--hub-token /srv/trouble/hub.token` therefore
+  resolve with `source=flag`, and `--dashboard-token_file=<path>` does too: the name extends the
+  sensitive word, so rule 9 is the only rule that sees it. A value that is NOT an explicit path is
+  refused exactly as before — a token (`--hub-token abcDEF…`), a bare file name (`--token_file
+  tokens.json`) and a slash-prefixed word with no path structure (`--token_file /tokens`) all exit 13
+  with **013** — because the same rule is what makes a pasted credential on argv a hard refusal (§3.2).
+  The two spellings differ where the value follows an `=` of a name that ENDS at the sensitive word:
+  `--hub-token=<path>` is `NAME=value` first, claimed by `env_assign` (SPEC-02 §3.3 rule 7), and the
+  assignment form carries no path exemption in any context, because an environment or a config snapshot
+  writes the same shape. `hub.token` therefore rides argv in the space spelling; from the file or the
+  environment it takes either value.
 
 `internal/app`'s tests reach the flag source through `BootOptions.Args`, which is why §2.5 and this section
 could disagree with `cmd/troubled` for as long as they did; the surface is pinned by the argv tests of
@@ -599,7 +613,9 @@ mismatch is visible before a deploy.
    rule set (no second pattern dialect) → TROUBLE-LIFECYCLE-006; the shipped unit passes only `--config`.
 2. At boot the daemon scans `/proc/self/cmdline` with the same rule set; **any hit is
    TROUBLE-LIFECYCLE-013 and the daemon refuses to start** (exit 13) because `/proc/<pid>/cmdline` is
-   world-readable.
+   world-readable. The scan is the mandatory set of SPEC-02 §3.3, exemptions included: a token-store
+   path (`--hub-token /srv/trouble/hub.token`) rides, a credential value (`--hub-token abcDEF…`) does
+   not — §2.5a states the surface and the shapes.
 3. Every child process (`journalctl`, escalators, alarm commands) gets `exec.Cmd.Env` built from an explicit
    allowlist, so the daemon never re-exports its own secret-bearing environment.
 
@@ -1232,7 +1248,7 @@ Files and pass thresholds (all numbers normative regressions):
 |---|---|---|
 | `internal/lifecycle/config_test.go` | 4×4 precedence matrix over 3 keys (flag/env/file/default) — each resolves to the expected value **and** `source`/`source_ref`; conflict ⇒ 002 with both refs and a successful start; the §3.1f conflict semantics in both directions — a fixture whose six file keys all sit away from their builtin defaults plus one env-only key ⇒ **0** 002 rows and a boot `config` record with `payload.conflicts = 0` and no `conflict_refs` key, and the same fixture with `TROUBLE_INGEST_BIND` overriding the file's `ingest.bind` ⇒ **exactly 1** row naming both `source_ref`s (the other six deviations still record nothing) with `payload.conflicts = 1`; unknown file key ⇒ 001; unknown env key ⇒ ignored + hint record; type error ⇒ 001 | 100% row coverage; zero secrets in the marshalled dump (fixture `sk_live_fixture_0001` count = 0); 0 spurious 002 rows on a boot that configures seven keys away from their defaults; exactly 1 row per genuine two-source divergence |
 | `internal/lifecycle/flow_bounds_test.go` | the §3.1d `flow.*` keys: the five defaults with NO file, env or flag (256 / 72h / 5 / 5s / 100, each `source=default`/`builtin`); a `[flow]` table resolves and a HALF-specified one leaves the other four at those defaults; flag > env > file > default with the winning `source`/`source_ref` on each row; all five present exactly once in the explain dump (plus the `--key` filter form); a zero, a negative, a `0s`, an empty and an unparsable duration refused through all three sources | 5 defaults + 1 file/1 half-table resolve + 3 precedence rows + 5 explain rows + 16 refusal cases; every refusal 001 AND naming the key; 0 cases resolving to a non-positive bound |
-| `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the eight non-addressable keys asserted by name and reason (five declarations, three refused by the argv scan); a secret-shaped flag value driven through a real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a secret-shaped flag value still exits 13 with 013, and a control value passes the same scan |
+| `cmd/troubled/main_test.go` | the §2.5a argv surface: the daemon's own flags in both dash spellings, a key flag forwarded verbatim, an unknown key refused by name (001/exit 13), a one-dash token refused (exit 2), the file→flag precedence with the losing file recorded (002), and the surface INVENTORY — every registered key driven through `--<spelling>` with the six non-addressable keys asserted by name and reason (five declarations, plus the one whose value is an environment-variable NAME refused by the argv scan), the two token-store keys driven with the store path an operator types; the two token-STORE keys on a real `/proc/self/cmdline` in BOTH directions (a path value passes step 3 and dies at the LATER gate 012 — the poisoned-ledger arm, so the scan is not merely absent — while a token value for the same flags is refused 013); a secret-shaped flag value driven through the same real `/proc/self/cmdline`; the pre-fix `flag.FlagSet` kept as the control that `--state_root` must not die in | every registered key either resolves with `source=flag` + `source_ref=--<spelling>` or is in the named exempt set (0 silent skips); `--state_root <dir>` reaches the state-root gate (004/exit 13) instead of the flag package (exit 2); a token-store path is accepted by boot step 3 and a token value still exits 13 with 013, both proven on a real cmdline |
 | `internal/lifecycle/sensors_registry_test.go` | the §3.1e sensor surface as registered keys: the key list DERIVED from `internal/sensors`' own decoder `case` labels and compared with the registry in both directions (a key the plane reads but the registry does not know fails, and so does a registered key the plane never reads); every default pinned to the plane's compiled posture; flag > env > file > default with the winning `source`/`source_ref` on duration, integer, bool, list, string and depth keys plus the 002 conflict row; every sensor key present exactly once in the explain dump (and the `--key` filter form); the resolved row TYPES the decoder's readers accept; a file that sets the WHOLE surface (generated from the key list) resolving with no refusal; `sensors.rules.dir` following the resolved state root; `sensors.inotify.paths` refused by name from a flag and from the environment while its file form resolves | every key covered in both directions, 0 unregistered keys the plane reads; 6 precedence cases × 4 sources asserted with provenance; 0 refusals from a file that sets all 33 keys; 0 sensor keys missing from the dump; both scalar refusals 001 AND naming the key |
 | `internal/sensors/config_test.go` | the decoder's side of the same handoff: the compiled defaults field by field, and every reader driven with BOTH forms a resolved `ConfigValue` can carry — `types.Duration` (a default row) beside the duration string, `bool` beside `"true"`, `int`/`int64` beside the decimal string, `[]string`/`[]any` beside the comma-separated string, and the array-of-tables form of `sensors.inotify.paths` (`[]map[string]any`, which `[[sensors.inotify.paths]]` parses into) beside the untyped `[]any` carrier and every empty spelling; a path-less table and a scalar refused by name | every default asserted; every reader accepts both forms; 0 accepted scalar for the list-of-tables key; the empty forms all mean "no configured path" |
 | `internal/app/sensors_config_test.go` | the composition root's resolution→plane path (§3.1e): the resolved set is handed to `sensors.New` exactly as `daemon.go` does, and the CONFIGURED `sensors.rules.dir` is what the plane loads (the control arm with no such key loads the shipped defaults, so the first assertion is evidence); the shipped `examples/config.toml` resolves with its `[sensors]` keys sourced from the FILE and reaches the typed config; a row of a type no reader accepts is refused, so the green arm is not vacuous | every case asserted; the control arm loads 0 configured rules; 0 rows accepted without a reader; the shipped example's sensor rows all `source=file` |

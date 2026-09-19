@@ -47,24 +47,45 @@ troubled --state_root ~/.local/state/trouble-scratch \
          --ingest-bind 127.0.0.1:7645 --dashboard-bind 127.0.0.1:7646
 ```
 
-Three behaviours are load-bearing:
+Four behaviours are load-bearing:
 
 1. **An unknown key is refused by name.** `--no-such-key` reaches the resolver,
    which exits TROUBLE-LIFECYCLE-001 `unknown flag "--no-such-key"`; the daemon
    maps a boot refusal to exit 13. It is never ignored and never read as a
    positional; a one-dash token that is not `-v`/`-h` is a usage error (exit 2).
-2. **Seven keys cannot be set from argv.** `projects`, `issues`, `skills` and
+2. **Six keys cannot be set from argv.** `projects`, `issues`, `skills` and
    `llm` are tables and a flag value is a scalar (refused by name, 001).
-   `dashboard.token_file`, `hub.token` and `server.redis.password_env` are
-   refused by the argv secret scan at boot
-   (`cli_flag_secret`, TROUBLE-LIFECYCLE-013): their flag NAMES match a mandatory
-   rule, so the value that follows is read as a secret no matter what it holds —
-   a token-store path, a real token and the NAME of an environment variable are
-   the same shape to that rule. Set them from the file or from
-   `TROUBLE_DASHBOARD_TOKEN_FILE` / `TROUBLE_HUB_TOKEN` /
+   `server.redis.password_env` is refused by the argv secret scan at boot
+   (`cli_flag_secret`, TROUBLE-LIFECYCLE-013): its value is the NAME of an
+   environment variable, and a name is not path-shaped, so the rule keeps
+   reading it as a secret. Set it from the file or from
    `TROUBLE_SERVER_REDIS_PASSWORD_ENV`, which is what the shipped unit's
    `EnvironmentFile=` is for.
-3. **The daemon's own surface prints its real shape.** `--help` lists its four
+3. **The two token-STORE keys do ride argv — with a path.** `dashboard.token_file`
+   and `hub.token` are addressable, because the mandatory `cli_flag_secret` rule
+   leaves an explicitly path-shaped VALUE alone (SPEC-02 §3.3 rule 9): a value
+   that starts with `/`, `~/`, `./` or `../` and continues in the path alphabet
+   (an absolute value also needs a separator or an extension after the slash —
+   `/srv/tokens.json`, `/tokens.json`) is a store locator, not a secret, and it
+   resolves with `source=flag`:
+
+```
+troubled --state_root ~/.local/state/trouble-scratch \
+         --dashboard-token_file /home/user/.config/trouble/dashboard-tokens.json \
+         --hub-token /srv/trouble/hub.token
+```
+
+   Anything that is not an explicit path is still refused with 013, exactly as
+   before: a pasted token (`--hub-token abcDEF…`), a bare file name
+   (`--token_file tokens.json`), a slash-prefixed word with no path structure
+   (`--token_file /tokens`) and a base64 run (`--token_file /9j4K+fg==`). The two
+   spellings differ for a name that ENDS at the sensitive word: `--dashboard-token_file=<path>`
+   is the rule-9 flag form and resolves, while `--hub-token=<path>` is
+   `NAME=value` first (rule 7 `env_assign`) and stays refused — the assignment
+   form has no path exemption in any context, because an environment or config
+   dump is written in the same shape. `hub.token` therefore rides argv in the
+   space spelling, the file or the environment.
+4. **The daemon's own surface prints its real shape.** `--help` lists its four
    argv forms plus the per-key form and points at `trouble config explain`; it
    never prints Go's flag-package automessage, which could only name the daemon's
    own flags and so contradicted the documented surface (TRBL-018).

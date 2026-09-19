@@ -45,10 +45,12 @@ var (
 	// table per watched path).
 	wantTableRefused = []string{"issues", "llm", "projects", "sensors.inotify.paths", "skills"}
 	// Refused by the argv secret scan (SPEC-12 §3.2): the flag NAME matches the
-	// mandatory cli_flag_secret rule, so the value that follows it — a path, in
-	// practice a token store path, or an environment-variable NAME in
-	// server.redis.password_env — is never accepted on argv. Set from file/env.
-	wantArgvScanRefused = []string{"dashboard.token_file", "hub.token", "server.redis.password_env"}
+	// mandatory cli_flag_secret rule and the value this inventory drives it with
+	// — the NAME of an environment variable — is not path-shaped, so the scan
+	// refuses it. The two token-STORE keys are deliberately NOT in this list:
+	// an explicitly path-shaped value rides argv (TRBL-026, SPEC-12 §2.5a), and
+	// probeValue below drives them with the value an operator would type.
+	wantArgvScanRefused = []string{"server.redis.password_env"}
 )
 
 func TestMain(m *testing.M) {
@@ -138,9 +140,24 @@ func rowFor(t *testing.T, rows []types.ConfigValue, key string) types.ConfigValu
 
 // probeValue returns a value of the same shape as def, so a type-checking key
 // (int, duration, bool, string list, zone-window map) is exercised with a value it
-// can actually accept. The value itself is irrelevant: the assertion is about the
-// PROVENANCE of the row, not about its content.
-func probeValue(def any) string {
+// can actually accept. The value itself is irrelevant for provenance: the
+// assertion is about the SOURCE of the row, not about its content — except for
+// the two token-store keys below, whose argv form is the value's shape.
+//
+// A string key gets "probe" — deliberately NOT path-shaped, so a key whose flag
+// name trips the argv secret scan is still refused by it. The two token-STORE
+// keys are the exception: their documented argv form is a store PATH (TRBL-026,
+// SPEC-12 §2.5a), and driving them with "probe" would keep them counted as
+// refused by the scan, which is no longer what happens to a value an operator
+// types. The token-shaped direction for the same two flags is pinned separately
+// (TestTokenStorePathRidesArgv).
+func probeValue(key string, def any) string {
+	switch key {
+	case "dashboard.token_file":
+		return "/srv/trouble/dashboard-tokens.json"
+	case "hub.token":
+		return "/srv/trouble/hub.token"
+	}
 	switch def.(type) {
 	case bool:
 		return "true"
@@ -285,7 +302,7 @@ func TestDaemonArgvAddressesEveryRegisteredKey(t *testing.T) {
 	)
 	for _, v := range res.Values {
 		spelling := "--" + strings.ReplaceAll(v.Key, ".", "-")
-		value := probeValue(v.Value)
+		value := probeValue(v.Key, v.Value)
 
 		own, keys, err := splitDaemonArgs([]string{spelling, value})
 		if err != nil {
@@ -533,6 +550,95 @@ func TestSecretShapedFlagValueStillRefusedOnArgv(t *testing.T) {
 		t.Errorf("daemon control with an unusable state root: exit %d, stderr %q; want 13 naming %s",
 			code, out, types.CodeLifecycle004)
 	}
+}
+
+// --- B5: a token-store PATH rides argv, a token value still does not (TRBL-026)
+
+// TestTokenStorePathRidesArgv pins BOTH directions of SPEC-12 §2.5a for the two
+// token-store keys. The defect: the mandatory cli_flag_secret rule matches the
+// flag NAME, so `--dashboard-token_file <path>` and `--hub-token <path>` were
+// refused whatever their value held, and an operator or a QA harness could not
+// point an instance at a store without going through the file or the
+// environment. The rule now leaves an explicitly path-shaped value alone
+// (SPEC-02 §3.3 rule 9) while keeping the refusal for a value that is not one —
+// the same rule is what makes a pasted credential on argv hard, and that half
+// must not move.
+//
+// The path direction is carried one gate FURTHER than the scan: the `run` arm's
+// refusal is a later boot gate (the poisoned ledger's schema_version 99, 012),
+// which a boot can only reach if step 3 let the argv through. Its control runs
+// the same boot with a token value, which dies at step 3 instead.
+func TestTokenStorePathRidesArgv(t *testing.T) {
+	const (
+		storePath = "/home/user/.config/trouble/dashboard-tokens.json"
+		token     = "abcDEF123ghiJKL456mnoPQR"
+	)
+
+	// (a) boot step 3 accepts a store path, in both spellings that reach rule 9.
+	for _, argv := range [][]string{
+		{"--dashboard-token_file", storePath},
+		{"--hub-token", storePath},
+		{"--dashboard-token_file=" + storePath},
+	} {
+		if code, out := runChild(t, "scan", argv...); code != 0 {
+			t.Errorf("scan %q: exit %d, stderr %q; want 0 (a token-store path is not a secret)", argv, code, out)
+		}
+	}
+
+	// (b) the same flags with a token value still refuse, with the same code.
+	for _, argv := range [][]string{
+		{"--dashboard-token_file", token},
+		{"--hub-token", token},
+	} {
+		code, out := runChild(t, "scan", argv...)
+		if code != 13 || !strings.Contains(out, string(types.CodeLifecycle013)) {
+			t.Errorf("scan %q: exit %d, stderr %q; want 13 naming %s", argv, code, out, types.CodeLifecycle013)
+		}
+	}
+
+	// (c) `NAME=value` is the assignment form, not rule 9's flag form: it keeps
+	// no path exemption, so `--hub-token=<path>` is refused where the space
+	// spelling rides (SPEC-12 §2.5a states the difference).
+	if code, out := runChild(t, "scan", "--hub-token="+storePath); code != 13 ||
+		!strings.Contains(out, string(types.CodeLifecycle013)) {
+		t.Errorf("scan --hub-token=<path>: exit %d, stderr %q; want 13 naming %s",
+			code, out, types.CodeLifecycle013)
+	}
+
+	// (d) the daemon's own boot with a store path: step 3 lets it through.
+	code, out := runChild(t, "run", "--state_root", poisonedLedgerRoot(t), "--hub-token", storePath)
+	if strings.Contains(out, string(types.CodeLifecycle013)) {
+		t.Errorf("daemon with a token-store path: the argv scan refused it: %q", out)
+	}
+	if code != 13 || !strings.Contains(out, string(types.CodeLifecycle012)) {
+		t.Errorf("daemon with a token-store path: exit %d, stderr %q; want 13 naming %s (the later gate)",
+			code, out, types.CodeLifecycle012)
+	}
+	// (e) control: the same boot with a token value dies AT step 3, so (d) is
+	// about the value and not about the gate it stopped at.
+	code, out = runChild(t, "run", "--state_root", poisonedLedgerRoot(t), "--hub-token", token)
+	if code != 13 || !strings.Contains(out, string(types.CodeLifecycle013)) {
+		t.Errorf("daemon with a token value: exit %d, stderr %q; want 13 naming %s",
+			code, out, types.CodeLifecycle013)
+	}
+}
+
+// poisonedLedgerRoot makes a state root the boot gate accepts whose ledger holds
+// one line claiming schema_version 99. Step 4 (012) is then the first gate a boot
+// can reach once step 3 has passed, which is how the test above proves the argv
+// scan let a token-store path through instead of asserting "no refuse happened".
+func poisonedLedgerRoot(t *testing.T) string {
+	t.Helper()
+	root := argvStateRoot(t)
+	dir := filepath.Join(root, "ledger")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir ledger: %v", err)
+	}
+	line := []byte(`{"schema_version":99,"rec_id":"01J9Z6Q0M2X4T8V1K7B3N5R8WD"}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "poison.jsonl"), line, 0o600); err != nil {
+		t.Fatalf("write poison: %v", err)
+	}
+	return root
 }
 
 // --- the daemon's own surface stays honest -----------------------------------

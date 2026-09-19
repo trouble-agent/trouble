@@ -652,7 +652,7 @@ func TestHelpPrintsTheRealSurface(t *testing.T) {
 		if code != 0 {
 			t.Errorf("run(%s) = %d, want 0", arg, code)
 		}
-		for _, want := range []string{"--config <path>", "--version", "--<key> <value>", "TROUBLE-LIFECYCLE-001", "config explain"} {
+		for _, want := range []string{"--config <path>", "--version", "--<key> <value>", "TROUBLE-LIFECYCLE-001", "config explain", "a.b_c -> --a-b_c"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("run(%s) usage does not mention %q:\n%s", arg, want, got)
 			}

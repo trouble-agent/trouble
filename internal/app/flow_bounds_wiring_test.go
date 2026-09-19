@@ -109,6 +109,9 @@ func queueEntry(ts time.Time) types.SpoolEntry {
 // entries; the same four writes with no `[flow]` table must leave four, which is
 // what makes the first half evidence instead of coincidence.
 func TestFlowQueueEvictsAtTheConfiguredBoundNotAtTheConstant(t *testing.T) {
+	// AC-33: the bound in force on BOTH halves is the resolved
+	// flow.spool_max_entries — at 3 the oldest entry is evicted where the
+	// compiled default keeps four.
 	t.Run("configured bound 3", func(t *testing.T) {
 		d := daemonWithConfig(t, "[flow]\nspool_max_entries = 3\n")
 		clk := NewClock(time.Now())
@@ -197,6 +200,8 @@ func TestFlowQueueEvictsAtTheConfiguredBoundNotAtTheConstant(t *testing.T) {
 // TTL-dropped under `flow.spool_ttl = 1h`; under the compiled default (72h) the
 // same entry is never TTL-dropped.
 func TestFlowReplayUsesTheConfiguredTTLNotTheConstant(t *testing.T) {
+	// AC-33: flow.spool_ttl is the TTL the drain applies; the compiled default
+	// must NOT produce a `ttl` drop for an entry the operator's key expires.
 	// The seeded payload is undecodable on purpose: it keeps the default-bound
 	// control case off the network (the corrupt branch drops it) while leaving
 	// the TTL branch — which runs FIRST — the one under test.

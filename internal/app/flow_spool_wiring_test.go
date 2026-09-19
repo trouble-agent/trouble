@@ -25,6 +25,8 @@ import (
 )
 
 func TestFlowDepsWiresAQueueTheFlowCanReplayWithTheDeskOff(t *testing.T) {
+	// AC-32: with the issue desk OFF (the shipped posture) the composition root
+	// still hands the flow a queue it can replay, at the §3.9a path.
 	stateRoot := t.TempDir()
 	d := &Daemon{Cfg: lifecycle.Config{StateRoot: stateRoot}}
 	clk := NewClock(time.Now())
@@ -98,6 +100,8 @@ func TestFlowDepsWiresAQueueTheFlowCanReplayWithTheDeskOff(t *testing.T) {
 }
 
 func TestFlowDepsWiresNoQueueWhenTheStoreCannotBeBuilt(t *testing.T) {
+	// AC-32: a store that cannot be built leaves the flow reporting "no queue"
+	// instead of claiming durability.
 	stateRoot := t.TempDir()
 	// A file where the spool directory belongs: the store cannot be built, so the
 	// flow gets no queue and every dispatch record must say so.

@@ -5,7 +5,7 @@ Area prefix: (none — this file allocates error-code AREAS, it does not define 
 Package: (none — repository meta-document)
 Consumed types: ErrorCode, Record, RecordKind, Prefix, Sig (ownership map only)
 Local types: — 
-ACs: AC-1..AC-31 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
+ACs: AC-1..AC-33 (matrix owner; every AC appears exactly once in the matrix, with its spec mapping)
 PRD: §10, §11, §12
 
 ## 1. Purpose
@@ -61,11 +61,11 @@ deferred table), `deferred` (specified at interface level only; see §3.3).
 | SPEC-05 | ladder: state machine, verification, autonomy gates | §05, §06b, §11, §12 | AC-1, AC-2, AC-3, AC-4, AC-5, AC-11, AC-20, AC-21, AC-22, AC-26, AC-31 | frozen |
 | SPEC-06 | registry: module SDK v1, plays, do-not-touch, polkit | §06, §11 | AC-7, AC-23 | frozen |
 | SPEC-07 | research: Off-by-One contract, class-slug derivation | §05, §12 | AC-3, AC-17, AC-20, AC-31 | frozen |
-| SPEC-08 | flow: board-jsonl row, task-router, hot-fix spawn | §08, §11, §12 | AC-9, AC-19, AC-21, AC-22, AC-26 | frozen |
+| SPEC-08 | flow: board-jsonl row, task-router, hot-fix spawn | §08, §11, §12 | AC-9, AC-19, AC-21, AC-22, AC-26, AC-32, AC-33 | frozen |
 | SPEC-09 | issues: driver contract, github + duckbrain | §07, §11 | AC-8, AC-22, AC-31 | frozen |
 | SPEC-10 | dashboard: routes, auth, scopes, CSRF, live updates, paging | §04c, §11 | AC-16, AC-19, AC-26, AC-30 | frozen |
 | SPEC-11 | skills: artifact schema, local promote loop, pull distribution | §06c, §12 | AC-24 (partial), AC-25, AC-26 | partial |
-| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology, server profiles | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26, AC-27, AC-28, AC-29 | partial |
+| SPEC-12 | lifecycle: unit, watchdog, upgrades, config, topology, server profiles | §09, §11, §12 | AC-14, AC-18, AC-25 (partial), AC-26, AC-27, AC-28, AC-29, AC-33 | partial |
 | SPEC-13 | server profiles: standalone | light-hub (Redis buffer/dedup + DuckBrain archival) | §03, §11, §12 | AC-29 | frozen |
 
 ### 3.2 AC matrix (binding)
@@ -106,6 +106,8 @@ item ships — see §6.1) · **D** = deferred to v1.0 (AC text retained; v0.1 cl
 | AC-29 | AC-29 Light-hub degradation: `[server] profile="light-hub"` with Redis + a DuckBrain namespace — duplicate `ForwardEnvelope` idempotency keys replayed across a Redis failover land exactly one ledger record; stopping Redis mid-burst makes senders see 429 + `Retry-After` while the local spool holds and the daemon keeps serving (no event loss, hub degrades to standalone ingestion); a closed ledger generation is exported to DuckBrain and only then dropped from the hot host, and with DuckBrain unreachable archival pauses with a gap record while ingestion continues; the ladder produces identical incident/verify sequences in both profiles for the same event stream. | SPEC-13 (profile, queue, dedup gate, archival), SPEC-12 (config, health, topology) | B |
 | AC-30 | AC-30 Ledger pagination: a 10M-record corpus is walked with `page_token` + `page_size` — page-size stability holds (no record repeated, none skipped across the walk, `next_page_token` empty exactly at the end), the retention sweep deletes whole generation files (+ `.idx` + archive marker) while a walk is in flight, and a token pointing at a dropped generation returns a `reset` hint + newest-first restart instead of an error loop; a missing or mismatched `{file}.idx` is rebuilt from the generation file. | SPEC-01 (tokens, sidecar, drop-generation retention), SPEC-10 (`/incidents`, `/groups` paging) | B |
 | AC-31 | AC-31 Cross-plane context: a sentinel `Admit` populates `Observation.Codeplane` (sig, group, release, regression, top-5 recent) and the bundle lands on the incident record; a sensor `Admit` whose convergence map links an open sentinel group arrives at the agent rung with BOTH planes' context; the research request and the issue body carry the bundle verbatim; a bundle whose release disagrees with the running release is discarded with a gap record, never shown as fact. | SPEC-05 §3.13a, SPEC-04 §3.9a, SPEC-07 §3.10a, SPEC-09 §3.13a | B |
+| AC-32 | AC-32 Flow-owned dispatch durability: a hot-fix dispatch that cannot be delivered is EITHER durably queued on the flow's own store — `<state_root>/spool/flow/spawn/<ev_ULID>.json`, one JSON entry per file, mode `0600` under a `0700` directory, drained by `Flow.Run` — and replayed through the §3.6 attempt sequence with the SAME `idem_key`, at most one in-flight dispatch per `idem_key` and a `409`/duplicate answer accepted as success, so the entry is deleted and no second spawn is created for work the first attempt already placed, and the entry survives a restart to be listed and replayed by a second store instance over the same root; OR refused as `dispatch_state="unspooled"` or `"spool_failed"` with a `reason` and a `coupling` field naming `SPEC-08 §3.6/§3.9 × SPEC-09 §3.6/§3.7` — a sink or store the subsystem cannot itself replay never yields `dispatch_state="spooled"`, and with the issue desk OFF (the shipped posture) the composition root still hands the flow a queue it can replay, while a store that cannot be built leaves the flow reporting no queue instead of claiming durability. | SPEC-08 | B |
+| AC-33 | AC-33 Flow queue bounds, resolved and recorded: every bound on the §3.9a dispatch queue is the `flow.*` registry key in force on BOTH halves — the store and the loop that drains it — so a host that declares no `[flow]` table runs the compiled defaults (256 entries, 72h, 5 attempts, 5s, 100 per drain), while `flow.spool_max_entries=3` and `flow.spool_ttl=1h` are the bounds actually in force and a key that is not strictly positive (zero, negative, `0s`, unparsable) is refused at resolution with TROUBLE-LIFECYCLE-001 naming the key; every entry a bound costs is recorded rather than silent — at the entry bound the OLDEST entry is evicted and never the incoming one with one `drop_reason:"overflow"` record per eviction, and an entry past its TTL, past `max_attempts` or undecodable drops with `drop_reason` `"ttl"`/`"attempts"`/`"corrupt"` as a `flow` + `spawn` record pair naming incident, sig and task_id, with no `gap` record for any of them. | SPEC-08, SPEC-12 §3.1d | B |
 
 `[carried]` ACs: see §6.2 — prd-v2.3.html references AC-1..AC-17 as "carry" but does not restate their
 text; the scope keys above are derived from PRD §02 (directive map) and §10 (MVP bullets) and MUST be
@@ -255,6 +257,7 @@ The scheme is `TROUBLE-<AREA>-<NNN>` with the AREA tokens allocated in §3.5 and
 | AC-27 | "proxy" binary is deferred | Status `D`: v0.1 specifies the forward/spool/replay mechanism the proxy would use (SPEC-12 §3.7) but ships no proxy binary. No v0.1 spec section claims proxy coverage. |
 | AC-19 | "live incident appears within 2s" needs a live-update choice; SSE is deferred | Resolved in SPEC-10 §2: 2s polling of htmx partials is the v0.1 mechanism; SSE is named as the reserved v1.0 route but is not specified as in-scope. |
 | AC-28, AC-29, AC-30, AC-31 (added in v0.1.1) | none — no deferred item is a passing condition here: dual sensor routes, the light-hub profile, ledger page tokens and the cross-plane codeplane bundle are all inside the §3.3 cut line. The deferred light-mode offload binary and sentinel proxy binary are *different* artifacts from the `light-hub` server profile (SPEC-13 §1: a profile selects plumbing inside the one daemon; the deferred binaries are separate processes) | Status `B` for all four. AC-31 carries the same reasoning as AC-28..AC-30: the bundle is a field on records the shipped `Admit`, research and issue paths already carry (`Observation.Codeplane` → `Incident.Codeplane` → the research request payload and the issue body), it adds no deferred process and no deferred artifact, and refusing a mismatched bundle is a `gap` record inside the shipped sentinel. The hand-off note in SPEC-12 §3.7 and SPEC-11 §3.4 is unchanged, and no section of this round describes a separate light or proxy process. |
+| AC-32, AC-33 (allocated for SPEC-08 §3.9a) | none — the flow-owned dispatch queue, the honest refusal, the replay loop and the five bounds are shipped behaviour (`internal/flow/spool.go` + `replay.go`, `internal/app` wiring), all inside the §3.3 cut line, and no deferred item is a passing condition | Status `B` for both: the queue the subsystem replays, the refusal that names the coupling, the same-`idem_key` replay and the resolved `flow.*` bounds with their recorded drops are existing behaviour with named enforcing tests (SPEC-08 §7 names them; `spool_test.go` added the three branches that had none — `spool_failed`, single-flight per `idem_key`, `409` accepted). SPEC-12 §3.1d owns the key registry the same AC resolves against. |
 
 ### 6.2 AC-1..AC-17 text absence
 
@@ -328,6 +331,7 @@ git grep -nE 'TBD|Phase 2|TODO|consider' -- specs/   # step 6 (manual review of 
 - Every spec file is a new node under `~/trouble/specs/`; `specs/tools/selfcheck.py` is the
   only executable artifact in the suite (stdlib-only Python, no deps) and is the CI entry point for the
   consistency loop. Since v0.1.1 it also validates `SPEC-13` (file set 01..13) and the AC range —
-  `AC-1..AC-31` as of v0.1.1a, derived from §3.2 rather than hardcoded — plus the matrix→metadata
-  declaration check of §7 step 2b, which is the mechanical half of keeping this index honest.
+  `AC-1..AC-33` as of the AC-32/AC-33 allocation for SPEC-08 §3.9a, derived from §3.2 rather than
+  hardcoded — plus the matrix→metadata declaration check of §7 step 2b, which is the mechanical half of
+  keeping this index honest.
 - No fleet repository is modified: trouble is greenfield at `~/trouble`.

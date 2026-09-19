@@ -344,6 +344,14 @@ const (
 	DefaultProjectDiskBudget = 2147483648 // 2GiB
 )
 
+// advertisedHostLoopbackDefault is the DSN host derived in postResolve when the
+// operator declares no `ingest.advertised_host` on a loopback bind (SPEC-12
+// §3.1/§3.1g). It is a value the sentinel accepts for exactly that case
+// (SPEC-04 §2.3a), which is what makes the documented default usable; the
+// string is named here so the projection that carries it onto the explain row
+// and the derivation cannot drift apart.
+const advertisedHostLoopbackDefault = "localhost"
+
 // SubsystemTable is one optional subsystem table — `[issues]` or `[skills]` —
 // exactly as the config file declared it (SPEC-12 §3.1b).
 //
@@ -1788,6 +1796,14 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			// path (what the sensors package will watch), never the empty
 			// marker the registry started from.
 			cv.Value = resolved.Config.Sensors.Rules.Dir
+		case "ingest.advertised_host":
+			// SPEC-12 §3.1g: the registry starts from the empty marker and
+			// postResolve derives the loopback name from the resolved bind, so
+			// the row carries the DSN host the sentinel will actually bake into
+			// every app's DSN — an operator reading `config explain`, or the
+			// boot `config` record, never sees a blank where the daemon uses
+			// "localhost".
+			cv.Value = resolved.Config.Ingest.AdvertisedHost
 		case "projects":
 			// The `projects` row is the one config value whose SOURCE shape is a
 			// table carrying credentials, and the explain dump plus the boot
@@ -1879,18 +1895,31 @@ func postResolve(c Config) Config {
 	if c.Checker.AlarmFile == "" {
 		c.Checker.AlarmFile = filepath.Join(c.StateRoot, "checker.alarm")
 	}
+	// SPEC-12 §3.1g: with no declared host the DSN host is the loopback name,
+	// and that is a value the sentinel ACCEPTS only because this derivation is
+	// conditioned on the bind being loopback (SPEC-04 §2.3a). The two halves are
+	// one contract: a loopback listener is reachable from this host alone, so
+	// every reporter that can reach it resolves "localhost" to it; any other
+	// bind leaves the key empty and the §3.2 preflight refuses the boot rather
+	// than bake an unreachable host into a DSN.
 	if c.Ingest.AdvertisedHost == "" && isLoopbackBind(c.Ingest.Bind) {
-		c.Ingest.AdvertisedHost = "localhost"
+		c.Ingest.AdvertisedHost = advertisedHostLoopbackDefault
 	}
 	return c
 }
 
+// isLoopbackBind reports whether the ingest bind is a loopback address. It
+// classifies on the same predicate as the §3.2 preflight (isLoopbackHost), so
+// the derivation in postResolve and the bind check agree on every spelling:
+// 127/8, ::1, and the loopback names, bracketed or bare (splitHostPort leaves
+// the brackets on an IPv6 literal).
 func isLoopbackBind(bind string) bool {
 	host, _, err := splitHostPort(bind)
 	if err != nil {
 		return false
 	}
-	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	return isLoopbackHost(host)
 }
 
 func envName(key string) string {

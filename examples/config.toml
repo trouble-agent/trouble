@@ -28,10 +28,15 @@ alarm_command = []
 
 [ingest]
 bind = "127.0.0.1:7643"
-# A NAME the reporting apps resolve — never an IP literal, never "localhost"
-# (SPEC-04 §2.2): the DSN is baked into every deployed app, so a bind address
-# here is a fleet-wide silent-no-report. Replace this placeholder with your host.
-advertised_host = "trouble.example.net"
+# The DSN host baked into every reporting app's DSN. LEFT EMPTY HERE on purpose:
+# with this loopback bind, no declaration derives "localhost" (SPEC-12 §3.1) —
+# a loopback listener is reachable from this host alone, so every reporter that
+# can reach it resolves the loopback name to it, and the sentinel accepts the
+# name for exactly that bind (SPEC-04 §2.3a). Declare a NAME the reporters
+# resolve only when you move the bind off loopback: "localhost" is then refused
+# at boot (TROUBLE-SENTINEL-009 — a reporter on another host would resolve it to
+# itself and report nowhere), and so is any IP literal or wildcard address at
+# every bind. The resolved value is visible on `bin/trouble config explain`.
 
 [ingest.auth]
 # true = a loopback request authenticates with the project's DSN public key

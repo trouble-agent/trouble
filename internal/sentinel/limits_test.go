@@ -336,6 +336,13 @@ func TestBindMatrixRefusals(t *testing.T) {
 
 // TestBootValidation pins §4.2 step 1: a name (never an IP or bind address) for
 // advertised_host, https implying a terminator, 32-hex keys and quota > 0.
+//
+// The DSN-host rows are the §2.3a precondition, not a flat blacklist: the
+// loopback NAME is refused while the bind is NOT loopback (a reporter on another
+// host resolves it to itself and reports nowhere) and accepted while it is —
+// the accept side, both surfaces, and the ingest round trip that proves it are
+// TestAdvertisedHostMatrix and TestLoopbackDSNHostServesIngest in
+// advertised_host_test.go.
 func TestBootValidation(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -345,7 +352,22 @@ func TestBootValidation(t *testing.T) {
 	}{
 		{"ip host", func(c *Config) { c.AdvertisedHost = "10.0.0.5" }, types.CodeSentinel009, causeAdvertisedHost},
 		{"bind host", func(c *Config) { c.AdvertisedHost = "0.0.0.0" }, types.CodeSentinel009, causeAdvertisedHost},
-		{"localhost", func(c *Config) { c.AdvertisedHost = "localhost" }, types.CodeSentinel009, causeAdvertisedHost},
+		{"missing host", func(c *Config) { c.AdvertisedHost = "" }, types.CodeSentinel009, causeAdvertisedHost},
+		{"localhost on a wildcard bind", func(c *Config) {
+			c.Bind = "0.0.0.0:7643"
+			c.AdvertisedHost = "localhost"
+		}, types.CodeSentinel009, causeAdvertisedHost},
+		{"localhost on a LAN bind", func(c *Config) {
+			c.Bind = "10.0.0.5:7643"
+			c.AdvertisedHost = "localhost"
+		}, types.CodeSentinel009, causeAdvertisedHost},
+		{"advertised_hosts entry is an IP literal", func(c *Config) {
+			c.AdvertisedHosts = []string{"trouble.example.net", "10.0.0.5"}
+		}, types.CodeSentinel009, causeAdvertisedHost},
+		{"advertised_hosts entry is localhost off loopback", func(c *Config) {
+			c.Bind = "0.0.0.0:7643"
+			c.AdvertisedHosts = []string{"localhost"}
+		}, types.CodeSentinel009, causeAdvertisedHost},
 		{"https without terminator", func(c *Config) {
 			c.Scheme = "https"
 			c.ProxyTrust = proxyTrustNone
@@ -413,6 +435,28 @@ func TestDSNGrammarAndGeneration(t *testing.T) {
 	badCfg.AdvertisedHost = "0.0.0.0"
 	if _, err := GenerateDSN(badCfg, cfg.Projects[0]); err == nil {
 		t.Error("GenerateDSN accepted an IP/bind host")
+	}
+	// ...and the loopback NAME once the bind is not loopback (§2.3a): a DSN is
+	// minted before an app is deployed, so generation is the earlier of the two
+	// surfaces that must refuse it.
+	lanCfg := cfg
+	lanCfg.Bind = "0.0.0.0:7643"
+	lanCfg.AdvertisedHost = "localhost"
+	if _, err := GenerateDSN(lanCfg, cfg.Projects[0]); err == nil {
+		t.Error("GenerateDSN accepted the loopback host on a non-loopback bind")
+	}
+	// The same rule, accepted: a loopback bind mints the loopback host (what
+	// SPEC-12 §3.1 derives) and the minted DSN parses back against the config.
+	loopCfg := testConfig(t, func(c *Config) { c.Bind = "127.0.0.1:7643"; c.AdvertisedHost = "localhost" })
+	ldsn, lerr := GenerateDSN(loopCfg, loopCfg.Projects[0])
+	if lerr != nil {
+		t.Fatalf("GenerateDSN for a loopback bind: %v", lerr)
+	}
+	if want := "http://" + testPubA + "@localhost:7643/1"; ldsn != want {
+		t.Fatalf("loopback dsn = %q, want %q", ldsn, want)
+	}
+	if _, perr := ParseDSN(loopCfg, ldsn); perr != nil {
+		t.Fatalf("the loopback dsn does not parse back: %v", perr)
 	}
 }
 

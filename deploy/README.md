@@ -52,8 +52,12 @@ public_key = "replace-with-a-new-32-lowercase-hex-character-key"
 
 Keep `ingest.bind = "127.0.0.1:7643"`, `dashboard.bind = "127.0.0.1:7644"`,
 and `ingest.auth.loopback_dsn = true` for this local first run. Do not use an IP
-literal, `localhost`, or either bind address for `ingest.advertised_host`: it is
-the name reporters place in a DSN. Keep the
+literal or either bind address for `ingest.advertised_host`: it is the name
+reporters place in a DSN. On this loopback bind you may leave the key unset
+instead — `localhost` is then derived for you and is the one spelling of the
+loopback name the sentinel accepts (SPEC-04 §2.3a); the same name is refused the
+moment the bind leaves loopback, so moving to a LAN/tailnet address means
+declaring a real name here. Keep the
 shipped `[issues]` and `[skills]` tables disabled unless their complete external
 configuration and credentials are ready. The stock project key is valid only as
 a bootable placeholder; replace it before accepting reports from anything other

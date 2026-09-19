@@ -883,3 +883,143 @@ segments with a CRC footer, batched (≤200 records, ≤512 KiB decompressed), g
 and forwarded as a Sentry-shaped envelope. Acks trim sealed segments; budget
 overflow drops the oldest whole segment and writes an exact `gap` record, leaving
 the 2 MiB gap reserve untouched.
+
+
+## 14. Deployment (binaries and containers)
+
+Two ways to run the same two binaries: from the release matrix on a host, or from
+the container image with the compose stack. Both stamp the build the same way, so
+`/health.json` reads the same `version` / `git_sha` / `build_time` either way.
+
+**The binary matrix (SPEC-12 §3.4; `make bin`, `make release`).** `make bin` writes
+the two stamped binaries to `bin/`; `make release` writes the same pair for each
+target below plus `manifest.json` (checksums), and exits non-zero unless every
+target built — a partial manifest reads like a release, so it is never written.
+
+| goos/goarch | `troubled` (daemon) | `trouble` (CLI) | archive |
+|---|---|---|---|
+| linux/amd64 | `dist/linux-amd64/troubled` | `dist/linux-amd64/trouble` | (placeholder — your packaging step) |
+| linux/arm64 | `dist/linux-arm64/troubled` | `dist/linux-arm64/trouble` | (placeholder) |
+| darwin/arm64 | `dist/darwin-arm64/troubled` | `dist/darwin-arm64/trouble` | (placeholder) |
+| windows/amd64 | `dist/windows-amd64/troubled.exe` | `dist/windows-amd64/trouble.exe` | (placeholder) |
+
+Every one is built `CGO_ENABLED=0` with `-trimpath` and `-ldflags "-s -w"` plus the
+three `lifecycle` stamps. A build that cannot determine a sha stamps the literal
+placeholder `nogit00` — never `unknown`, which is the sentinel `/health.json`
+reports as `status="degraded" detail.reason="unstamped_build"` and `trouble install`
+refuses without `--force`.
+
+**The image.** `Dockerfile` is multi-stage: `golang:1.26-bookworm` builds both
+binaries (module download layer cached ahead of the source `COPY`),
+`gcr.io/distroless/static-debian12:nonroot` is the runtime — no shell, no package
+manager, no curl. `distroless` rather than `scratch` because it still carries an
+`/etc/passwd` with uid 65532, a CA bundle and tzdata, so the daemon runs
+unprivileged and can still do TLS. Only the two binaries are copied in.
+
+```
+docker build --build-arg GIT_SHA=$(git rev-parse --short=7 HEAD) -t trouble:local .
+docker run -d --name trouble \
+  -p 127.0.0.1:7643:7643 -p 127.0.0.1:7644:7644 \
+  -v trouble-state:/data \
+  -v "$PWD/deploy/container/config.toml:/etc/trouble/config.toml:ro" \
+  trouble:local --config /etc/trouble/config.toml
+```
+
+`ARG VERSION/GIT_SHA/BUILD_TIME` are all overridable. With no `GIT_SHA` the build
+derives it with `git rev-parse --short=7 HEAD` from the build context (`.git` is
+deliberately not in `.dockerignore`, for exactly this reason); with no usable git
+it stamps `nogit00` and says so loudly. A build that reports `git_sha` other than
+`unknown` is stamped; anything else is degraded by design.
+
+**The compose stack.** `docker-compose.yml` runs `trouble` and `redis:7-alpine`.
+Redis carries the SPEC-13 preflight posture — `--appendonly yes`,
+`--maxmemory-policy noeviction`, cluster mode never enabled — because the hub's
+dedup window is a correctness surface, not a cache: an evicted key is a lost event.
+
+```
+docker compose up -d                 # build + start trouble and redis
+docker compose ps                    # both healthy?
+docker compose logs -f trouble
+docker compose stop redis            # SPEC-13 degradation check (see below)
+docker compose down                  # stop, keep volumes; `-v` also drops state
+```
+
+One-time token seed — the dashboard mints tokens exactly once, to the file the
+daemon reads, so the seed runs in the image against the same volume:
+
+```
+docker compose run --rm \
+  -e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token \
+  -e TROUBLE_STATE_ROOT=/data/state \
+  --entrypoint /usr/local/bin/trouble trouble \
+  dashboard token create --label compose --scopes read
+```
+
+That prints the plaintext once. Put it in `/data/state/trouble.env` as
+`TROUBLE_DASHBOARD_TOKEN=<plaintext>` (mode 0600) so `trouble check-stall` — the
+container `HEALTHCHECK` and the external stall checker — can authenticate:
+
+```
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7644/health.json
+```
+
+**Ports.** `7643` ingest, `7644` dashboard; both published on `127.0.0.1` only
+(`127.0.0.1:7643:7643`, `127.0.0.1:7644:7644`). This stack never binds `3000`,
+`8642`/`8643` (Hermes gateway) or `9090` (coding-hermes scheduler).
+
+**Paths and modes.** State volume `trouble-state` at `/data`; `state_root` is
+`/data/state` and the token and env files are `/data/state/dashboard.token` and
+`/data/state/trouble.env`. Three mode/ownership traps, all measured:
+
+1. `/data` itself cannot be the state root. A fresh named volume is created
+   `root:root 0755` by the volume driver — only the image directory's *contents*
+   are copied in — so it is neither `0700` nor writable by uid 65532, and the
+   daemon refuses: `TROUBLE-LIFECYCLE-005: state_root "/data" mode is 0755, want
+   0700`. The image therefore ships `/data/state` as `0700` owned by `65532`.
+2. A host bind-mounted token file is owned by the invoking user (uid 1000, `0600`)
+   and is unreadable for the daemon → `TROUBLE-LIFECYCLE-013 (token_file_mode):
+   token store unstatable`.
+3. A compose `secrets:` entry mounts `0444` root-owned and trips the store's own
+   check → `TROUBLE-LIFECYCLE-013: token file mode not 0600`.
+
+Secrets therefore live inside the state volume, which is the one place the daemon
+can both read and write at the mode it enforces.
+
+**Every off-loopback key the container needs** (each added because the daemon
+refused the boot, not by guesswork — all four are in
+`deploy/container/config.toml` next to the refusal they answer):
+
+| key | refusal it answers |
+|---|---|
+| `ingest.bind`/`dashboard.bind` `0.0.0.0` | the published port must reach the listener |
+| `[ingest.auth] nonloopback_mode = "proxy"` | `TROUBLE-LIFECYCLE-003: public ingest.bind "0.0.0.0:7643" requires proxy mode` |
+| `dashboard.mandate = "proxy"` | `TROUBLE-DASHBOARD-006 (mandate_required): non-loopback bind requires a mandate` |
+| `dashboard.public_origin` | `TROUBLE-LIFECYCLE-001 (public_origin_required): public_origin required off loopback` |
+
+`proxy` is the honest declaration for a container whose only ingress is the
+host's published port; `tailnet` is the other accepted mandate.
+
+**HEALTHCHECK.** Distroless has neither shell nor curl, so the probe is the CLI
+itself — `/usr/local/bin/trouble check-stall --health-url
+http://127.0.0.1:7644/health.json --json` — which is the SPEC-05 external stall
+checker: it reads the ledger sequence out of `/health.json` and alarms on stall,
+not on process liveness. It authenticates from `TROUBLE_DASHBOARD_TOKEN` in
+`secrets.environment_file`, so that file must exist and be `0600` or the
+container reports unhealthy while the daemon is fine. Without a token file the
+daemon still serves and logs `dashboard token store is empty ... reason=missing`,
+and every request fails closed with `401`.
+
+**Redis degradation (SPEC-13).** With the standalone profile the daemon does not
+consult Redis at all, so `docker compose stop redis` changes nothing: `trouble`
+stays `Up`, `/health.json` keeps answering `200`, and `ledger_last_seq` keeps
+advancing (measured: 89 → 104 across the stop). When the light-hub profile lands,
+its documented behaviour — degrade to standalone ingestion, no event loss, no
+restart — must be re-proved against this same before/after sequence.
+
+`deploy/container/config.light-hub.toml` carries the wire-up shape for that
+profile (`server.profile = "light-hub"`, `server.redis.url =
+redis://redis:6379/0`). It is **not** the compose default, because the current
+tree has no `[server]` table in the lifecycle registry and unknown file keys are
+fatal — measured: `boot refused err="TROUBLE-LIFECYCLE-001: unknown file key
+"server.redis.appendonly""`. Switch the compose volume source to that file
+once the SPEC-13 config keys exist; do not delete the keys to make it boot.

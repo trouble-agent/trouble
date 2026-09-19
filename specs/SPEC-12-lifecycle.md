@@ -114,7 +114,8 @@ injects the resulting `Actor` into the ledger writer constructor (§8).
 `a.b_c` → env `TROUBLE_A_B_C` → flag `--a-b-c`. Env vars are read only with the `TROUBLE_` prefix. A dot
 becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secrets.environment_file` is
 `--secrets-environment_file`, `lifecycle.unit_name` is `--lifecycle-unit_name`. Every registered key of §3.1
-is flag-addressable in that form, and the flag source beats env, file and default (§3.1).
+is flag-addressable in that form except the five §2.5a names — three of them are declarations rather than
+scalars, and two cannot cross a command line at all. A flag source beats env, file and default (§3.1).
 
 The shipped unit's `ExecStart` renders exactly one argument pair, `--config <path>`; `RenderUnits` scans every
 argument it renders with the SPEC-02 mandatory rule set and refuses an `ExecStart` that carries secret-shaped

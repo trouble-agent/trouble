@@ -68,6 +68,8 @@ func flowRow(t *testing.T, r Resolved, key string) types.ConfigValue {
 // criterion's default half: with nothing set anywhere, the five keys resolve to
 // the numbers SPEC-08 §3.9a states, each with builtin provenance.
 func TestFlowBoundsDefaultsAreTheSection39aNumbers(t *testing.T) {
+	// AC-33: a host with no [flow] table runs the compiled defaults taken from
+	// the numbers SPEC-08 §3.9a pins (256 / 72h / 5 / 5s / 100).
 	r, err := Resolve(nil, nil, emptyConfigPath(t))
 	if err != nil {
 		t.Fatalf("Resolve with no file, no env and no flags: %v", err)
@@ -239,6 +241,8 @@ func TestFlowBoundsAppearInTheExplainDump(t *testing.T) {
 // zero (which the flow would read as "unbounded"). The table drives both classes
 // through all three sources an operator has.
 func TestFlowBoundsRefuseNonPositiveAndUnparsableValues(t *testing.T) {
+	// AC-33: a key that is not strictly positive is refused at resolution with
+	// TROUBLE-LIFECYCLE-001 naming the key, before the store is built.
 	cases := []struct {
 		name    string
 		file    string

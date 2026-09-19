@@ -638,6 +638,50 @@ window ⇒ TROUBLE-LIFECYCLE-007 recorded and logged before systemd's SIGABRT;
 `STATUS=` carries `version seq=<n> sensors=<n>/<n>`; `STOPPING=1` on drain entry; `RELOADING=1` around a
 SIGHUP config reload.
 
+### 3.5a Per-platform build matrix
+
+`trouble` builds with `CGO_ENABLED=0` for linux/amd64, linux/arm64, darwin/arm64 and windows/amd64. The
+daemon core and the sentinel are present on all four. Every Linux-only code path sits behind a build
+constraint (`//go:build linux` or a `_linux.go` suffix) and has a counterpart in the same package, so a
+cross build compiles either a real implementation or the declared absence — never an undefined symbol.
+`internal/portability` holds the source-invariant check that fails when a file touches the Linux-only
+syscall surface (`x/sys/unix`, inotify masks, `Statfs_t`, `Fdatasync`, `Flock`, `Stat_t`, `Setpgid`)
+without such a constraint.
+
+| Subsystem | linux | darwin | windows |
+|---|---|---|---|
+| daemon core, sentinel, ledger, flow, issues, registry, dashboard, hub | present | present | present |
+| sensors: PSI (`/proc/pressure` + epoll trigger) | present | absent | absent |
+| sensors: inotify (rules hot-reload trigger) | present | absent | absent |
+| sensors: disk (`statfs(2)` + `/proc/self/mounts`) | present | absent | absent |
+| sensors: journald follower | present | present | present |
+| sensors: D-Bus timer / unit observations | present | present | present |
+
+**Absent means degraded with a reason, never a silent no-op.** A sensor with no implementation on the
+running platform reports `enabled=false, degraded=true` with a non-empty reason naming the gap
+(`platform gap: …`, SPEC-03 §3.3): PSI and inotify and disk each return one of the three reasons above,
+and a rule over that sensor is evaluated against the refusal rather than against an empty sample set,
+because "no events" and "no implementation" are different facts. The journald and D-Bus rows compile
+everywhere and degrade with a reason where `journalctl` or the system bus is absent, which is the same
+path a Linux host without them takes.
+
+| Primitive | linux | darwin | windows |
+|---|---|---|---|
+| durability flush (`fdatasync=true`) | `fdatasync(2)`, else `fsync(2)` | `fsync(2)`: Go exposes no darwin binding for `fdatasync` in `syscall` or `x/sys/unix` | `FlushFileBuffers` (`fdatasync(2)` does not exist) |
+| single-writer lock on `ledger/LOCK` | `flock(LOCK_EX)` non-blocking | `flock(LOCK_EX)` non-blocking | `LockFileEx` exclusive + fail-immediately, first byte of the file |
+| process group of a spawned helper | `setpgid` + `kill(-pgid)` | same | none: `SysProcAttr` has no `Setpgid`; only the direct child is signalled |
+| file identity for rotation and board stamps | `(st_dev, st_ino)` | `(st_dev, st_ino)` | not applicable: `(size, mtime)` only |
+| credential-file owner check (§3.2) | uid vs daemon uid | uid vs daemon uid | not applicable (ownership is ACL-based, no uid) |
+| flow disk gate (§3.8) | `statfs` `bavail × bsize` | same | `GetDiskFreeSpaceEx` free-bytes-available |
+
+Three rows are weaker on Windows and are stated as weaker rather than equal: the file identity falls
+back to `(size, mtime)`, so a same-size same-mtime replacement is not detected by the stamp; the
+credential-file owner check cannot run, so that refusal is not available there; and a killed helper does
+not take its own children with it. The durability and locking rows are not downgrades: `FlushFileBuffers`
+flushes data and metadata, and `LockFileEx` on the single `LOCK` file gives the same mutual exclusion —
+what is lost is the `fdatasync` optimisation (an append-only rotation pays a metadata flush) and, on
+darwin, that same optimisation, since the platform call is reached through `fsync(2)`.
+
 ### 3.6 Upgrades: rename-over, park/resume, schema compatibility, downgrade refusal
 
 `trouble upgrade` in order, with every step recorded as a `lifecycle` record:

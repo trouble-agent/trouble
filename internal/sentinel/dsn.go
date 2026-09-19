@@ -85,8 +85,8 @@ func GenerateDSN(cfg Config, p types.Project) (string, error) {
 	if p.SecretKey != "" && !validSecretKey(p.SecretKey) {
 		return "", errf(types.CodeSentinel006, "secret_key must be exactly 32 lowercase hex (16-hex is refused)", causeSecretLength)
 	}
-	if net.ParseIP(cfg.AdvertisedHost) != nil || isBindAddress(cfg.AdvertisedHost) {
-		return "", errf(types.CodeSentinel009, "advertised_host must be a name, never an IP or bind address", causeAdvertisedHost)
+	if err := cfg.advertisedHostRefusal(cfg.AdvertisedHost); err != nil {
+		return "", err
 	}
 	if cfg.ProxyTrust == proxyTrustNone && cfg.Scheme == "https" {
 		return "", errf(types.CodeSentinel009, "https requires a TLS terminator (proxy_trust != none)", causeHTTPSNoTerminator)

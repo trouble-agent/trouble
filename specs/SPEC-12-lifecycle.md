@@ -549,6 +549,34 @@ carrying `payload.conflicts = 0`; the same fixture with `TROUBLE_INGEST_BIND` ov
 `ingest.bind` resolves with **exactly 1** row naming both `source_ref`s, while the remaining six deviations
 still record nothing.
 
+### 3.1g The derived DSN host: `ingest.advertised_host` on a loopback bind (v0.1.1c)
+
+With no declaration, `ingest.advertised_host` is not a blank — it is DERIVED (TRBL-017):
+
+- **The default is the loopback NAME, conditioned on the bind.** `postResolve` sets the key to
+  `localhost` exactly when it is undeclared AND `ingest.bind` is loopback — the same predicate the §3.2
+  bind preflight applies (`isLoopbackHost`: any 127/8 address, `::1` bracketed or bare, the loopback name,
+  case-insensitive), so the derivation and the preflight cannot disagree about a bind. The derivation is
+  what makes the documented default USABLE: the sentinel accepts the loopback name for exactly this bind
+  (SPEC-04 §2.3a) and bakes it into every generated DSN. On any other bind the key stays empty and the
+  §3.2 preflight refuses the boot (TROUBLE-LIFECYCLE-003, "non-loopback ingest.bind requires
+  ingest.advertised_host") rather than mint an unreachable DSN host.
+- **The derived value is what the operator sees.** The `config explain` row and the boot `config` record
+  carry the DERIVED value, never the empty marker the registry started from — an operator reading either
+  surface sees the DSN host the daemon will use. A declared value always wins, keeps its own provenance
+  (`source=file`), and reaches the boot record verbatim.
+- **A wildcard bind derives nothing.** `ingest.bind = 0.0.0.0:7643` with no declared host leaves the key
+  empty and refuses at preflight: a wildcard listener is reachable off-host, so handing it the loopback
+  name would mint exactly the silent-no-report DSN the sentinel refuses (SPEC-04 §2.3a). Deriving on a
+  wildcard bind and letting the sentinel refuse the boot would also work — the operators see the sentinel
+  code — but the preflight owns bind classification, so the refusal names the missing declaration instead.
+
+Asserted by `internal/lifecycle/advertised_host_test.go` (§7): the derivation matrix drives every bind
+spelling through `Resolve` (default bind, loopback by address/name, 127/8, `[::1]`, and the refusals —
+wildcard, IPv6 wildcard, a LAN address) and asserts the explain row carries the derived value; two further
+tests pin a declared value winning with its provenance, and a no-declaration boot recording `localhost` in
+the boot `config` record.
+
 ### 3.2 State root, secret-file modes, bind preflight
 
 ```

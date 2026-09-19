@@ -55,7 +55,7 @@ const (
 // them. They are documented as deviations in docs/sentinel-compat.md §5.
 type Config struct {
 	Bind                     string   // default "127.0.0.1:7643"
-	AdvertisedHost           string   // DSN host; an IP literal or a bind address is refused
+	AdvertisedHost           string   // DSN host; a name, never an IP literal or a wildcard. "localhost" only while Bind is loopback (§2.3a)
 	AdvertisedHosts          []string // extra names accepted as a valid DSN host
 	Scheme                   string   // "http" | "https"; "https" requires ProxyTrust != "none"
 	RequireSecret            bool     // default false
@@ -192,18 +192,18 @@ func (c *Config) validate() *Error {
 	default:
 		return errf(types.CodeSentinel009, "scheme must be http or https", causeAdvertisedHost)
 	}
-	if c.AdvertisedHost == "" {
-		return errf(types.CodeSentinel009, "advertised_host is required: a DSN is baked into every app", causeAdvertisedHost)
+	if err := c.advertisedHostRefusal(c.AdvertisedHost); err != nil {
+		return err
 	}
-	if net.ParseIP(c.AdvertisedHost) != nil {
-		return errf(types.CodeSentinel009, "advertised_host must be a name, never an IP literal", causeAdvertisedHost)
-	}
-	if isBindAddress(c.AdvertisedHost) {
-		return errf(types.CodeSentinel009, "advertised_host must not be a bind address", causeAdvertisedHost)
-	}
+	// The accepted set is the union of the two keys (§2.3), so an entry of
+	// `advertised_hosts` is a DSN host like any other and meets the same rule:
+	// an IP literal, a wildcard and the loopback name outside a loopback bind
+	// are refused here too, or the §2.3a precondition is bypassed by the list.
 	for _, h := range c.AdvertisedHosts {
-		if net.ParseIP(h) != nil {
-			return errf(types.CodeSentinel009, "advertised_hosts entries must be names", causeAdvertisedHost)
+		if c.advertisedHostRefusal(h) != nil {
+			return errf(types.CodeSentinel009,
+				"advertised_hosts entries must be names the reporters resolve: an IP literal, a wildcard address and \"localhost\" outside a loopback bind are refused (SPEC-04 §2.3a)",
+				causeAdvertisedHost)
 		}
 	}
 	for _, p := range c.Projects {
@@ -244,25 +244,86 @@ func (c *Config) validate() *Error {
 	return nil
 }
 
-// isBindAddress reports whether host is a wildcard/any-address form a DSN must
-// never carry: 0.0.0.0, ::, or "localhost" (a per-host name that makes every
-// deployed app silently report nowhere when the fleet moves).
-func isBindAddress(host string) bool {
+// isWildcardAddress reports whether host is a wildcard/any-address form a DSN
+// must never carry: 0.0.0.0, ::, [::], or the empty string. None of them names
+// the listener from a reporter, at any bind.
+func isWildcardAddress(host string) bool {
 	switch strings.ToLower(strings.TrimSpace(host)) {
-	case "0.0.0.0", "::", "[::]", "", "localhost":
+	case "0.0.0.0", "::", "[::]", "":
 		return true
 	}
 	return false
 }
 
+// isLocalhostName reports whether host is the loopback NAME. It is stated on the
+// same normalization acceptsHost uses, so "LocalHost." is the loopback name here
+// too and cannot side-step the §2.3a precondition.
+func isLocalhostName(host string) bool {
+	return normalizeHostName(host) == "localhost"
+}
+
+// loopbackBind reports whether the listening address is itself loopback. It is
+// the PRECONDITION of §2.3a: a loopback listener is reachable from this host
+// only, so every reporter that can reach it resolves the loopback name to it.
+func (c Config) loopbackBind() bool {
+	host, _ := parseHostPort(c.Bind)
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "localhost" || h == "ip6-localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// advertisedHostRefusal is the ONE rule for a candidate DSN host, consulted at
+// config load (validate) and at generation (GenerateDSN, §2.3), so the two
+// surfaces cannot drift. It returns nil when the host is acceptable for the
+// bind this config listens on:
+//
+//   - empty, an IP literal, and a wildcard are refused at every bind;
+//   - `localhost` is refused unless the bind is loopback (§2.3a): with any
+//     other bind a reporter on another host resolves it to itself and reports
+//     nowhere — the silent-no-report §2.3 exists to stop — so the refusal names
+//     that fix instead of restating the rule.
+func (c Config) advertisedHostRefusal(host string) *Error {
+	switch {
+	case strings.TrimSpace(host) == "":
+		return errf(types.CodeSentinel009, "advertised_host is required: a DSN is baked into every app", causeAdvertisedHost)
+	case isWildcardAddress(host):
+		return errf(types.CodeSentinel009, "advertised_host must be a name, never a wildcard address (0.0.0.0/::)", causeAdvertisedHost)
+	case net.ParseIP(host) != nil:
+		return errf(types.CodeSentinel009, "advertised_host must be a name, never an IP literal", causeAdvertisedHost)
+	case isLocalhostName(host) && !c.loopbackBind():
+		bind := c.Bind
+		if bind == "" {
+			bind = defaultBind
+		}
+		return errf(types.CodeSentinel009,
+			"advertised_host \"localhost\" is refused while ingest.bind "+strconv.Quote(bind)+
+				" is not loopback: a reporter on another host resolves localhost to itself and reports nowhere — "+
+				"declare a name the reporters resolve, or bind ingest to a loopback address to keep the loopback DSN form (SPEC-04 §2.3a)",
+			causeAdvertisedHost)
+	}
+	return nil
+}
+
+// normalizeHostName is the one normalization for a DSN host and for the hosts the
+// config advertises: lowercase, no surrounding space, no trailing root dot. Both
+// sides go through it (or a DSN minted from `localhost.` would parse to a host
+// the same config then refuses), and §2.3a's precondition is stated on it, so
+// the dot spelling cannot walk around the loopback rule.
+func normalizeHostName(host string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+}
+
 // acceptsHost reports whether host is inside the advertised set.
 func (c *Config) acceptsHost(host string) bool {
-	h := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
-	if h == strings.ToLower(c.AdvertisedHost) {
+	h := normalizeHostName(host)
+	if h == normalizeHostName(c.AdvertisedHost) {
 		return true
 	}
 	for _, a := range c.AdvertisedHosts {
-		if h == strings.ToLower(strings.Trim(strings.TrimSpace(a), ".")) {
+		if h == normalizeHostName(a) {
 			return true
 		}
 	}

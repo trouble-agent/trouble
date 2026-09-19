@@ -232,24 +232,38 @@ func TestShippedExampleDeclaresAProject(t *testing.T) {
 	if !res.Config.Ingest.Auth.LoopbackDSN {
 		t.Errorf("the shipped example must keep the documented loopback DSN form on: %+v", res.Config.Ingest.Auth)
 	}
-	// The shipped advertised_host must be a name the sentinel accepts: an IP
-	// literal, a bind address or "localhost" is refused at config load
-	// (SPEC-04 §2.2), which would leave the shipped boot without an ingest plane.
-	if !validAdvertisedName(res.Config.Ingest.AdvertisedHost) {
-		t.Errorf("examples/config.toml advertises %q, which the sentinel refuses as a DSN host",
-			res.Config.Ingest.AdvertisedHost)
+	// TRBL-017: the example must advertise a host the sentinel ACCEPTS, and it
+	// must do so through the documented default rather than a placeholder. The
+	// example binds loopback, so leaving the key empty derives "localhost"
+	// (SPEC-12 §3.1/§3.1g) — a value the sentinel accepts for exactly this bind
+	// (SPEC-04 §2.3a). Pinned as an equality so re-introducing an unresolvable
+	// placeholder (the old `trouble.example.net`, a name nothing resolves but a
+	// gate the shape passed) fails here.
+	if got := res.Config.Ingest.AdvertisedHost; got != "localhost" {
+		t.Errorf("examples/config.toml resolves ingest.advertised_host = %q, want the documented loopback default \"localhost\" for its loopback bind", got)
+	}
+	if !validAdvertisedName(res.Config.Ingest.AdvertisedHost, res.Config.Ingest.Bind) {
+		t.Errorf("examples/config.toml advertises %q on bind %q, which the sentinel refuses as a DSN host",
+			res.Config.Ingest.AdvertisedHost, res.Config.Ingest.Bind)
 	}
 }
 
-// validAdvertisedName mirrors the sentinel's refusal of an IP literal, a
-// wildcard bind address or "localhost" as a DSN host.
-func validAdvertisedName(host string) bool {
+// validAdvertisedName mirrors the sentinel's DSN-host rule (SPEC-04 §2.3/§2.3a):
+// a name, never an IP literal or a wildcard at any bind, and the loopback name
+// only while ingest.bind is itself loopback.
+func validAdvertisedName(host, bind string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
-	if h == "" || h == "0.0.0.0" || h == "::" || h == "[::]" || h == "localhost" {
+	if h == "" || h == "0.0.0.0" || h == "::" || h == "[::]" {
 		return false
 	}
 	if strings.Trim(h, "0123456789.") == "" { // py-style IPv4 shape
 		return false
 	}
-	return !strings.Contains(h, ":") // IPv6
+	if strings.Contains(h, ":") { // IPv6
+		return false
+	}
+	if strings.TrimSuffix(h, ".") == "localhost" {
+		return isLoopbackBind(bind)
+	}
+	return true
 }

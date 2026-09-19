@@ -130,10 +130,37 @@ from `ScrubResult`) cross the boundary. Dependency direction stays one-way (SPEC
 | `scheme` | `http` or `https`; `https` requires `proxy_trust != none` (a TLS terminator in front) or startup fails with TROUBLE-SENTINEL-009, causes `["https_without_terminator"]` |
 | `pubkey` | exactly 32 lowercase hex; the ONLY unredacted credential in the system (brief §1.C) |
 | `secret` | exactly 32 lowercase hex, emitted only when `require_secret = true`; 16-hex secrets are refused (TROUBLE-SENTINEL-006, causes `["secret_length"]`) and listed in `docs/sentinel-compat.md` as a divergence from Sentry's older 16-hex secret |
-| `host` | must be in `{advertised_host}` ∪ `advertised_hosts`. An IP literal, `0.0.0.0`, `localhost`, or the bind host of another service is refused at generation and at config load (TROUBLE-SENTINEL-009) — a DSN is baked into every deployed app, so a bind address here is a fleet-wide silent-no-report |
+| `host` | must be in `{advertised_host}` ∪ `advertised_hosts`. An IP literal or a wildcard address (`0.0.0.0`, `::`) is refused at every bind, at generation and at config load (TROUBLE-SENTINEL-009, causes `["advertised_host"]`) — a DSN is baked into every deployed app, so a bind address here is a fleet-wide silent-no-report. `localhost` is refused on any bind that is NOT loopback (§2.3a) |
 | `port` | optional; omitted when it equals the scheme default, else `7643` |
 | `path` | **ends at the base**: `/{project_id}` exactly — no `/api`, no trailing slash, no query. SDKs append `/api/{project_id}/envelope/` themselves |
 | `project_id` | numeric-as-string, 1..2^31-1; a DSN whose project id differs from the request path → TROUBLE-SENTINEL-006, causes `["dsn_project_mismatch"]` |
+
+**§2.3a The loopback-name exception (bind-conditional DSN host).** `localhost` is the one name that
+resolves differently per reporter: on the reporting host itself it names the reporter, not the listener.
+That is exactly why it is refused wherever a DSN can travel — and exactly why it is CORRECT on a bind that
+cannot: a loopback listener is reachable from this host alone, so every reporter that can reach the
+listener resolves the loopback name to it. The refusal is therefore a precondition, not a flat blacklist,
+and it mirrors the ingest plane's own default (`ingest.advertised_host` derives `localhost` on a loopback
+bind, SPEC-12 §3.1): without the exception that default was a value the sentinel then refused — a stock
+boot with an unusable documented posture (TRBL-017).
+
+- **The rule.** A DSN host equal to the loopback name (case-insensitive, trailing root dot stripped, the
+  same normalization the advertised-set comparison applies) is accepted only while `bind` is itself
+  loopback — a loopback address in 127/8, `::1`, or the loopback name spelled as the bind host. On any
+  other bind it is refused at config load AND at DSN generation (TROUBLE-SENTINEL-009, causes
+  `["advertised_host"]`) with the fix named, not restated: *declare a name the reporters resolve, or bind
+  ingest to a loopback address*. The precondition applies to the loopback NAME only — an IP literal and a
+  wildcard stay refused at every bind, including a loopback one (`advertised_host = 127.0.0.1` buys
+  nothing over the name and breaks when the fleet moves).
+- **One gate, both surfaces.** Config load and `GenerateDSN` consult the SAME refusal function, so the two
+  cannot drift: a config that boots mints DSNs, and a DSN the config mints parses back against it. The
+  same precondition covers every entry of `advertised_hosts` — a list entry is a DSN host like any other,
+  and a list spelling of `localhost.` must not walk around the rule the scalar form obeys.
+- **The DSN must carry a real request.** The accepted form is proven, not merely un-refused: the test
+  matrix drives both surfaces over accept AND refuse rows (loopback bind with the name in three spellings;
+  wildcard/LAN/public binds with the name refused), and a config on `127.0.0.1` mints the loopback DSN and
+  serves a real envelope through it (the §2.4 `envelope_dsn` form, so the request carries the host and not
+  only the key) — the path a local SDK takes.
 
 Generation: `trouble init` mints `crypto/rand` 32-hex keys per project and refuses to write a DSN
 whose host is not an advertised name. Rotation: `trouble sentinel rotate-key <project>` installs a
@@ -163,7 +190,7 @@ an SDK interop gap into data instead of a mystery (brief §1.E; judge D6).
 ```toml
 [sentinel]
 bind = "127.0.0.1:7643"
-advertised_host = "trouble.example.net"      # never an IP, never a bind address
+advertised_host = "trouble.example.net"      # never an IP, never a wildcard; "localhost" only while bind is loopback (§2.3a)
 scheme = "http"
 loss_policy = "drop-with-counter"            # sample | drop-with-counter | spool-if-light
 proxy_trust = "loopback"                     # loopback | none | explicit-list

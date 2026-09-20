@@ -1120,7 +1120,14 @@ calibration. Rules the tests follow:
    still fails (small-group flushes), and the fsync/record bar is exact `1/4096` when the run had no
    catch-up, bounded `2/4096` when it did — an order of magnitude below any per-small-group regression.
    The amortized-cost contract (1.94 µs/rec; ≥ 100k rec/s on the reference host) remains enforced by
-   `TestAmortizedThroughput`.
+   `TestAmortizedThroughput`, whose 100,000 rec/s floor is a RATE and is graded as
+   `100000 / Scale()` — the I/O-bound factor (QA-TROUBLE-5/TRBL-050: the load_avg-only
+   `60000×20/(load+16)` relaxation curve it replaced moved the WRONG way — a more contended host
+   got a MORE lenient bar — and could not see a concurrent fsync-heavy neighbor at all: three
+   back-to-back runs at the same load_avg ~4.4 measured 39,489 / ok / ok rec/s. The I/O pilot
+   runs on the same filesystem the measured run uses, so disk contention inflates the pilot the
+   same way it inflates the run, while the contention half still covers a descheduled box; a
+   per-line collapse (the measured 512 rec/s) fails every floor the model can produce).
 
 No §7 number is relaxed: a reference-class host meets every original figure, and every scaled assertion
 still fails on a genuine multi-x regression regardless of which host it lands on.

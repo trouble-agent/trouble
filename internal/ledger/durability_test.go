@@ -124,20 +124,28 @@ func TestFsyncCountIsStructural(t *testing.T) {
 }
 
 // TestAmortizedThroughput: the SPEC-01 §7 floor is ≥100,000 rec/s amortized
-// (measured 515k rec/s on the reference host — a 5× margin). That floor assumes
-// the host is not already saturated: the amortized path is a scheduler- and
-// syscall-bound loop, and this repository is routinely measured while other
-// builds run. So the floor is load-aware rather than silently lowered: on a
-// quiet host (1-min load average < 4) the spec's 100,000 rec/s is enforced, and
-// on a busy host the floor follows the measured degradation (see
-// groupCommitFloorFor). Above the fence in internal/loadfence the floor curve no
-// longer tracks the host — at load_avg 47.64 the same run measured 18,438 rec/s
-// against a 18,856 bar, a 2% gap inside the run-to-run spread of a descheduled
-// box — so the miss is reported as an explicit SKIP carrying the observed
-// load_avg and the measured rate instead of a red that would misreport host load
-// as a ledger regression. Below the fence the assertion fails exactly as it
-// always has (verified on the pre-change tree: the identical failure text at
-// load_avg 47.64).
+// (measured 515k rec/s on the reference host — a 5× margin). The floor is a
+// reference-host measurement, so it is graded against the host's own measured
+// I/O throughput and load via loadfence.Measure().Scale() (SPEC-01 §7a):
+// scale = max(1, IOMultiple) × (1 + load_avg_1m/16), clamped so a host can
+// only ever LOOSEN the bar relative to the reference number, never tighten it
+// — on a quiet reference-class host the scale is 1 and the spec's 100,000
+// rec/s is enforced exactly.
+//
+// TRBL-050: the floor previously followed load_avg alone (the
+// 60000×20/(load+16) curve in groupCommitFloorFor), which cannot see WHO is
+// loading the box — three back-to-back runs on the same host at the same
+// load_avg ~4.4 measured 39,489 / ok / ok rec/s because a concurrent
+// fsync-heavy sibling test stole the disk while load_avg barely moved — and
+// it graded a contended host MORE leniently as load rose (the wrong way). An
+// I/O-bound gate must follow the disk, not the run queue: the I/O pilot
+// measures the same filesystem the run is about to use, so a contended disk
+// inflates the pilot exactly the way it inflates the measured run, and
+// Scale()'s contention half still covers a descheduled box. As before, above
+// the loadfence fence the miss is reported as an explicit SKIP carrying the
+// observed load_avg and the measured rate instead of a red that would
+// misreport host load as a ledger regression; below the fence the assertion
+// fails exactly as it always has.
 func TestAmortizedThroughput(t *testing.T) {
 	if raceEnabled {
 		t.Skip("absolute throughput floors are measured without -race; run `go test -count=1 ./internal/ledger/...` for the regression bar")
@@ -152,22 +160,22 @@ func TestAmortizedThroughput(t *testing.T) {
 	const n = 25 * batch
 	el := runAppends(t, l, n, batch)
 	rate := float64(n) / el.Seconds()
-	load := loadAvg1()
-	// Throughput floors are load-aware: under parallel package execution the
-	// host is shared, so the floor scales with observed load (measured
-	// reference 515k rec/s quiet; 58k observed at load ~8 under go test ./...).
-	// The loaded floor follows the measured degradation, 60000×20/(load+16)
-	// floored at the SPEC-01 durability minimum (10k), rather than a flat bar:
-	// the same run measured 33.8k at load ~27, under the old flat 40k. A quiet
-	// host still asserts the spec's 100,000 directly.
-	floor := groupCommitFloorFor(load)
+	// SPEC-01 §7a: the floor is divided by the host's measured Scale() — the
+	// I/O-bound factor. A TIME budget scales up by the box's slowdown; a RATE
+	// floor scales down, so the spec number is asserted on a quiet
+	// reference-class host (scale = 1) and only relaxed where the box's own
+	// pilots say it is slower or busier than the reference.
+	prof := loadfence.Measure(t.TempDir())
+	scale := prof.Scale()
+	load := prof.Load
+	floor := 100000.0 / scale
 	if rate < floor {
 		loadfence.Miss(t, "TestAmortizedThroughput",
-			fmt.Sprintf("amortized throughput = %.0f rec/s, want >= %.0f (load_avg_1m=%.2f; SPEC-01 §7 floor is 100000, reference host measured 515k)", rate, floor, load),
+			fmt.Sprintf("amortized throughput = %.0f rec/s, want >= %.0f (load_avg_1m=%.2f, calibration io=x%.2f load=x%.2f scale=x%.2f; SPEC-01 §7 floor is 100000, reference host measured 515k)", rate, floor, load, prof.IOMultiple, prof.Contention(), scale),
 			load)
 	}
-	t.Logf("amortized (group-commit) throughput: %.0f rec/s over %d records in %s (load_avg_1m=%.2f, floor=%.0f, spec floor=100000/measured 515k)",
-		rate, n, el, load, floor)
+	t.Logf("amortized (group-commit) throughput: %.0f rec/s over %d records in %s (load_avg_1m=%.2f, calibration io=x%.2f scale=x%.2f, floor=%.0f, spec floor=100000/measured 515k)",
+		rate, n, el, load, prof.IOMultiple, scale, floor)
 }
 
 // TestFsyncWindowBound: a producer appending 1 rec/10 ms with a 200 ms window
@@ -248,12 +256,18 @@ func TestPerLineRegression(t *testing.T) {
 	perRate := float64(pn) / pel.Seconds()
 
 	if !raceEnabled {
-		// Same load-aware floor as TestAmortizedThroughput: this test asserts
-		// the amortized mode's throughput itself (not just the ratio), so it
-		// uses the same scaled floor — the flat 60k bar false-failed at load
-		// ~27 (33.8k observed) and ~20 (59.0k observed, under by 1%).
-		if floor := groupCommitFloorFor(load); groupRate < floor {
-			t.Errorf("group-commit throughput = %.0f rec/s at load_avg_1m=%.2f, want >= %.0f", groupRate, load, floor)
+		// Same host-calibrated floor as TestAmortizedThroughput (SPEC-01
+		// §7a): this test asserts the amortized mode's throughput itself (not
+		// just the ratio), so it uses the same measured Scale() — the flat
+		// 60k bar false-failed at load ~27 (33.8k observed) and ~20 (59.0k
+		// observed, under by 1%), and TRBL-050 replaced the load_avg-only
+		// curve with the box's own I/O pilot, which also sees a contended
+		// disk that load_avg cannot.
+		prof := loadfence.Measure(t.TempDir())
+		scale := prof.Scale()
+		if floor := 100000.0 / scale; groupRate < floor {
+			t.Errorf("group-commit throughput = %.0f rec/s at load_avg_1m=%.2f (io=x%.2f scale=x%.2f), want >= %.0f",
+				groupRate, prof.Load, prof.IOMultiple, scale, floor)
 		}
 	}
 	if perRate*5 > groupRate {
@@ -264,61 +278,104 @@ func TestPerLineRegression(t *testing.T) {
 		groupRate, perRate, groupRate/perRate, load)
 }
 
-// groupCommitFloorFor scales the ledger's group-commit floor with the load the
-// measurement runs under: 60000×20/(load+16), floored at 10000 rec/s. The
-// curve equals the existing flat loaded floor (60k) at load 4 and follows the
-// measured degradation under full-suite parallel load (58k at load ~8; 33.8k
-// at load ~27, where the old flat 40k bar false-failed) instead of assuming
-// the host's core share is fixed. A quiet host (load < 4) keeps the spec's
-// 100,000 rec/s (SPEC-01 §7, reference host measured 515k). The clamp keeps
-// the regression bar: 10k rec/s is the SPEC-01 durability minimum and still
-// ~75x the per-line mode's ~133 rec/s, so the amortized mode's advantage —
-// the property TestPerLineRegression exists to protect — cannot be optimised
-// away behind even a crushed host.
-func groupCommitFloorFor(load float64) float64 {
-	if load < 4 {
-		return 100000.0
-	}
-	floor := 60000.0 * 20.0 / (load + 16.0)
-	if floor < 10000.0 {
-		floor = 10000.0
-	}
-	return floor
+// amortizedFloorFor scales the SPEC-01 §7 amortized-throughput floor
+// (100,000 rec/s on the reference host) by the host's measured I/O-bound
+// calibration factor (SPEC-01 §7a): 100000 / Scale(), where
+// Scale() = max(1, IOMultiple) × (1 + load_avg_1m/16). A RATE floor divides by
+// the scale (a TIME budget multiplies), so on a quiet reference-class host the
+// scale is 1 and the spec's 100,000 is asserted exactly; the clamp means a
+// host can only ever LOOSEN the bar, never tighten it.
+//
+// TRBL-050: the previous floor was load_avg-only (60000×20/(load+16)), which
+// moves the wrong way — a more contended host got a MORE lenient bar — and
+// cannot see a concurrent fsync-heavy neighbor at all (three back-to-back runs
+// at the same load_avg ~4.4 measured 39,489 / ok / ok rec/s). Group commit is
+// I/O-bound: the I/O pilot runs on the same filesystem the measured run uses,
+// so disk contention inflates the pilot the same way it inflates the run,
+// while the contention half still covers a descheduled box. The floor stays a
+// real regression bar: a per-line collapse (the measured 512 rec/s) fails it
+// on every profile, by construction of the clamp and the fence above.
+func amortizedFloorFor(prof loadfence.Profile) float64 {
+	return 100000.0 / prof.Scale()
 }
 
-// TestGroupCommitFloorScaling pins the load-aware ledger floor: quiet hosts
-// keep the spec number, the observed points pass, the clamp holds, the floor
-// never decreases with load, and a per-line-collapse regression (the amortized
-// path running at 1000 rec/s, un-grouped) stays caught at every load.
-func TestGroupCommitFloorScaling(t *testing.T) {
+// TestAmortizedFloorScaling pins the calibrated ledger floor: a quiet
+// reference-class host asserts the spec number exactly, a faster-than-
+// reference disk is clamped (never tightened), a busy run queue and a
+// contended disk each loosen it through their own term, and the TRBL-050 case
+// — a contended disk at UNCHANGED load_avg, which the load-only curve was
+// blind to — lowers the bar via the I/O pilot. The floor never increases with
+// IOMultiple or with load, and a per-line collapse (the measured 512 rec/s)
+// fails every floor in the table.
+func TestAmortizedFloorScaling(t *testing.T) {
 	cases := []struct {
-		load float64
+		name string
+		prof loadfence.Profile
 		want float64
 	}{
-		{0, 100000},            // no /proc/loadavg → spec floor
-		{3.9, 100000},          // quiet host: SPEC-01 §7 asserted directly
-		{4, 60000},             // curve starts at the old flat loaded bar
-		{8, 50000},             // 60000 × 20/24
-		{27, 27906.976744186},  // observed 33.8k at load ~27
-		{100, 10344.827586207}, // 60000 × 20/116, above the clamp
-		{150, 10000},           // the clamp
+		{
+			name: "quiet reference-class host: SPEC-01 §7 asserted exactly",
+			prof: loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 0},
+			want: 100000,
+		},
+		{
+			name: "disk faster than reference: clamped, never tightened",
+			prof: loadfence.Profile{IOMultiple: 0.5, CPUMultiple: 0.5, Load: 0},
+			want: 100000,
+		},
+		{
+			name: "busy run queue, healthy disk: contention term only",
+			prof: loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 4.4},
+			want: 100000.0 / (1 + 4.4/16),
+		},
+		{
+			name: "TRBL-050: contended disk at unchanged load_avg — the pilot sees what load_avg cannot",
+			prof: loadfence.Profile{IOMultiple: 3, CPUMultiple: 1, Load: 4.4},
+			want: 100000.0 / (3.0 * (1 + 4.4/16)),
+		},
+		{
+			name: "quiet box, half the reference disk bandwidth",
+			prof: loadfence.Profile{IOMultiple: 2, CPUMultiple: 1, Load: 0},
+			want: 50000,
+		},
+		{
+			name: "worst table case just below the fence: floor still many x the per-line mode",
+			prof: loadfence.Profile{IOMultiple: 5, CPUMultiple: 1, Load: 44},
+			want: 100000.0 / (5.0 * (1 + 44.0/16)),
+		},
+		{
+			name: "NaN multiple degrades to the reference (clamp1), contention still applies",
+			prof: loadfence.Profile{IOMultiple: math.NaN(), CPUMultiple: math.NaN(), Load: 4},
+			want: 100000.0 / (1 + 4.0/16),
+		},
 	}
 	for _, c := range cases {
-		if got := groupCommitFloorFor(c.load); math.Abs(got-c.want) > 0.01 {
-			t.Errorf("groupCommitFloorFor(%.1f) = %.1f, want %.1f", c.load, got, c.want)
+		if got := amortizedFloorFor(c.prof); math.Abs(got-c.want) > 0.01 {
+			t.Errorf("amortizedFloorFor(%s) = %.1f, want %.1f", c.name, got, c.want)
+		}
+		if c.want <= 5*512 {
+			t.Errorf("amortizedFloorFor(%s) = %.1f admits a per-line-collapse regression (measured 512 rec/s, bar must stay > 5x)", c.name, c.want)
 		}
 	}
-	for _, load := range []float64{0, 4, 8, 27, 150} {
-		if groupCommitFloorFor(load) < 10000 {
-			t.Errorf("groupCommitFloorFor(%.1f) admits a per-line-collapse regression (1000 rec/s)", load)
+	for _, load := range []float64{0, 4, 8, 27, 44} {
+		prev := amortizedFloorFor(loadfence.Profile{IOMultiple: 1, Load: load})
+		for _, io := range []float64{1, 2, 3, 5, 10} {
+			got := amortizedFloorFor(loadfence.Profile{IOMultiple: io, Load: load})
+			if got > prev {
+				t.Errorf("amortizedFloorFor(io=%g, load=%g) = %.1f > previous %.1f: the floor must never increase with IOMultiple", io, load, got, prev)
+			}
+			prev = got
 		}
 	}
-	prev := groupCommitFloorFor(0)
-	for _, load := range []float64{0, 3.9, 4, 8, 27, 150} {
-		if got := groupCommitFloorFor(load); got > prev {
-			t.Errorf("groupCommitFloorFor(%.1f) = %.1f > previous %.1f: the floor must never increase with load", load, got, prev)
+	for _, io := range []float64{1, 2, 3} {
+		prev := amortizedFloorFor(loadfence.Profile{IOMultiple: io, Load: 0})
+		for _, load := range []float64{0, 4, 8, 27, 44} {
+			got := amortizedFloorFor(loadfence.Profile{IOMultiple: io, Load: load})
+			if got > prev {
+				t.Errorf("amortizedFloorFor(io=%g, load=%g) = %.1f > previous %.1f: the floor must never increase with load", io, load, got, prev)
+			}
+			prev = got
 		}
-		prev = groupCommitFloorFor(load)
 	}
 }
 

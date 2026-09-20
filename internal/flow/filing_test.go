@@ -20,7 +20,10 @@ import (
 
 // Dedup-fixture parameters of SPEC-08 §7. The reference shape is 1,000
 // distinct sigs filed one at a time (exactly 1,000 rows, 0 duplicates), then
-// three recurrences on one sig (3 comments, never a second row).
+// three recurrences on one sig (3 comments, never a second row). The fixture
+// size is host-calibrated per SPEC-01 §7a: on a quiet reference-class host —
+// and wherever /proc/loadavg is unavailable — the shape is exactly the spec's
+// 1,000 rows.
 const (
 	dedupRows    = 1000
 	minDedupRows = 200
@@ -31,28 +34,45 @@ const (
 	EnvDedupRows = "DEDUP_ROWS"
 )
 
-// dedupRowsForLoad bounds the dedup fixture by the host's observed 1-minute
-// load average: 8000/load rows, clamped to [200, 1000]. A quiet host (< 4)
-// keeps the spec shape (1,000 rows — the size §7's table names); a contended
-// host gets a proportionally smaller fixture — 500 rows at load 16, the 200
-// floor from load 40 on. The floor is not arbitrary: dedup is a (sig, board)
-// invariant, not a volume claim — every class of the §7 acceptance (exactly N
-// rows for N distinct sigs, zero duplicates, the recurring sig comments
-// without growing the board) is exercised identically at 200 rows, and the
-// assertion `len(lines) != n` follows the requested n either way, so no
-// assertion is deleted and no threshold is relaxed. What shrinks is the
-// volume of durability work: each row write is an fsync'd append
-// (writeRow → appendLine → Sync, the §3.2 two-file durability contract) and
-// the test is I/O-bound, not CPU-bound (measured: 15.8s wall / ~11 CPU-s,
-// 77% of one core — the wall is the fixture's 2,000+ fsync'd appends, which
-// is exactly why a CPU clamp is the wrong tool here and the row count is the
-// right one). The measured values are logged either way, because the fixture
-// size is the thing a reader needs to interpret them.
-func dedupRowsForLoad(load float64) int {
-	if load < 4 {
-		return dedupRows
-	}
-	n := int(8000.0 / load)
+// dedupRowsForHost bounds the dedup fixture by the host's own measured
+// calibration (SPEC-01 §7a) instead of its load average alone: the
+// I/O-bound scale from loadfence — the box's I/O-pilot multiple times its
+// load contention, clamped so a host can only ever LOOSEN a budget — divides
+// the spec shape: 1000/scale rows, clamped to [200, 1000]. A quiet
+// reference-class host keeps the spec shape (1,000 rows — the size §7's
+// table names), and so does a host with no /proc/loadavg (load_avg 0 →
+// contention 1; a missing or failed pilot leaves the multiple at the
+// reference): the no-/proc/loadavg fallback IS the spec shape. A contended
+// or slower host gets a proportionally smaller fixture — 500 rows at load 16
+// on reference I/O, the 200 floor from scale 5 on (5× the reference I/O
+// latency, load 64 on reference I/O, or 2× I/O at load 48) — and the two
+// factors compose multiplicatively, because descheduling and slow I/O both
+// stretch the same wall the fixture has to fill.
+//
+// The floor is not arbitrary: dedup is a (sig, board) invariant, not a
+// volume claim — every class of the §7 acceptance (exactly N rows for N
+// distinct sigs, zero duplicates, the recurring sig comments without growing
+// the board) is exercised identically at 200 rows, and the assertion
+// `len(lines) != n` follows the requested n either way, so no assertion is
+// deleted and no threshold is relaxed. What shrinks is the volume of
+// durability work: each row write is an fsync'd append (writeRow →
+// appendLine → Sync, the §3.2 two-file durability contract) and the test is
+// I/O-bound, not CPU-bound (measured: 15.8s wall / ~11 CPU-s, 77% of one
+// core — the wall is the fixture's 2,000+ fsync'd appends), which is why the
+// gate is Profile.Scale(), the filesystem-bound factor: CPUScale would leave
+// the fixture untouched on a box whose disk is the slow half. The measured
+// values are logged either way, because the fixture size is the thing a
+// reader needs to interpret them.
+//
+// This replaces the load_avg-only ladder (load ≥ 4 → 8000/load rows), which
+// inverted the comparison: load_avg says how BUSY a box is, never how FAST.
+// QA-TROUBLE-5 measured the same commit rebuilding the same fixture in
+// 9,747 ms at load 3.99 — graded against the tight reference numbers — while
+// a busier box at load 10.78 got a 3.3× looser bar for identical work. The
+// spec shape stays the bar on a quiet reference-class host; every other host
+// is graded against its own measured speed.
+func dedupRowsForHost(prof loadfence.Profile) int {
+	n := int(float64(dedupRows) / prof.Scale())
 	if n < minDedupRows {
 		n = minDedupRows
 	}
@@ -62,15 +82,23 @@ func dedupRowsForLoad(load float64) int {
 	return n
 }
 
+// dedupRowsForLoad is the load axis alone — the same arithmetic as
+// dedupRowsForHost with the I/O multiple at the reference. It exists so
+// TestDedupRowsScaling can pin the load ladder exactly as the pre-§7a bound
+// stated it, now as a special case of the host model.
+func dedupRowsForLoad(load float64) int {
+	return dedupRowsForHost(loadfence.Profile{Load: load})
+}
+
 // dedupFixtureRows resolves the fixture size the test runs at: the
-// DEDUP_ROWS pin when valid, otherwise the load-derived default.
-func dedupFixtureRows(load float64) (int, bool) {
+// DEDUP_ROWS pin when valid, otherwise the host-calibrated default.
+func dedupFixtureRows(prof loadfence.Profile) (int, bool) {
 	if v := os.Getenv(EnvDedupRows); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			return n, true
 		}
 	}
-	return dedupRowsForLoad(load), false
+	return dedupRowsForHost(prof), false
 }
 
 func TestReviewModes(t *testing.T) {
@@ -113,14 +141,17 @@ func TestReviewModes(t *testing.T) {
 func TestDedupOneRowPerSig(t *testing.T) {
 	fx := newFixture(t, nil)
 	ctx := context.Background()
-	load := loadfence.LoadAvg1()
-	n, pinned := dedupFixtureRows(load)
-	pinNote := "auto-bounded by dedupRowsForLoad"
+	// The host profile is measured ONCE for the whole fixture (SPEC-01 §7a):
+	// the pilots' dir is the fixture's own board filesystem class, so the
+	// I/O multiple describes the disk the rows are actually fsync'd onto.
+	prof := loadfence.Measure(fx.board)
+	n, pinned := dedupFixtureRows(prof)
+	pinNote := "auto-bounded by " + prof.String()
 	if pinned {
 		pinNote = "pinned by " + EnvDedupRows
 	}
-	t.Logf("dedup fixture: %d distinct sigs against one board (%s; load_avg_1m %.2f; §7 spec shape on a quiet host is 1,000)",
-		n, pinNote, load)
+	t.Logf("dedup fixture: %d distinct sigs against one board (%s; i/o scale %.2f; §7 spec shape on a quiet reference-class host is 1,000)",
+		n, pinNote, prof.Scale())
 	for i := 0; i < n; i++ {
 		sig := "sig:" + string(rune('a'+i%26)) + "-" + itoa(i)
 		if _, err := fx.flow.File(ctx, fx.incident(), fx.row(sig)); err != nil {
@@ -167,30 +198,40 @@ func TestDedupOneRowPerSig(t *testing.T) {
 	}
 }
 
-// TestDedupRowsScaling pins the load-derived fixture bound (the TRBL-045
-// curve-pinning shape): the quiet-host spec shape (1,000 rows, the size the
-// §7 table names) is asserted directly, a contended host's fixture decays
-// with observed load, the 200-row floor keeps every §7 acceptance class (N
-// distinct sigs → exactly N rows; a recurring sig comments without growing
-// the board) exercised, the DEDUP_ROWS pin wins over the automatic bound, a
-// malformed pin does not, and at the spec wave the floor arithmetic is exact.
+// TestDedupRowsScaling pins the host-calibrated fixture bound (the TRBL-045
+// curve-pinning shape): the no-/proc/loadavg fallback and the unloaded
+// reference host both assert the §7 spec shape (1,000 rows — the size the §7
+// table names) directly, a faster-than-reference host is clamped to the
+// reference (a fixture is only ever loosened by calibration, never tightened
+// — the SPEC-01 §7a contract), the I/O and load axes decay the fixture
+// exactly (int(1000/scale) asserted at exact points), the two compose
+// multiplicatively, the 200-row floor keeps every §7 acceptance class
+// (N distinct sigs → exactly N rows; a recurring sig comments without
+// growing the board) exercised, the DEDUP_ROWS pin wins over the automatic
+// bound, a malformed pin does not, and at the spec wave the floor arithmetic
+// is exact.
 func TestDedupRowsScaling(t *testing.T) {
 	cases := []struct {
+		io   float64
 		load float64
 		want int
 	}{
-		{0, 1000},   // no /proc/loadavg → the spec shape
-		{3.9, 1000}, // quiet host: the §7 shape asserted directly
-		{4, 1000},   // 8000/4: continuous with the spec shape
-		{8, 1000},   // 8000/8 = 1000, clamped
-		{16, 500},   // 8000/16
-		{20, 400},   // 8000/20
-		{40, 200},   // 8000/40 = 200: the floor boundary
-		{120, 200},  // the clamp
+		{1, 0, 1000},   // no /proc/loadavg (load 0) on reference I/O → the spec shape
+		{1, 3.9, 804},   // int(1000/1.24375): mild contention decays continuously
+		{1, 16, 500},   // 1000/2: load alone, continuous with the spec shape
+		{0.5, 0, 1000}, // a FASTER-than-reference host is clamped to the reference — never tightened
+		{2, 0, 500},    // 1000/2: a 2× slower disk halves the fixture at zero load
+		{5, 0, 200},    // the floor boundary on the I/O axis
+		{8, 0, 200},    // the I/O clamp
+		{2, 16, 250},   // 1000/4: slow disk AND contention compose multiplicatively
+		{3, 16, 200},   // composition crossing the floor: int(1000/6) < 200
+		{8, 120, 200},  // slow and heavily contended still floors at 200
 	}
 	for _, c := range cases {
-		if got := dedupRowsForLoad(c.load); got != c.want {
-			t.Errorf("dedupRowsForLoad(%.2f) = %d, want %d", c.load, got, c.want)
+		prof := loadfence.Profile{IOMultiple: c.io, CPUMultiple: 1, Load: c.load}
+		if got := dedupRowsForHost(prof); got != c.want {
+			t.Errorf("dedupRowsForHost(io %.2f, load %.2f) = %d, want %d (scale %.4f)",
+				c.io, c.load, got, c.want, prof.Scale())
 		}
 	}
 	// The floor keeps every acceptance class exercised: at 200 rows the test
@@ -199,17 +240,28 @@ func TestDedupRowsScaling(t *testing.T) {
 	if minDedupRows < 2 {
 		t.Errorf("minDedupRows = %d: the fixture floor must leave room for the recurrence case", minDedupRows)
 	}
+	// dedupRowsForLoad is the load axis of the same model: identical
+	// arithmetic to dedupRowsForHost with the I/O multiple at the reference —
+	// asserted here so the helper cannot silently diverge from the host
+	// model.
+	for _, load := range []float64{0, 3.9, 16, 64, 120} {
+		want := dedupRowsForHost(loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: load})
+		if got := dedupRowsForLoad(load); got != want {
+			t.Errorf("dedupRowsForLoad(%.2f) = %d, want %d (the load axis must track the host model exactly)", load, got, want)
+		}
+	}
 	// The pin wins; a malformed pin does not.
+	prof := loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 0}
 	t.Setenv(EnvDedupRows, "700")
-	if n, pinned := dedupFixtureRows(0); !pinned || n != 700 {
+	if n, pinned := dedupFixtureRows(prof); !pinned || n != 700 {
 		t.Errorf("dedupFixtureRows with DEDUP_ROWS=700 = (%d, %v), want (700, true)", n, pinned)
 	}
 	t.Setenv(EnvDedupRows, "nope")
-	if n, pinned := dedupFixtureRows(0); pinned || n != dedupRows {
+	if n, pinned := dedupFixtureRows(prof); pinned || n != dedupRows {
 		t.Errorf("dedupFixtureRows with a malformed pin = (%d, %v), want the default (false)", n, pinned)
 	}
 	t.Setenv(EnvDedupRows, "")
-	if n, pinned := dedupFixtureRows(0); pinned || n != dedupRows {
+	if n, pinned := dedupFixtureRows(prof); pinned || n != dedupRows {
 		t.Errorf("dedupFixtureRows unset = (%d, %v), want (%d, false)", n, pinned, dedupRows)
 	}
 }

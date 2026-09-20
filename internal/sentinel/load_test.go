@@ -29,11 +29,17 @@ import (
 // Load-test parameters of SPEC-04 §7.
 const (
 	loadWorkers = 8
-	// loadPipeline is how many requests each worker keeps in flight. A fully
-	// synchronous 8-worker loop cannot exceed 8/(fsync window) requests per
-	// second, so measuring what group commit buys requires in-flight requests —
-	// §7's own reference numbers were measured with the same shape (the SPEC-02
-	// harness used 128 in flight).
+	// minLoadPipeline is the floor of the auto-bounded in-flight wave: even a
+	// crushed host runs the measurement at 8 × 8 in flight, which still fills
+	// the ledger's 100-record group-commit batch (see loadPipelineForLoad).
+	minLoadPipeline = 8
+	// loadPipeline is how many requests each worker keeps in flight on a quiet
+	// host. A fully synchronous 8-worker loop cannot exceed 8/(fsync window)
+	// requests per second, so measuring what group commit buys requires
+	// in-flight requests — §7's own reference numbers were measured with the
+	// same shape (the SPEC-02 harness used 128 in flight). On a contended host
+	// the default wave decays with observed load (loadPipelineForLoad) so the
+	// measurement bounds its own impact; LOAD_PIPELINE pins the shape.
 	loadPipeline      = 32
 	loadDuration      = 60 * time.Second
 	loadDurationShort = 5 * time.Second
@@ -130,6 +136,69 @@ func loadFloorFor(load float64) float64 {
 	return floor
 }
 
+// loadPipelineForLoad bounds the in-flight wave the default measurement
+// sustains: each worker holds 96/load requests in flight, clamped to
+// [8, loadPipeline]. A quiet host (< 4) keeps the spec shape (8 × 32 = 256 in
+// flight, the shape §7's reference numbers were measured under); a contended
+// host gets a proportionally smaller wave — at load 4 it is 8 × 24 = 192 in
+// flight, at load 8 it is 8 × 12 = 96, and from load 12 on it is floored at
+// 8 × 8 = 64. The floor is not arbitrary: 64 in-flight requests still let the
+// ledger's writer batch tens of records per 5ms group-commit window (~50x the
+// un-grouped fsync-per-line rate of ~130 rec/s), so the group-commit claim
+// this test exists to prove is measured at every load. Without this bound the
+// fixed 256-in-flight wave keeps ~8 cores pegged for the whole window on a
+// busy box (measured: 490 CPU-seconds over a 64s wall at load ~33, and still
+// ~530 CPU-s at load ~12 — more self-inflicted load than every other
+// package's suite combined), which is exactly the load-hygiene failure
+// TRBL-045 exists to bound: the harness must not become the host's biggest
+// offender while it measures the daemon. The served-request counts shrink
+// with the wave; every assertion (floors, latency budgets, RSS bounds, exact
+// event accounting) reads the same measured values as before and is untouched.
+// loadWindowForLoad bounds the window (and with it the total CPU energy) the
+// same way — the measurement is demand-driven, so on a quiet-ish host a wave
+// bound alone cannot cap how much it burns (see that function).
+func loadPipelineForLoad(load float64) int {
+	if load < 4 {
+		return loadPipeline
+	}
+	p := int(96.0 / load)
+	if p < minLoadPipeline {
+		p = minLoadPipeline
+	}
+	if p > loadPipeline {
+		p = loadPipeline
+	}
+	return p
+}
+
+// loadWindowForLoad bounds the wall time (hence the total CPU energy) the
+// default measurement burns on a contended host: the §7 window scales as
+// 240/load seconds, floored at 10s. A quiet host (< 4) keeps the full 60s
+// spec window; a busy host gets a shorter one — 30s at load 8, 20s at load
+// 12, 15s at load 16, the 10s floor from load 24 on. The floor keeps the
+// measurement statistically sound at the loaded-host throughput floors: 10s
+// at the 450 req/s clamp floor is 4,500 samples — far more than the p999
+// percentile needs and ~90 group-commit cycles. Without this bound the fixed
+// 60s window burns the server's whole available capacity for a full minute
+// no matter how busy the host is (measured: ~550 CPU-seconds at load ~8,
+// ~490 at load ~33 — the measurement is demand-driven, so a wave bound alone
+// cannot cap its energy on a quiet-ish host), which is the load-hygiene
+// failure TRBL-045 exists to bound. LOAD_DURATION_S pins the window
+// explicitly for a spec-shape re-measurement.
+func loadWindowForLoad(load float64) int {
+	if load < 4 {
+		return int(loadDuration / time.Second)
+	}
+	w := int(240.0 / load)
+	if w < 10 {
+		w = 10
+	}
+	if w > int(loadDuration/time.Second) {
+		w = int(loadDuration / time.Second)
+	}
+	return w
+}
+
 // hostLatencyBudgetFor scales a quiet-host latency budget (the p99/p999 host
 // budgets of §7) with the load the measurement runs under: the same scheduler
 // queueing that collapses throughput also inflates the p99 tail (SPEC-06a:
@@ -208,14 +277,72 @@ func TestLoadGateScaling(t *testing.T) {
 			t.Errorf("hostLatencyBudgetFor(p99, %.1f) admits a 5s stall", load)
 		}
 	}
+	// The in-flight wave bound (loadPipelineForLoad) pins load hygiene: the
+	// quiet-host spec shape is preserved, a contended host's wave decays with
+	// observed load, and the floor keeps 64 requests in flight — deep enough
+	// to batch tens of records per group-commit window (~50x the un-grouped
+	// fsync-per-line rate) — so the group-commit claim the load test exists to
+	// prove is measured at every load, while the harness no longer pegs ~8
+	// cores for its whole window on a busy box (TRBL-045: the fixed 8 × 32
+	// wave measured 490 CPU-seconds over a 64s wall at load ~33, and still
+	// ~530 CPU-s at load ~12).
+	pipelineCases := []struct {
+		load float64
+		want int
+	}{
+		{0, 32},   // no /proc/loadavg → the quiet-host spec shape
+		{3.9, 32}, // quiet host: §7's shape asserted directly
+		{4, 24},   // 96/4: the wave starts decaying right past the fence
+		{6, 16},   // 96/6
+		{8, 12},   // 96/8
+		{12, 8},   // 96/12 = 8: the floor boundary
+		{31, 8},   // the clamp
+	}
+	for _, c := range pipelineCases {
+		if got := loadPipelineForLoad(c.load); got != c.want {
+			t.Errorf("loadPipelineForLoad(%.2f) = %d, want %d", c.load, got, c.want)
+		}
+	}
+	// The window bound (loadWindowForLoad) caps the measurement's total energy:
+	// the quiet-host 60s spec window is kept, a contended host's window scales
+	// down, and the 10s floor keeps thousands of samples plus ~90 group-commit
+	// cycles at the loaded-host floors — the proof is not traded away.
+	windowCases := []struct {
+		load float64
+		want int
+	}{
+		{0, 60},   // no /proc/loadavg → the §7 window
+		{3.9, 60}, // quiet host: §7's window asserted directly
+		{4, 60},   // 240/4 = 60: continuous with the spec window
+		{8, 30},   // 240/8
+		{12, 20},  // 240/12
+		{16, 15},  // 240/16 (SPEC-06a's load point)
+		{24, 10},  // 240/24 = 10: the floor boundary
+		{80, 10},  // the clamp
+	}
+	for _, c := range windowCases {
+		if got := loadWindowForLoad(c.load); got != c.want {
+			t.Errorf("loadWindowForLoad(%.2f) = %d, want %d", c.load, got, c.want)
+		}
+	}
+	// The measurement bar: the bounded wave must keep batching real — the
+	// 12.38 floor keeps ≥ 64 requests in flight (≈ half the 100-record batch
+	// per 5ms group-commit window), far above the un-grouped fsync-per-line
+	// request rate (~130 rec/s) the throughput floor must stay able to fail.
+	if loadPipelineForLoad(80) < 8 {
+		t.Errorf("loadPipelineForLoad floors below 8 in flight per worker")
+	}
 }
 
 // TestLoadIngestThroughput is §7's load test: 8 workers posting gzip'd 4KB
 // envelopes for 60s (5s with -short) against the real ledger, asserting the
 // 2,000 req/s sustained target, the p99/p999 latency budgets, zero 5xx and
 // bounded RSS growth. The measured numbers are logged either way, because the
-// spec's reference point (6,199 req/s with a 100-line group commit) is the thing
-// that proves group commit is actually in use.
+// spec's reference point (6,199 req/s with a 100-line group commit) is the
+// thing that proves group commit is actually in use. On a contended host the
+// default in-flight wave is auto-bounded (loadPipelineForLoad) so the harness
+// does not become the host's biggest load source while it measures the daemon;
+// LOAD_PIPELINE pins the shape explicitly for a spec-shape re-measurement.
 func TestLoadIngestThroughput(t *testing.T) {
 	if raceEnabled {
 		// Race instrumentation makes throughput and RSS meaningless: the §7 numbers
@@ -225,6 +352,19 @@ func TestLoadIngestThroughput(t *testing.T) {
 	}
 	dur := time.Duration(loadEnvInt("LOAD_DURATION_S", int(loadDuration/time.Second))) * time.Second
 	pipeline := loadEnvInt("LOAD_PIPELINE", loadPipeline)
+	// Without explicit env pins both the in-flight wave and the window decay
+	// with the host's observed load (loadPipelineForLoad, loadWindowForLoad):
+	// the quiet-host spec shape is kept exactly, a contended host runs a
+	// smaller wave for a shorter window, and the floors stay deep enough to
+	// fill the ledger's group-commit batch and gather ~90 commit cycles —
+	// the bound is on the harness's own energy, never on what it can prove.
+	loadAtStart := loadAvg1()
+	if !explicitLoadEnv("LOAD_PIPELINE") {
+		pipeline = loadPipelineForLoad(loadAtStart)
+	}
+	if !explicitLoadEnv("LOAD_DURATION_S") {
+		dur = time.Duration(loadWindowForLoad(loadAtStart)) * time.Second
+	}
 	if testing.Short() {
 		// The `-short` run is a smoke check, not the measurement: it keeps the
 		// same path but a single request in flight per worker, so a parallel
@@ -394,6 +534,8 @@ func TestLoadIngestThroughput(t *testing.T) {
 	t.Logf("load: %d requests in %s = %.0f req/s (mean %s, p50 %s, p99 %s, p999 %s); ref %.0f req/s",
 		n, elapsed.Round(time.Millisecond), reqS, mean.Round(time.Microsecond), p50.Round(time.Microsecond),
 		p99.Round(time.Microsecond), p999.Round(time.Microsecond), loadReferenceReqS)
+	t.Logf("load: wave = %d workers x %d in flight for %s (load_avg_1m at start %.2f; LOAD_PIPELINE/LOAD_DURATION_S unset -> auto-bounded by loadPipelineForLoad/loadWindowForLoad)",
+		loadWorkers, pipeline, dur, loadAtStart)
 	t.Logf("load: 5xx=%d non-200=%d; RSS %d -> %d bytes (growth %d, bound %d)",
 		bad, fails, rssBefore, rssPeak, rssPeak-rssBefore, loadRSSGrowthBound)
 
@@ -549,6 +691,18 @@ func loadEnvInt(name string, def int) int {
 		}
 	}
 	return def
+}
+
+// explicitLoadEnv reports whether the caller pinned an env knob (a positive
+// integer). The auto-bounded default wave yields to an explicit override:
+// re-measuring the spec shape on any host stays a one-env-var job.
+func explicitLoadEnv(name string) bool {
+	v := os.Getenv(name)
+	if v == "" {
+		return false
+	}
+	n, err := strconv.Atoi(v)
+	return err == nil && n > 0
 }
 
 // loadEnvelope builds a gzip-friendly ~4KB SDK envelope (24 frames plus a 2KB

@@ -463,6 +463,7 @@ func TestLoadIngestThroughput(t *testing.T) {
 	// run window's own runqueue wait (schedstat, this process only) widens
 	// the floor's allowance looser-only, capped at 2x (see internal/loadfence).
 	waitBefore := loadfence.SuiteWaitSamples()
+	tasksBefore := loadfence.SuiteTaskCount()
 	start := time.Now()
 	for w := 0; w < loadWorkers; w++ {
 		for p := 0; p < pipeline; p++ {
@@ -523,9 +524,18 @@ func TestLoadIngestThroughput(t *testing.T) {
 	elapsed := time.Since(start)
 	// Close the contention window over exactly the measured run.
 	waitAfter := loadfence.SuiteWaitSamples()
+	tasksAfter := loadfence.SuiteTaskCount()
 	suiteWaitFrac := 0.0
-	if elapsed > 0 && waitAfter >= waitBefore {
-		suiteWaitFrac = float64(waitAfter-waitBefore) / float64(elapsed)
+	// SuiteWaitSamples SUMS wait nanoseconds across every task thread of the
+	// process, so over this window (loadWorkers*loadPipeline concurrent
+	// goroutines) the raw sum legitimately exceeds wall time and a plain
+	// sum/elapsed quotient reads ~6 - a value SuiteContention must discard as
+	// junk (it is right to), which silently denied this gate the allowance its
+	// log line implied. Normalise by the mean thread count so the reading is
+	// the per-thread deschedule FRACTION the term is defined on.
+	threads := float64(tasksBefore+tasksAfter) / 2.0
+	if elapsed > 0 && waitAfter >= waitBefore && threads >= 1 {
+		suiteWaitFrac = float64(waitAfter-waitBefore) / (float64(elapsed) * threads)
 	}
 
 	mu.Lock()
@@ -639,12 +649,23 @@ func TestLoadIngestThroughput(t *testing.T) {
 	// suite-wait (looser-only, capped x2 via SuiteContention). A floor that
 	// is a RATE divides by the factor: the loadFloorFor curve still prices
 	// the system regime, this term prices the suite pressure the curve
-	// cannot see, and the 450 req/s sanity floor still bounds the result.
+	// cannot see.
+	//
+	// TRBL-058: the 450 req/s sanity clamp lives INSIDE loadFloorFor, on the
+	// un-widened curve. Re-clamping here AFTER dividing would cancel the
+	// allowance exactly when it is earned — measured: widened 520/1.60 = 325
+	// was clamped straight back to 450, so a stormed run at 426/353 req/s
+	// still failed while the term reported it had applied a widening. The
+	// allowance must be able to take the floor below the clamp; the clamp
+	// bounds the curve, not the corrected floor. (ledger's gate already
+	// multiplies without re-clamping; this matches it.)
 	if sf, active := loadfence.SuiteContention(suiteWaitFrac); active {
 		floor = floor / sf
-		if floor < 450.0 {
-			floor = 450.0
-		}
+	} else if suiteWaitFrac > 1 {
+		// The measurement is beyond what the term can price. The old wiring could
+		// produce this silently (see the task-count normalisation above); if it
+		// ever happens again, say so instead of quietly running unwidened.
+		t.Logf("load: suite-wait %.3f is beyond the term's range (>1) — allowance NOT applied; the term is blind here, inspect the wiring", suiteWaitFrac)
 	}
 	if reqS < loadTargetReqS {
 		t.Logf("throughput %.0f req/s is under §7's %.0f req/s target (host load dependent; 4,100-4,500 req/s is typical on an idle host; load_avg_1m %.2f)", reqS, loadTargetReqS, load)

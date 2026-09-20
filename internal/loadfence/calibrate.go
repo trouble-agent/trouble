@@ -314,6 +314,19 @@ func SuiteWaitSamples() uint64 {
 	return total
 }
 
+// SuiteTaskCount reports how many task threads the process currently has. It
+// exists because SuiteWaitSamples SUMS wait across threads: a gate measuring a
+// high-concurrency window (a load test running 64 goroutines) must normalise by
+// the thread count or its quotient exceeds wall time and reads as junk. Returns
+// 1 when schedstat is unreadable so a caller's division stays well-defined.
+func SuiteTaskCount() int {
+	entries, err := os.ReadDir(SuiteSchedStatPath)
+	if err != nil || len(entries) == 0 {
+		return 1
+	}
+	return len(entries)
+}
+
 // SuiteContention converts a measured wait FRACTION (runqueue wait / wall time
 // over the gate's own window) into the multiplicative allowance the budget
 // takes. The fraction is clamped to [0, SuiteWaitCap], so the term lies in

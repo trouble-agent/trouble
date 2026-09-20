@@ -1128,6 +1128,31 @@ calibration. Rules the tests follow:
    runs on the same filesystem the measured run uses, so disk contention inflates the pilot the
    same way it inflates the run, while the contention half still covers a descheduled box; a
    per-line collapse (the measured 512 rec/s) fails every floor the model can produce).
+5. `TestScrubBudget` + `TestIngestHarnessThroughput` (SPEC-02/SPEC-04 §3.9, internal/scrub): the µs gates'
+   **fixed 4× documented deviation factor** — plus its load ladder (`load ≥ 4 → 4 × (1 + load/16)`, clamped
+   8×) — is the same inversion in miniature: the ladder under-allowed a quiet slower box and over-allowed a
+   busy fast one, and the fixed 4× graded every host identically. The deviation ceiling is now
+   **`4 × CPUScale()`**, measured once per test via `Measure("")` (the §3.9 gates are in-memory compute, so
+   no I/O pilot); the 8× clamp is removed with the ladder, because clamping a host whose pilots measure
+   3× slower to 8× would hold reference-class code to a slower box's number again — the fast-path-removal
+   signal is an order-of-magnitude shift and stays fatal on every host. The ingest harness's quiet-host
+   fence moves from `load_avg < 4` to the **measured scale ≤ 1.0** (`scrubFence`), and there the
+   5,000 req/s §3.9 floor is asserted EXACT — the quiet branch IS the reference class, so scaling it would
+   weaken the spec number. The loaded branch's 4,000 req/s bar **divides by the measured scale**
+   (`4000 / clampedMin1(scale)`, divisor floored at 1): a RATE scales down with the host's measured
+   slowdown, the item-1 direction. The ≤ 20 % cost bound is a same-process ratio of two runs and stays
+   unscaled (the host's speed cancels); the loaded floor still tracks the same-wave no-scrub baseline and
+   the 1,500 sanity floor stays fixed. The loaded baseline comparison itself was also made noise-proof
+   (measured live on 2026-09-19 at load 20.6: the old `floor = without` cap compared best-of-3 with-scrub
+   against ONE baseline draw — 1,588 vs 1,667 req/s at a measured 4.7% scrub cost — and failed on
+   sampling noise whenever a crushed host pushed both sides under the 4,000 bar): the no-scrub baseline
+   is now best of the SAME count as the with-side, and the baseline cap is `0.8 × without` — the §3.9
+   ≤ 20 % cost contract applied to the baseline, so best-of-runs with-scrub must land within the
+   documented cost of best-of-runs without it, never beat a zero-cost bar. Where the 4,000 bar still
+   means something (`without ≥ 5,000`), `min(4000/scale, 0.8 × without)` = `4000/scale` and nothing is
+   relaxed. `harnessWaveForLoad`'s `{0,128}` no-loadavg row is unchanged and is
+   proven reachable through `TROUBLE_HOST_LOAD_OVERRIDE=0` → `Measure().Load == 0` (the no-loadavg host
+   keeps the spec wave shape).
 
 No §7 number is relaxed: a reference-class host meets every original figure, and every scaled assertion
 still fails on a genuine multi-x regression regardless of which host it lands on.

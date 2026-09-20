@@ -2,12 +2,11 @@ package scrub
 
 import (
 	"context"
-	"os"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -144,30 +143,37 @@ func TestScrubBudget(t *testing.T) {
 	// per-KiB targets): under full-suite parallel load the µs-scale loop
 	// measurements absorb the host's scheduling delay, and the same code that
 	// stays inside 4x quiet measured 4.4x (264µs vs 60µs) at load_avg_1m ~19.
-	// On a busy host the deviation allowance scales — 4 × (1 + load/16),
-	// clamped to 8x — so the gate still bites: 8x is half of the order-of-
-	// magnitude shift a fast-path removal causes, and a quiet host still
-	// asserts the documented 4x directly.
-	load := loadAvg1()
-	ceiling := 4.0 // documented deviation factor for the §3.9 per-KiB targets
-	if load >= 4 {
-		ceiling = 4 * (1 + load/16)
-		if ceiling > 8 {
-			ceiling = 8
-		}
-	}
+	// A FIXED 4x graded every host identically — the QA-TROUBLE-5 inversion:
+	// load_avg says how busy a box is, never how fast, so the old ladder
+	// (load ≥ 4 → 4 × (1 + load/16), clamped to 8x) under-allowed a quiet
+	// slower box and over-allowed a busy fast one. The ceiling now follows the
+	// host's own measured CPU cost and load: 4 × CPUScale(), measured ONCE per
+	// test process (SPEC-01 §7a; the §3.9 gates are pure in-memory compute, so
+	// Measure("") runs only the CPU and load halves — no I/O pilot). On a
+	// quiet reference-class host the scale is 1 and the documented 4x is
+	// asserted exactly as before. The 8x clamp is gone with the ladder: it
+	// defended against load being the only signal, and clamping a host whose
+	// pilots measure 3x slower to 8x would hold reference-class code to a
+	// slower box's number again. The gate still bites on every host — a
+	// fast-path removal is the order-of-magnitude shift, and the bar moves
+	// with the box, not with the bug. TROUBLE_HOST_CALIB pins the scale for
+	// falsification, the same knob the ledger gates take.
+	prof := loadfence.Measure("")
+	cpuScale := prof.CPUScale()
+	load := prof.Load
+	ceiling := 4.0 * cpuScale // documented 4x deviation factor x the host's measured CPU cost
 	report := func(name string, budget time.Duration, measured time.Duration) {
 		t.Helper()
 		if measured > time.Duration(ceiling*float64(budget)) {
-			t.Errorf("%s = %s, more than %.1fx the §3.9 budget of %s (load_avg_1m %.2f; the documented deviation factor is 4x on a quiet host)", name, measured, ceiling, budget, load)
+			t.Errorf("%s = %s, more than %.1fx the §3.9 budget of %s (cpu-scale %.2f, load_avg_1m %.2f; the documented deviation factor is 4x on a quiet reference-class host)", name, measured, ceiling, budget, cpuScale, load)
 			return
 		}
 		if measured > budget {
-			t.Logf("NOTE %s = %s vs §3.9 budget %s (%.1fx, load_avg_1m %.2f)",
-				name, measured, budget, float64(measured)/float64(budget), load)
+			t.Logf("NOTE %s = %s vs §3.9 budget %s (%.1fx, cpu-scale %.2f, load_avg_1m %.2f)",
+				name, measured, budget, float64(measured)/float64(budget), cpuScale, load)
 			return
 		}
-		t.Logf("%s = %s (budget %s)", name, measured, budget)
+		t.Logf("%s = %s (budget %s, cpu-scale %.2f)", name, measured, budget, cpuScale)
 	}
 
 	measure := func(n int, f func()) time.Duration {
@@ -221,19 +227,6 @@ func TestScrubBudget(t *testing.T) {
 	}
 }
 
-// loadAvg1 reads the 1-minute load average (Linux); 0 when unavailable.
-func loadAvg1() float64 {
-	b, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return 0
-	}
-	fields := strings.Fields(string(b))
-	if len(fields) == 0 {
-		return 0
-	}
-	v, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
-		return 0
-	}
-	return v
-}
+// loadAvg1 was the file's only host signal until SPEC-01 §7a (TRBL-052); the
+// measured Profile (loadfence.Measure) replaced it, and loadfence.LoadAvg1 is
+// the shared implementation of the same read.

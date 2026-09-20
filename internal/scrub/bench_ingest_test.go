@@ -29,8 +29,10 @@ const (
 	// 5 ms group-commit window (see harnessWaveForLoad).
 	minHarnessWorkers = 32
 	// harnessWithRuns is the number of with-scrub attempts on a quiet host —
-	// best of three — plus the one no-scrub baseline run the cost ratio needs
-	// (the v0.1 red baseline was measured under the same 3+1 shape).
+	// best of three — and, since TRBL-052, the same count for the no-scrub
+	// baseline runs (best of best), so the loaded baseline comparison reads
+	// the same-statistic on both sides; the v0.1 red baseline was measured
+	// under the same best-of-three shape.
 	harnessWithRuns = 3
 )
 
@@ -68,9 +70,9 @@ func envPositiveInt(name string) (int, bool) {
 // floor is not arbitrary: 32 workers × 100 appends keep multiple requests in
 // flight per 5 ms group-commit window, so the batched-write claim the
 // throughput floor stands on is measured at every wave — and because the
-// loaded floor tracks the SAME-wave no-scrub baseline (min(4000, without)),
-// the regression bar reads two waves of the same size and stays meaningful as
-// the wave shrinks. Every assertion (the processed-equals-requested count, the
+// loaded floor tracks the SAME-wave no-scrub baseline (min(4000/scale,
+// 0.8x without)), the regression bar reads two waves of the same size and
+// stays meaningful as the wave shrinks. Every assertion (the processed-equals-requested count, the
 // quiet-host §3.9 floors and ≤20% cost, the loaded baseline floor and the
 // re-denominated sanity bar) is untouched. SCRUB_HARNESS_WORKERS pins the wave
 // explicitly for a spec-shape re-measurement.
@@ -109,7 +111,7 @@ func TestHarnessWaveScaling(t *testing.T) {
 		load float64
 		want int
 	}{
-		{0, 128},   // no /proc/loadavg → the spec shape
+		{0, 128},   // no /proc/loadavg → the spec shape (reachable below: TROUBLE_HOST_LOAD_OVERRIDE=0)
 		{3.9, 128}, // quiet host: the §7 shape asserted directly
 		{4, 128},   // 512/4 = 128: the shape is continuous at the fence
 		{5, 102},   // 512/5
@@ -123,6 +125,29 @@ func TestHarnessWaveScaling(t *testing.T) {
 		if got := harnessWaveForLoad(c.load); got != c.want {
 			t.Errorf("harnessWaveForLoad(%.2f) = %d, want %d", c.load, got, c.want)
 		}
+	}
+	// The no-loadavg host term is still reachable end-to-end (SPEC-01 §7a:
+	// the spec shape stays assertable on a host with no /proc/loadavg):
+	// TROUBLE_HOST_LOAD_OVERRIDE=0 drives loadfence.Measure's own load read
+	// (the same path the gates consume) to the {0,128} row, with the
+	// contention factor at the spec 1.0 alongside it. The load override pins
+	// only the load half — the CPU pilot still runs and is irrelevant here —
+	// so what this asserts is the shape, not the box.
+	t.Setenv(loadfence.EnvLoadOverride, "0")
+	quietProf := loadfence.Measure("")
+	if quietProf.Load != 0 || quietProf.Contention() != 1 {
+		t.Errorf("Measure under a zero load override: Load = %.2f, Contention = %.2f, want 0/1 (the no-loadavg shape)",
+			quietProf.Load, quietProf.Contention())
+	}
+	if got := harnessWaveForLoad(quietProf.Load); got != 128 {
+		t.Errorf("harnessWaveForLoad(measured Load %.2f) = %d, want 128 (the no-loadavg spec shape)", quietProf.Load, got)
+	}
+	// ...and the wave still decays off the MEASURED load: an override of 8
+	// must produce the 512/8 = 64 shape through the same live path.
+	t.Setenv(loadfence.EnvLoadOverride, "8")
+	busyProf := loadfence.Measure("")
+	if got := harnessWaveForLoad(busyProf.Load); got != 64 {
+		t.Errorf("harnessWaveForLoad(overridden Load %.2f) = %d, want 64 (the 512/8 decay through Measure)", busyProf.Load, got)
 	}
 	// The attempt count is the spec shape and is NOT load-scaled: the loaded
 	// 4000 floor only holds with the full best-of-three (best-of-1 measured
@@ -182,6 +207,22 @@ func TestIngestHarnessThroughput(t *testing.T) {
 		t.Fatalf("the harness body is %d bytes, want a representative ~1 KiB envelope", len(body))
 	}
 
+	// calibration (SPEC-01 §7a, QA-TROUBLE-5): the same Profile the §3.9 µs
+	// gates consume, measured ONCE per test, BEFORE any harness run — the run
+	// bodies below size their wave and the floors below grade both against
+	// this one profile. The §3.9 floor numbers are reference-host figures; a
+	// box the CPU pilot measures 1.4x slower gets a 1.4x looser floor
+	// (5000/1.4 ≈ 3571), exactly the §3.6 budget/floor agreement ledger item
+	// 1 encodes — a TIME scales up by the host factor, a RATE scales down by
+	// it. load_avg still participates through the scale's contention half, so
+	// a loaded host is no longer graded by load alone: the quiet-vs-busy
+	// fence keys on the MEASURED scale (1.0 = the reference class), not on
+	// raw load, and the TROUBLE_HOST_LOAD_OVERRIDE / TROUBLE_HOST_CALIB knobs
+	// compose into it the same way they do for the ledger gates.
+	prof := loadfence.Measure("")
+	cpuScale := prof.CPUScale()
+	load := prof.Load
+
 	run := func(t *testing.T, withScrub bool) float64 {
 		state := mustMkdirTemp(t, ".scrub-ingest-")
 		eng := newTestEngine(t, "")
@@ -210,7 +251,7 @@ func TestIngestHarnessThroughput(t *testing.T) {
 			t.Fatalf("ledger.Open: %v", err)
 		}
 
-		workers := harnessWaveForLoad(loadAvgExt())
+		workers := harnessWaveForLoad(load) // the shared profile measured before any run
 		const perWorker = harnessPerWorker
 		var ok atomic.Int64
 		ctx := context.Background()
@@ -280,10 +321,15 @@ func TestIngestHarnessThroughput(t *testing.T) {
 	//   - the with-scrub number is best of three — the run the host disturbed
 	//   least — at every load, because the loaded floor's noise defence rests
 	//   on it (best-of-1 measured 3,858 req/s at load 9 and tripped the 4000
-	//   floor);
+	//   floor); the no-scrub baseline is best of the SAME count (TRBL-052),
+	//   so the loaded comparison is best-vs-best, never one draw against
+	//   three (the old floor=without cap demanded a zero-cost scrubber
+	//   whenever a crushed host dropped both sides under the bar — measured
+	//   1,588 vs 1,667 req/s at 4.7% real cost, a noise flip, not a
+	//   regression);
 	//   - the loaded floor tracks the same-test no-scrub baseline: the whole
-	//   host slows both paths together, so min(4000, without) stays a
-	//   regression bar (the v0.1 red baseline measured 4.0-4.4k under exactly
+	//   host slows both paths together, so min(4000/scale, 0.8x without)
+	//   stays a regression bar (the v0.1 red baseline measured 4.0-4.4k under exactly
 	//   this condition, with `without` far above it) without flaking when the
 	//   fleet crushes every core. 1500 is the sanity floor: below it the
 	//   scrubber dominates even a crushed host, which is a real regression.
@@ -296,7 +342,6 @@ func TestIngestHarnessThroughput(t *testing.T) {
 	// count stays the §7 best-of-three at every load — it is the noise defence
 	// the loaded 4000 floor rests on, not a load lever — and SCRUB_HARNESS_RUNS
 	// pins it for a cheaper or fuller re-measurement.
-	load := loadAvgExt()
 	workers, workersPinned := envPositiveInt(EnvHarnessWorkers)
 	if !workersPinned {
 		workers = harnessWaveForLoad(load)
@@ -320,8 +365,9 @@ func TestIngestHarnessThroughput(t *testing.T) {
 		if with > bestWith {
 			bestWith = with
 		}
-		if attempt == 0 {
-			without = run(t, false)
+		b := run(t, false)
+		if b > without {
+			without = b
 		}
 	}
 	cost := (1 - bestWith/without) * 100
@@ -329,15 +375,15 @@ func TestIngestHarnessThroughput(t *testing.T) {
 	if workersPinned || runsPinned {
 		pinNote = "pinned by " + EnvHarnessWorkers + "/" + EnvHarnessRuns
 	}
-	t.Logf("ingestion harness: %d workers, best of %d %.0f req/s with the scrubber, %.0f req/s without it "+
-		"(cost %.1f%%, load_avg_1m %.2f; %s)",
-		workers, runs, bestWith, without, cost, load, pinNote)
+	t.Logf("ingestion harness: %d workers, best of %d %.0f req/s with the scrubber, best of %d %.0f req/s without it "+
+		"(cost %.1f%%, load_avg_1m %.2f, cpu-scale %.2f, %s; %s)",
+		workers, runs, bestWith, runs, without, cost, load, cpuScale, prof, pinNote)
 	if _, err := scrub.New(nil, testProjects()); err != nil {
 		t.Fatal(err)
 	}
-	if load < 4 && !workersPinned && !runsPinned {
-		// quiet host, spec shape: the SPEC-04 §3.9 numbers are directly
-		// assertable
+	if scrubFence(cpuScale) && !workersPinned && !runsPinned {
+		// quiet reference-class host (measured scale 1.0), spec shape: the
+		// SPEC-04 §3.9 numbers are directly assertable
 		if bestWith < 5000 {
 			t.Errorf("ingestion floor: best of %d %.0f req/s with the scrubber in the path, want >= 5000 "+
 				"(load_avg_1m=%.2f; SPEC-04 §3.9)", runs, bestWith, load)
@@ -349,27 +395,68 @@ func TestIngestHarnessThroughput(t *testing.T) {
 		}
 		return
 	}
-	floor := 4000.0 // shared host: still catches the v0.1 red 4.0-4.4k baseline
-	if without < floor {
-		floor = without // the host, not the scrubber, is the bottleneck here
+	// Shared host (or a pinned shape): the loaded floor's host term. The bar is
+	// a RATE, so it DIVIDES by the measured scale — a box the pilot measures
+	// 1.5x slower than the reference class deserves a two-thirds floor for
+	// identical work, the same direction §7a item 1 gives the ledger's
+	// scan-rate floor (60 / Scale()). clampedMin1 keeps a faster host honest
+	// (a pilot-measured 0.7x does not tighten the 4000 bar) and keeps the
+	// divisor away from 0 even if a pinned TROUBLE_HOST_CALIB of 0.01 slips
+	// through. The baseline cap is 0.8 x without — the §3.9 ≤20% cost
+	// contract applied to the baseline comparison, symmetrical with the
+	// quiet branch: best-of-runs with-scrub only has to land within the
+	// documented cost of best-of-runs without it. (The previous cap —
+	// floor = without, a single baseline draw against the with-side's
+	// best-of-three — demanded a zero-cost scrubber whenever a crushed host
+	// pushed throughput under the 4000 bar; that gate flipped on sampling
+	// noise, measured 1,588-with vs 1,667-without at 4.7% real cost on
+	// 2026-09-19, and is the flake class this change exists to close.)
+	floor := 4000.0 / clampedMin1(cpuScale) // shared host: still catches the v0.1 red 4.0-4.4k baseline
+	if baselineCap := 0.8 * without; baselineCap < floor {
+		floor = baselineCap
 	}
 	if floor < float64(sanityFloor) {
 		floor = float64(sanityFloor)
 	}
 	if bestWith < floor {
 		t.Errorf("ingestion floor: best of %d %.0f req/s with the scrubber in the path, want >= %.0f "+
-			"(load_avg_1m=%.2f, no-scrub baseline %.0f; the SPEC-04 §3.9 floor is 5,000 on a quiet host "+
+			"(load_avg_1m=%.2f, no-scrub baseline best of %d %.0f req/s; the SPEC-04 §3.9 floor is 5,000 on a quiet host "+
 			"and the v0.1 baseline before the per-field gates measured 4,000-4,400 under load)",
-			runs, bestWith, floor, load, without)
+			runs, bestWith, floor, load, runs, without)
 	} else if cost > 20 {
 		t.Logf("NOTE: measured cost is %.1f%% of this harness at load_avg_1m %.2f; the ratio of two "+
 			"loaded runs is noise-dominated and the §3.9 ≤20%% bound is asserted on quiet hosts", cost, load)
 	}
 }
 
-// loadAvgExt reads the 1-minute load average (Linux); 0 when unavailable,
-// and the TROUBLE_HOST_LOAD_OVERRIDE value when a valid one is set — the same
-// loadfence.LoadAvg1 the ledger gates read, so CI can falsify the
-// load-derived bounds without manufacturing host load. (In-package twin of
-// bench_test.go's loadAvg1: this file is package scrub_test.)
-func loadAvgExt() float64 { return loadfence.LoadAvg1() }
+// loadAvgExt was this file's host signal until SPEC-01 §7a (TRBL-052): the
+// measured Profile (loadfence.Measure) replaced it — load_avg alone is the
+// busy-vs-fast inversion §7a exists to close — and loadfence.LoadAvg1 remains
+// the shared implementation of the same read, consumed through the profile's
+// load half.
+//
+// The two helpers below are §7a's classification idioms, kept scrub-local
+// (loadfence exports Scale/CPUScale/Contention; the classification lived in
+// each consumer so far). They mirror the QA-TROUBLE-5 ledger gates so a
+// reader can diff the two packages' fencing line for line.
+
+// scrubFence reports whether a measured scale is the reference class — the
+// condition under which the spec numbers are asserted directly. The fence
+// sits at 1 because the multiples are best-of-N lower bounds measured on the
+// same run they grade: a host even slightly slower than the reference class
+// reads 1.0x and must take the scaled branch. It compares the SCALE (not the
+// raw multiple) so the load-derived contention participates exactly as it
+// does in the budgets themselves.
+func scrubFence(scale float64) bool { return scale <= 1.0 }
+
+// clampedMin1 bounds a scale used as a DIVISOR for the rate floors: a faster
+// host (multiple below the reference) must not tighten the floor, so the
+// divisor never drops below 1 — the same loosening-only rule loadfence's
+// clamp1 encodes for multiplicative budgets, on the division side. The guard
+// also keeps a pinned TROUBLE_HOST_CALIB of 0.01 from dividing by ~0.
+func clampedMin1(scale float64) float64 {
+	if scale < 1 || scale != scale { // NaN or below the reference: never tighten a floor
+		return 1
+	}
+	return scale
+}

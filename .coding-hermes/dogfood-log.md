@@ -65,3 +65,46 @@ filed:0 one minute into a 7-15 min battery, so the real cells were never pulled.
 This run then collected that battery by hand (cells recorded in the integration
 report). Neither the QA battery nor this run's install leg could spawn a fresh
 agent on any of three bunker boxes beyond the one that was already up.
+
+2026-09-20 | dogfood (cron, target row trouble-dogfood → repo ~/trouble) | 🟡 PROMISING-BUT-ROUGH | light-hub boot serving + full hub stanza 1s after first poll; documented on-ramp event → ledger event+group on one sig ~30s; SPEC-13 stop/start contract reproduced in ~2 min; fresh-box quickstart READY 3s | 6 (3 harness-mine, 3 product/docs) | install leg RAN on agent-host-3 (agent 215f3511, destroyed): Go bootstrap 27s + `make bin` 25s + documented quickstart smoke PASSED | HEAD 43fd5ca; findings TRBL-062..066; artifacts docs/dogfood/2026-09-20-light-hub-integration.md, docs/dogfood/2026-09-20-light-hub-diagnostics.md, docs/dogfood/2026-09-20-repro-light-hub.sh, skills/trouble-light-hub-usage/SKILL.md
+
+**Angle (skill rule: change the angle, not the depth).** The two 2026-09-17 runs swept the stock
+config + CLI + dashboard surface and the QA lane, and BOTH had to file SKIPPED-install-bunker because
+`bunker spawn` answered `deadline_exceeded`. This run took the two untouched surfaces: the SPEC-13
+light-hub profile (never driven by a dogfood run) and the install leg itself (bunker CLI 0.1.4 —
+spawned on the FIRST try).
+
+**Verdict rationale.** The flagship light-hub promise HOLDS: one on-ramp POST produced `event` +
+`group` + `incident` on one sig with the stream acked; a real `docker stop` of the wired redis gave
+`degraded`/`redis_unavailable` + `Retry-After: 1` + zero ledger records (exactly SPEC-13 §4.3), and
+`docker start` recovered to `status=ok` in 4s with `redis_restored` and no daemon restart. The fresh
+box ran the documented quickstart verbatim and passed. It is 🟡 rather than ✅ because the OPERATOR
+surface around that runtime is missing or wrong: the docs still say the runtime is unbuilt, the four
+SPEC-13 §2.2 CLI verbs do not exist, a token mint against a container-shaped config 401s silently,
+and the container quickstart's documented first event cannot authenticate at all.
+
+**Findings (rows the foreman works — no code was changed by this run):**
+
+1. TRBL-062 (P1) — the container quickstart's documented first event 401s `query_key_remote` even
+   from the host the stack runs on; the shipped container project has no `secret_key`, and
+   deploy/README.md's "Reporters OUTSIDE this host need one more line" is wrong for a `0.0.0.0` bind.
+2. TRBL-063 (P2) — `dashboard token create` against a config declaring `dashboard.token_file`
+   silently mints into the CLI's default store; the token 401s and nothing names the path.
+3. TRBL-064 (P1) — `docs/operations.md` §14 still asserts `internal/hub` is not built and a
+   light-hub boot carries no hub stanza; the same tree disproves both.
+4. TRBL-065 (P2) — SPEC-13 §2.2's `trouble hub status|archive|dedup|drain` are unmounted
+   (`unknown command "hub"`), so the documented pre-migration drain has no supported path.
+5. TRBL-066 (P2) — a no-`.git` transfer makes `make bin` produce an UNSTAMPED pair
+   (`0.0.0-dev unknown`) and the fresh-machine path never says so.
+
+Install leg: **RAN** (install_seconds≈25 build + 27s Go bootstrap), smoke **passed**; TRBL-011's
+SKIPPED row is superseded — its blocker was the 0.1.3 spawn wedge. No repo visibility or permission
+was touched anywhere in this run.
+
+**Honest gaps** (also in the diagnostics trail): the blob-level `ForwardEnvelope` duplicate-key
+collapse is unreachable via the generic-JSON on-ramp (no idempotency key → `dedup_hits=0`); what is
+proven is the group-level collapse. DuckBrain archival stayed parked by design (`TROUBLE-HUB-009`,
+empty endpoint). Two of my own probe rounds were invalidated by harness mistakes (a `--rm` redis
+deleted on `stop`; a second scratch redis that never started) — both discarded, and the final outage
+test ran against the redis the daemon was actually wired to. Those traps are written down so the next
+runner does not repeat them.

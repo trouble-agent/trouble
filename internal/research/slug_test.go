@@ -6,6 +6,7 @@ package research
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -179,22 +180,39 @@ func TestDeriveNeverBlocks(t *testing.T) {
 		types.SrcInotify, types.SrcSentinel, types.SrcCollector, types.SrcGeneric, types.SrcUnknown,
 	}
 	start := time.Now()
-	for i := 0; i < 10000; i++ {
-		sig := types.Sig{Source: sources[i%len(sources)], Algo: types.SigAlgoSHA256, NormVersion: 1, Short: "2ab4c6d8e0f1a3b5"}
-		f := subjectFacts{
-			Unit: "unit-" + string(rune('a'+i%26)) + ".service", Message: "panic: synthetic",
-			Origin: "x:y", Mount: "/mnt", Scope: "io", Path: "/tmp/p", Project: "proj",
+	var per time.Duration
+	// TRBL-057: the budget below is priced by the calibration model, but the
+	// model's two inputs cannot see the suite's OWN contention — `go test
+	// ./internal/...` runs many test binaries in parallel, that pressure
+	// builds and drains in seconds, and the 1m loadavg both lags and dilutes
+	// it (this gate failed at load_avg 37.2 in a parallel-binary storm and at
+	// load 41 in a full-suite run while passing everywhere in isolation; the
+	// best-of-3 CPU pilot measured ~1.0 DURING the storm because its best run
+	// prices the box's capability, not the environment seconds later). So the
+	// loop is measured under its own runqueue wait: the fraction of the
+	// window this process spent runnable-but-not-running (schedstat) widens
+	// the budget looser-only by 1/(1-f), capped at 2x. A regression does not
+	// mint runqueue wait — the per-call regex compilation this gate exists to
+	// catch (83µs) still fails against the worst case this term allows
+	// (20µs × 32µs-ceiling × 2 = 128µs is not reached: 32 × 2 = 64µs < 83µs).
+	waitFrac := loadfence.SuiteWaitFraction(func() {
+		for i := 0; i < 10000; i++ {
+			sig := types.Sig{Source: sources[i%len(sources)], Algo: types.SigAlgoSHA256, NormVersion: 1, Short: "2ab4c6d8e0f1a3b5"}
+			f := subjectFacts{
+				Unit: "unit-" + string(rune('a'+i%26)) + ".service", Message: "panic: synthetic",
+				Origin: "x:y", Mount: "/mnt", Scope: "io", Path: "/tmp/p", Project: "proj",
+			}
+			cs := DeriveClassSlug(sig, f, tbl)
+			if cs.Slug == "" {
+				t.Fatalf("iteration %d produced an empty slug", i)
+			}
 		}
-		cs := DeriveClassSlug(sig, f, tbl)
-		if cs.Slug == "" {
-			t.Fatalf("iteration %d produced an empty slug", i)
-		}
-	}
+		per = time.Since(start) / 10000
+	})
 	// The spec's §7 gate is ≤1µs/call. With the rule list compiled once and a
 	// 9-rule match over the message the honest number is a few µs; the bound
 	// asserted here is the one that fails a regression (a per-call regex
 	// compilation measured 83µs), not a re-statement of the aspiration.
-	per := time.Since(start) / 10000
 	if raceEnabled {
 		// The race detector multiplies the cost of every memory access; the
 		// bound below is an uninstrumented measurement.
@@ -218,12 +236,14 @@ func TestDeriveNeverBlocks(t *testing.T) {
 	// (verified on the pre-change tree: identical text at load_avg 46.91).
 	load := loadAvgResearch()
 	budget := deriveBudgetFor(load)
+	suiteFactor, _ := loadfence.SuiteContention(waitFrac)
+	budget = time.Duration(float64(budget) * suiteFactor)
 	if per > budget {
 		loadfence.MissFatal(t, "TestDeriveNeverBlocks",
-			fmt.Sprintf("derivation took %s/call, want ≤%s (load_avg_1m=%.2f; the quiet-host budget is 20µs)", per, budget, load),
+			fmt.Sprintf("derivation took %s/call, want ≤%s (load_avg_1m=%.2f; the quiet-host budget is 20µs; suite-wait %.2f → x%.2f)", per, budget, load, waitFrac, suiteFactor),
 			load)
 	}
-	t.Logf("derivation: %s/call over 10000 synthetic sigs (load_avg_1m=%.2f, budget=%s)", per, load, budget)
+	t.Logf("derivation: %s/call over 10000 synthetic sigs (load_avg_1m=%.2f, budget=%s, suite-wait %.2f, suite x%.2f)", per, load, budget, waitFrac, suiteFactor)
 }
 
 // deriveBudgetFor scales the 20µs derivation budget with the load the
@@ -274,6 +294,39 @@ func TestDeriveBudgetScaling(t *testing.T) {
 			t.Errorf("deriveBudgetFor(%.1f) = %s < previous %s: budget must not decrease with load", load, got, prev)
 		}
 		prev = deriveBudgetFor(load)
+	}
+}
+
+// TestDeriveBudgetUnderSuiteContention pins the TRBL-057 term where it touches
+// this gate: the suite-wait factor only ever WIDENS the budget (a host is
+// graded looser than the reference, never tighter), and the widening is
+// bounded so the gate's regression catch survives at maximum contention —
+// a per-call regex compilation (83µs measured) must exceed the budget even
+// when the suite-wait term is at its full 2x ceiling.
+func TestDeriveBudgetUnderSuiteContention(t *testing.T) {
+	prev := deriveBudgetFor(100) // the load ceiling
+	for _, f := range []float64{0, 0.05, 0.12, 0.3, 0.5, 0.5 + 1e-9} {
+		factor, _ := loadfence.SuiteContention(f)
+		if factor < 1 {
+			t.Fatalf("SuiteContention(%v) = %v: the term tightened a budget", f, factor)
+		}
+		budget := time.Duration(float64(deriveBudgetFor(26)) * factor)
+		if budget < prev {
+			t.Fatalf("suite factor %v shrank the budget from %s to %s", factor, prev, budget)
+		}
+		prev = budget
+		// The regression this gate exists to catch stays caught at every
+		// contention level, load ceiling included.
+		worst := time.Duration(float64(deriveBudgetFor(100)) * factor)
+		if worst >= 83*time.Microsecond {
+			t.Fatalf("budget %s under suite factor %.2f admits the regex-compilation regression (83µs/call)", worst, factor)
+		}
+	}
+	// No evidence is not a widening: junk readings degrade to factor 1.
+	for _, junk := range []float64{-1, math.NaN(), 1.5} {
+		if factor, active := loadfence.SuiteContention(junk); factor != 1 || active {
+			t.Fatalf("SuiteContention(%v) = (%v, %v), want (1, false)", junk, factor, active)
+		}
 	}
 }
 

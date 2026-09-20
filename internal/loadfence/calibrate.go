@@ -2,6 +2,7 @@ package loadfence
 
 import (
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -245,3 +246,114 @@ func MeasureComputePilot() float64 {
 
 // ComputeSink keeps the pilot's result observable.
 var ComputeSink uint64
+
+// —— suite-internal contention (TRBL-057) ——
+//
+// The Profile above prices a host (what one unit of work costs here) and the
+// system's run queue (load_avg_1m). It cannot see CONTENTION THAT THE SUITE
+// ITSELF CREATES: `go test ./internal/...` runs many test binaries in parallel
+// on the same cores, that pressure builds and drains in seconds, and the 1m
+// loadavg both lags and dilutes it (three full-suite runs rotated FAILs at
+// load 21/34/41 whose margins are absent in isolation — TRBL-057). The
+// best-of-3 pilot is blind to it by construction: its best run prices the
+// box's capability, not the environment a gate experiences seconds later.
+//
+// The honest signal is the gate's OWN process: Linux accounts exactly how long
+// the process's threads sat runnable-but-not-running in
+// /proc/self/task/<tid>/schedstat (field 2, nanoseconds). A measurement window
+// that spends a fraction f of its wall time descheduled was slowed by ~1/(1-f)
+// from scheduling alone — no code regression mints runqueue wait, so widening
+// a budget by that factor (and only that direction) prices the suite's own
+// load without ever hiding a regression behind it. It composes with the
+// Profile: the pilot still prices a genuinely slower box, load still prices a
+// descheduling REGIME, and this term prices the suite's own pressure that
+// neither can observe.
+
+const (
+	// SuiteSchedStatPath is the per-thread scheduler-statistics file the term
+	// reads. /proc/self is process-scoped by the kernel, so parallel test
+	// binaries each measure exactly their own threads.
+	SuiteSchedStatPath = "/proc/self/task"
+
+	// SuiteWaitCap bounds the term at 2x: a window that was half wait is
+	// already a 2x widening, and past that the shape of the failure is not
+	// scheduling (the full suite at its worst sampled 0.12-0.3 in these
+	// investigations). The cap is what keeps each gate's regression catch
+	// alive — e.g. TestDeriveNeverBlocks must still fail a per-call regex
+	// compilation (83µs measured) at EVERY contention level against its
+	// 20µs quiet budget: 20µs × 32µs-ceiling × 2 = 128µs > 83µs would fail
+	// that catch without a cap, so the catch is re-proven per gate below.
+	SuiteWaitCap = 0.50
+)
+
+// SuiteWaitSamples reads the process's cumulative runqueue wait (nanoseconds,
+// summed over every thread) from schedstat. best-effort by contract: a kernel
+// without schedstat (or a read race with thread exit) returns 0 and the term
+// degrades to 1 — a model that cannot measure must not tighten a budget.
+func SuiteWaitSamples() uint64 {
+	entries, err := os.ReadDir(SuiteSchedStatPath)
+	if err != nil {
+		return 0
+	}
+	var total uint64
+	for _, e := range entries {
+		b, err := os.ReadFile(SuiteSchedStatPath + "/" + e.Name() + "/schedstat")
+		if err != nil {
+			continue // thread exited between readdir and read
+		}
+		fields := strings.Fields(string(b))
+		if len(fields) < 2 {
+			continue
+		}
+		v, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			continue
+		}
+		total += v
+	}
+	return total
+}
+
+// SuiteContention converts a measured wait FRACTION (runqueue wait / wall time
+// over the gate's own window) into the multiplicative allowance the budget
+// takes. The fraction is clamped to [0, SuiteWaitCap], so the term lies in
+// [1, 2]: looser-only by construction, and a NaN or out-of-range reading
+// (clock skew between samples) is treated as no evidence rather than as a
+// widening. The returned second value reports whether the term is active, so
+// a gate can log the evidence on every run.
+func SuiteContention(waitFraction float64) (factor float64, active bool) {
+	if waitFraction <= 0 || math.IsNaN(waitFraction) || waitFraction > 1 {
+		return 1, false
+	}
+	if waitFraction > SuiteWaitCap {
+		waitFraction = SuiteWaitCap
+	}
+	return 1 / (1 - waitFraction), true
+}
+
+// SuiteWaitFraction is the whole measurement: sample, run f, sample again, and
+// report the fraction of wall time this process spent descheduled. An earlier
+// caller-wide GOMAXPROCS-less measurement window (runtime.NumCPU threads on a
+// 16-core box) is exactly the regime the full suite creates, so a quiet host
+// measures ~0 here even under fleet load — the fleet's own threads do not
+// enter this process's schedstat.
+func SuiteWaitFraction(f func()) float64 {
+	before := SuiteWaitSamples()
+	start := time.Now()
+	f()
+	elapsed := time.Since(start)
+	after := SuiteWaitSamples()
+	if elapsed <= 0 || after < before {
+		return 0
+	}
+	return float64(after-before) / float64(elapsed)
+}
+
+// SuiteWaitMeasure is SuiteWaitFraction for a measurement that must KEEP its
+// duration: the gate gets both its number and the contention evidence the
+// budget consumes, taken over exactly the measured window.
+func SuiteWaitMeasure(f func() time.Duration) (time.Duration, float64) {
+	var dur time.Duration
+	frac := SuiteWaitFraction(func() { dur = f() })
+	return dur, frac
+}

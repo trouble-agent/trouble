@@ -162,29 +162,51 @@ func TestScrubBudget(t *testing.T) {
 	cpuScale := prof.CPUScale()
 	load := prof.Load
 	ceiling := 4.0 * cpuScale // documented 4x deviation factor x the host's measured CPU cost
+	// TRBL-057: the pilot above prices the box and load_avg prices the
+	// system's run queue, but neither can see the suite's OWN contention —
+	// parallel test binaries contend for the same cores on a timescale the
+	// best-of-3 pilot (capability, not environment) and the 1m loadavg (lags
+	// and dilutes) do not capture. Each measured loop therefore also reports
+	// the fraction of its window this process spent descheduled (schedstat),
+	// and the ceiling widens looser-only by 1/(1-f), capped at 2x. The cap
+	// keeps the catastrophic-regression catch alive: a fast-path removal is
+	// an order-of-magnitude shift, far past 2x, and every loop's factor is
+	// logged so a widening is never silent.
+	suiteFactor := 1.0
+	suiteWorst := 0.0
 	report := func(name string, budget time.Duration, measured time.Duration) {
 		t.Helper()
-		if measured > time.Duration(ceiling*float64(budget)) {
-			t.Errorf("%s = %s, more than %.1fx the §3.9 budget of %s (cpu-scale %.2f, load_avg_1m %.2f; the documented deviation factor is 4x on a quiet reference-class host)", name, measured, ceiling, budget, cpuScale, load)
+		effCeiling := ceiling * suiteFactor
+		if measured > time.Duration(effCeiling*float64(budget)) {
+			t.Errorf("%s = %s, more than %.1fx the §3.9 budget of %s (cpu-scale %.2f, load_avg_1m %.2f, suite-wait x%.2f; the documented deviation factor is 4x on a quiet reference-class host)", name, measured, effCeiling, budget, cpuScale, load, suiteFactor)
 			return
 		}
 		if measured > budget {
-			t.Logf("NOTE %s = %s vs §3.9 budget %s (%.1fx, cpu-scale %.2f, load_avg_1m %.2f)",
-				name, measured, budget, float64(measured)/float64(budget), cpuScale, load)
+			t.Logf("NOTE %s = %s vs §3.9 budget %s (%.1fx, cpu-scale %.2f, load_avg_1m %.2f, suite x%.2f)",
+				name, measured, budget, float64(measured)/float64(budget), cpuScale, load, suiteFactor)
 			return
 		}
-		t.Logf("%s = %s (budget %s, cpu-scale %.2f)", name, measured, budget, cpuScale)
+		t.Logf("%s = %s (budget %s, cpu-scale %.2f, suite x%.2f)", name, measured, budget, cpuScale, suiteFactor)
 	}
 
 	measure := func(n int, f func()) time.Duration {
 		for i := 0; i < 20; i++ {
 			f()
 		}
-		start := time.Now()
-		for i := 0; i < n; i++ {
-			f()
+		dur, frac := loadfence.SuiteWaitMeasure(func() time.Duration {
+			start := time.Now()
+			for i := 0; i < n; i++ {
+				f()
+			}
+			return time.Since(start) / time.Duration(n)
+		})
+		if sf, active := loadfence.SuiteContention(frac); active {
+			suiteFactor = sf
 		}
-		return time.Since(start) / time.Duration(n)
+		if frac > suiteWorst {
+			suiteWorst = frac
+		}
+		return dur
 	}
 
 	one := cleanPayload(1024)
@@ -220,6 +242,7 @@ func TestScrubBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Logf("suite-wait: worst measured-loop wait fraction %.3f (term max x2)", suiteWorst)
 	t.Logf("full set %d B carrying a secret = %s (all 17 enabled rules run here; "+
 		"§3.9 budgets 60 µs/KiB for a full pass)", len(sec), withSecret)
 	if withSecret > 50*time.Millisecond {

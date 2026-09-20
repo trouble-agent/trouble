@@ -189,12 +189,23 @@ func TestFsyncWindowBound(t *testing.T) {
 	})
 	const n = 30
 	lat := make([]time.Duration, 0, n)
-	for i := 0; i < n; i++ {
-		start := time.Now()
-		mustAppend(t, l, eventDraft("psi", fmt.Sprintf("psi:sha256v1:%016x", i), fmt.Sprintf("%064x", i), 0))
-		lat = append(lat, time.Since(start))
-		time.Sleep(10 * time.Millisecond)
-	}
+	// TRBL-057: the ack waits on the ledger's writer goroutine, which lives in
+	// THIS process — suite-internal contention (parallel test binaries) shows
+	// up here as writer descheduling that the best-of-3 pilot (capability)
+	// and the 1m loadavg (lags, dilutes) both miss. The fraction of this
+	// window the process spent runnable-but-not-running widens the bound
+	// looser-only by 1/(1-f), capped at 2x (see internal/loadfence). The 10ms
+	// sleeps inflate the window's wall time and so UNDER-measure the
+	// fraction — the term can only under-widen, never overstate.
+	var waitFrac float64
+	waitFrac = loadfence.SuiteWaitFraction(func() {
+		for i := 0; i < n; i++ {
+			start := time.Now()
+			mustAppend(t, l, eventDraft("psi", fmt.Sprintf("psi:sha256v1:%016x", i), fmt.Sprintf("%064x", i), 0))
+			lat = append(lat, time.Since(start))
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 	if len(lat) != n {
 		t.Fatalf("ack count = %d, want %d", len(lat), n)
 	}
@@ -225,15 +236,21 @@ func TestFsyncWindowBound(t *testing.T) {
 	if raceEnabled {
 		allow = time.Duration(window)*time.Millisecond + 400*time.Millisecond + 3*durableCost
 	}
+	// TRBL-057: the window's own descheduling is the suite term the load
+	// number cannot see (the acks and the writer share this process's run
+	// queue with every parallel test binary). Looser-only, capped at 2x — the
+	// bound stays well under the pile-up shapes it exists to fail.
+	suiteFactor, _ := loadfence.SuiteContention(waitFrac)
+	allow = time.Duration(float64(allow) * suiteFactor)
 	if p99 > allow {
-		t.Errorf("p99 ack latency = %s, want <= %s (window %dms + 10ms + 3x measured write+fsync %s; SPEC-01 §7 bare bound is window+10ms; load_avg_1m=%.2f)",
-			p99, allow, window, durableCost, load)
+		t.Errorf("p99 ack latency = %s, want <= %s (window %dms + 10ms + 3x measured write+fsync %s, suite-wait %.2f → x%.2f; SPEC-01 §7 bare bound is window+10ms; load_avg_1m=%.2f)",
+			p99, allow, window, durableCost, waitFrac, suiteFactor, load)
 	}
 	if got := l.Status().Records; got != int64(n)+1 { // + the boot lifecycle record
 		t.Errorf("records = %d, want %d", got, n+1)
 	}
-	t.Logf("fsync window %dms: p50 %s p99 %s max %s (bound %s, measured write+fsync %s, load_avg_1m=%.2f)",
-		window, lat[len(lat)/2], p99, lat[len(lat)-1], allow, durableCost, load)
+	t.Logf("fsync window %dms: p50 %s p99 %s max %s (bound %s, measured write+fsync %s, load_avg_1m=%.2f, suite x%.2f)",
+		window, lat[len(lat)/2], p99, lat[len(lat)-1], allow, durableCost, load, suiteFactor)
 }
 
 // TestPerLineRegression keeps the amortized mode's advantage from being

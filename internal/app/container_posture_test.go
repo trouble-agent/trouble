@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/trouble-agent/trouble/internal/dashboard"
 	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/sentinel"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -174,7 +176,113 @@ func TestShippedContainerConfigBootsToServe(t *testing.T) {
 	if mandate != "proxy" || origin == "" {
 		t.Fatalf("container posture drifted: mandate=%q public_origin=%q, want mandate=proxy and a non-empty public_origin from the shipped file", mandate, origin)
 	}
+
+	// TRBL-062: the published port puts every reporter in a NON-loopback zone
+	// — including one running on the host itself. The container's socket peer
+	// is docker's bridge gateway (a private 172.x address => zone lan), which
+	// is exactly what the operator's failing curl looked like from inside the
+	// stack (measured: 401 `query-string key refused on a non-loopback
+	// request`). The shipped project must therefore carry a secret_key, so the
+	// X-Sentry-Auth form the quickstart documents authenticates through the
+	// §3.7 bind matrix.
+	//
+	// The zone is what makes this probe non-vacuous, and it is NOT the daemon's
+	// own socket shape. Over 127.0.0.1 the TCP peer is loopback, clientIP()
+	// returns zone loopback (trustedProxies is empty here, so the XFF loop falls
+	// back to the peer), the bind matrix is skipped, and a request with no
+	// secret at all answers 200 — so a loopback-shaped probe would pass with or
+	// without this row's fix. The real container posture is driven through the
+	// live sentinel handler with the peer set to docker's bridge gateway and NO
+	// X-Forwarded-For, matching a request that traverses the published port.
+	//
+	// The secret is read from the RESOLVED project set, not from the raw
+	// resolved ConfigValue: `secret_key` is an alias the parser folds into
+	// ProjectConfig.Secret (lifecycle config.go, the "secret", "secret_key"
+	// case), and ProjectConfig.SecretKey — the struct field — is never
+	// populated by any parse path. Asserting on it would fail on a correct
+	// config, so the assertion below reads the same types.Project the
+	// sentinel's bind matrix resolves its material from.
+	projSet, err := res.Config.ProjectsSet()
+	if err != nil {
+		t.Fatalf("resolve the shipped container config's project set: %v", err)
+	}
+	if len(projSet) != 1 {
+		t.Fatalf("the shipped container config declares %d projects, want 1", len(projSet))
+	}
+	proj := projSet[0]
+	if proj.SecretKey == "" {
+		t.Fatalf("the shipped container project carries no secret_key: on a published port EVERY reporter (host included) arrives off loopback and the bind matrix admits no auth form (TRBL-062)")
+	}
+	if d.Subsystems == nil || d.Subsystems.Sentinel == nil {
+		t.Fatalf("the shipped container boot built no sentinel: the container's whole ingest surface is missing (TRBL-062)")
+	}
+	ingest := d.Subsystems.Sentinel.Handler()
+
+	// The published-port first event: the shipped X-Sentry-Auth form, on the
+	// docker-gateway peer the published port actually presents.
+	first := httptest.NewRequest(http.MethodPost, "/api/1/event/", strings.NewReader(`{"message":"container quickstart first event (TRBL-062)","level":"error","release":"0.1.0"}`))
+	first.RemoteAddr = dockerBridgePeer
+	first.Header.Set("Content-Type", "application/json")
+	first.Header.Set("X-Sentry-Auth", fmt.Sprintf("Sentry sentry_version=7, sentry_key=%s, sentry_secret=%s", proj.PublicKey, proj.SecretKey))
+	rec := httptest.NewRecorder()
+	ingest.ServeHTTP(rec, first)
+	firstResp := rec.Result()
+	firstBody, _ := io.ReadAll(firstResp.Body)
+	firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		t.Fatalf("published-port first event (X-Sentry-Auth) = %d %s, want 200 — a reporter on this host must authenticate with the shipped form (TRBL-062)", firstResp.StatusCode, firstBody)
+	}
+	if !strings.Contains(string(firstBody), `"id"`) {
+		t.Fatalf("published-port first event answered without an event id: %s", firstBody)
+	}
+
+	// And the bare query form stays refused on the SAME zone shape: same
+	// project, same peer, no secret — exactly the operator's 401 before this
+	// row. This is the assertion that makes the 200 above load-bearing: strip
+	// the shipped secret and this failure is what a reporter gets instead.
+	bare := httptest.NewRequest(http.MethodPost, "/api/1/event/?sentry_key="+proj.PublicKey, strings.NewReader(`{"message":"trbl-062 bare form","level":"error"}`))
+	bare.RemoteAddr = dockerBridgePeer
+	bare.Header.Set("Content-Type", "application/json")
+	bareRec := httptest.NewRecorder()
+	ingest.ServeHTTP(bareRec, bare)
+	bareResp := bareRec.Result()
+	bareBody, _ := io.ReadAll(bareResp.Body)
+	bareResp.Body.Close()
+	if bareResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("bare ?sentry_key= on a published-port zone = %d %s, want 401: the loopback exception must NOT apply to the container posture (TRBL-062)", bareResp.StatusCode, bareBody)
+	}
+	if !strings.Contains(string(bareBody), "query_key_remote") {
+		t.Fatalf("bare ?sentry_key= on a published-port zone answered 401 without the measured cause: %s (X-Sentry-Error: %s)", bareBody, bareResp.Header.Get("X-Sentry-Error"))
+	}
+
+	// Non-vacuity: the 200 above must be the SECRET doing the work, not the
+	// zone. Same wire, same peer, header form, one bit flipped in the secret —
+	// the bind matrix must refuse it. Without this the first-event assertion
+	// could pass on a posture that admits any header at all.
+	wrongSecret := "0" + proj.SecretKey[1:]
+	if wrongSecret == proj.SecretKey {
+		wrongSecret = "1" + proj.SecretKey[1:]
+	}
+	wrong := httptest.NewRequest(http.MethodPost, "/api/1/event/", strings.NewReader(`{"message":"trbl-062 wrong secret","level":"error"}`))
+	wrong.RemoteAddr = dockerBridgePeer
+	wrong.Header.Set("Content-Type", "application/json")
+	wrong.Header.Set("X-Sentry-Auth", fmt.Sprintf("Sentry sentry_version=7, sentry_key=%s, sentry_secret=%s", proj.PublicKey, wrongSecret))
+	wrongRec := httptest.NewRecorder()
+	ingest.ServeHTTP(wrongRec, wrong)
+	wrongResp := wrongRec.Result()
+	wrongBody, _ := io.ReadAll(wrongResp.Body)
+	wrongResp.Body.Close()
+	if wrongResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("X-Sentry-Auth with a WRONG secret on a published-port zone = %d %s, want 401: the 200 first-event proof would be vacuous (TRBL-062)", wrongResp.StatusCode, wrongBody)
+	}
 }
+
+// dockerBridgePeer is the TCP peer a request presents when it arrives over a
+// docker published port: the bridge gateway, a private address, i.e. the LAN
+// zone of the §3.7 bind matrix (and never a loopback peer, which is the one
+// zone the matrix exempts). Fixed on purpose: the assertion it feeds is about
+// the shipped posture, not about this host's docker network numbering.
+const dockerBridgePeer = "172.18.0.1:41234"
 
 // TestShippedContainerRefusalsStayMeasured is AC2's negative half: each of the
 // row's four measured refusals is still enforced, proven by dropping (or
@@ -290,6 +398,65 @@ func TestShippedContainerRefusalsStayMeasured(t *testing.T) {
 			},
 			wantInErr: []string{"TROUBLE-LIFECYCLE-013", "token file mode not 0600"},
 		},
+		{
+			// TRBL-062: the published port admits NO bare-public-key form —
+			// a shipped project without a secret leaves the quickstart's
+			// reporter with no accepted auth form at all. Dropping the
+			// shipped secret_key line must return the measured 401 shape
+			// (`query_key_remote`) through the live resolution path.
+			name:     "published-port project without a secret (TRBL-062, TROUBLE-SENTINEL-006 query_key_remote)",
+			dropLine: `secret_key = "fedcba9876543210fedcba9876543210"`,
+			boot: func(t *testing.T, cfgPath string) error {
+				res, err := lifecycle.Resolve(nil, nil, cfgPath)
+				if err != nil {
+					return err
+				}
+				projects, err := res.Config.ProjectsSet()
+				if err != nil {
+					return err
+				}
+				if len(projects) == 0 {
+					t.Fatalf("the mutated config declares no projects; the TRBL-062 case needs the shipped project minus its secret")
+				}
+				// The same field mapping buildSentinel performs (the daemon's
+				// composition of the sentinel config); the scrubber is nil on
+				// purpose — this probe must refuse at AUTH, before any scrub.
+				scfg := sentinel.Config{
+					Bind:           "127.0.0.1:0",
+					AdvertisedHost: res.Config.Ingest.AdvertisedHost,
+					Scheme:         "http",
+					SpoolDir:       t.TempDir(),
+					HostID:         "container-posture-test",
+					Actor:          lifecycle.Actor(types.ActorDaemon, "troubled"),
+					Projects:       projects,
+					ProxyTrust:     "loopback",
+					RequireSecret:  !res.Config.Ingest.Auth.LoopbackDSN,
+					LedgerWait:     types.Duration("2s"),
+				}
+				s, serr := sentinel.NewServer(scfg, stubSink{}, nil)
+				if serr != nil {
+					return serr
+				}
+				// The bare query form on the published-port wire: the TCP peer
+				// is the docker bridge itself (a non-loopback container IP,
+				// which adds no X-Forwarded-For) — the recorded request keeps
+				// that peer, so the zone resolves to lan exactly as it does
+				// behind docker's published port.
+				req2 := httptest.NewRequest(http.MethodPost, "/api/1/event/", strings.NewReader(`{"message":"trbl-062 bare form","level":"error"}`))
+				req2.Host = "trouble.example.net"
+				req2.RemoteAddr = "172.18.0.7:41234"
+				q := req2.URL.Query()
+				q.Set("sentry_key", projects[0].PublicKey)
+				req2.URL.RawQuery = q.Encode()
+				rec := httptest.NewRecorder()
+				s.Handler().ServeHTTP(rec, req2)
+				res2 := rec.Result()
+				b, _ := io.ReadAll(res2.Body)
+				res2.Body.Close()
+				return fmt.Errorf("wire answer %d %s (X-Sentry-Error: %s)", res2.StatusCode, b, res2.Header.Get("X-Sentry-Error"))
+			},
+			wantInErr: []string{"TROUBLE-SENTINEL-006", "query-string key refused on a non-loopback request"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -344,3 +511,13 @@ func TestShippedContainerRefusalsStayMeasured(t *testing.T) {
 		t.Fatalf("the shipped container config must resolve: %v", err)
 	}
 }
+
+// stubSink satisfies sentinel's ledgerSink for auth-path probes that must
+// never reach the ledger; an append here is a bug the probe wants loud.
+type stubSink struct{}
+
+func (stubSink) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) {
+	return types.Record{}, fmt.Errorf("stubSink: the TRBL-062 auth probe must not append")
+}
+
+func (stubSink) LastSeq() uint64 { return 0 }

@@ -124,11 +124,16 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
    (TROUBLE-LIFECYCLE-005/013), and the shipped comment in the file's
    `[secrets]` table shows how the env file gets there.
 
-   Reporters OUTSIDE this host need one more line on their project: a
-   `secret_key` (32 lowercase hex) plus `X-Sentry-Auth` — off loopback the
-   bind matrix refuses a bare public key (`query-string key refused on a
-   non-loopback request`, then `off-loopback requests require the project
-   ingest token`), both measured live.
+   The compose stack's own first event needs one line on its project: a
+   `secret_key` (32 lowercase hex) plus the `X-Sentry-Auth` header — a request
+   through the published port arrives from a non-loopback ZONE (its TCP peer is
+   docker's bridge gateway, a private 172.x address), including one sent from
+   this host, and the bind matrix refuses a bare public key there
+   (`query-string key refused on a non-loopback request` for the query form,
+   then `off-loopback requests require the project ingest token` for a header
+   form with no secret; both measured live on a built stack). The shipped
+   file declares the dev placeholder `secret_key`; rotate it before anything
+   real reports here.
 
 2. Build, boot, seed, verify — in order; the container starts `unhealthy` by
    design until the seed exists:
@@ -162,7 +167,37 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
    when the resolved config declares a different one, so the mismatch is visible
    instead of silent.
 
-3. Tear down: `docker compose down` keeps the state volume; `-v` drops it.
+3. Send the first event. A request through the published port arrives from a
+   non-loopback zone, so the foreground quickstart's `?sentry_key=`-only form is
+   refused here; use the header form with the project's `secret_key` (step 1,
+   or the shipped dev placeholder):
+
+   ```sh
+   curl -fsS -X POST "http://127.0.0.1:7643/api/1/event/" \
+     -H 'Content-Type: application/json' \
+     -H 'X-Sentry-Auth: Sentry sentry_version=7, sentry_key=<32-hex public_key>, sentry_secret=<32-hex secret_key>' \
+     --data '{"message":"first trouble event","level":"error","release":"0.1.0"}'
+
+   docker run --rm -v trouble_trouble-state:/data alpine:3 \
+     sh -c 'grep -hE "\"kind\":\"(event|group)\"" /data/state/ledger/*.jsonl' \
+     | jq -r 'select(.kind == "event" or .kind == "group") | [.kind, .sig] | @tsv'
+   ```
+
+   The event request must return `{"id":"<event_id>"}` and the ledger command
+   must show the `event` and its fingerprint `group` on one sig — the same
+   acceptance the foreground quickstart proves.
+
+   The ledger is at `state_root/ledger`, and this file's `state_root` is
+   `/data/state`, so inside the volume it is `state/ledger/` — NOT the volume
+   root. On the host side that path is 0700 owned by the daemon's uid (65532),
+   so reading it as your own user fails with `Permission denied`; the throwaway
+   container above reads it as root instead. To resolve the host path yourself,
+   `docker volume inspect trouble_trouble-state` and append `/state/ledger`
+   (measured: `/var/lib/docker/volumes/<project>_trouble-state/_data/state/ledger/`).
+   The container name is prefixed by the compose project name, so it is
+   `trouble_trouble-state` only when the project is still named `trouble`.
+
+4. Tear down: `docker compose down` keeps the state volume; `-v` drops it.
 
 Builds from a git **worktree** stamp `nogit00` unless `GIT_SHA` is passed as in
 step 2 — the worktree's `.git` is a pointer file the build context cannot

@@ -45,7 +45,7 @@ HOST_MEASURED_GATES = TestAmortizedThroughput|TestPerLineRegression|TestDeriveNe
 HOST_GATE_PKGS = ./internal/ledger/... ./internal/research/... ./internal/sentinel/...
 HOST_GATE_NAMES = TestAmortizedThroughput TestPerLineRegression TestDeriveNeverBlocks TestCollectorLongLineIsTruncated
 
-.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host smoke smoke-e2e ac-matrix clean
+.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host smoke smoke-e2e upgrade-cross-version ac-matrix clean
 
 all: build
 
@@ -185,6 +185,13 @@ smoke: bin
 # the version triple to the checker's exit 0 → exit 8 transition (tests/e2e/).
 smoke-e2e: bin
 	bash tests/e2e/cli_smoke.sh $(BIN)
+
+# The prev-release → HEAD upgrade path (SPEC-12 §3.6; QA-TROUBLE-7) with two
+# STAMPED builds, run as an operator would. It needs no git tag: the two
+# versions are §3.4 link-time stamps on this tree, which is how a release build
+# is made. Tagging is a release act the owner performs — never a build step.
+upgrade-cross-version:
+	bash scripts/upgrade_cross_version.sh
 
 # The v0.1 exit gate: the AC matrix over the SPEC-INDEX contract.
 ac-matrix:

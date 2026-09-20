@@ -124,12 +124,39 @@ host_id = ""
 hub_id = ""
 
 # The sentinel's project set (SPEC-12 §3.1a): the ingest listener is only built
-# when at least one project is declared. The key is the shipped hostile
-# placeholder — valid in shape, useless as a credential.
+# when at least one project is declared. Both keys are shipped hostile
+# placeholders — valid in shape, useless as credentials.
+#
+# secret_key is NOT optional here, and its absence is what made this file's own
+# quickstart fail its first event (TRBL-062): a published port delivers every
+# request from a non-loopback ZONE (measured live: the documented bare
+# `?sentry_key=` POST returned
+# `401 {"causes":["query_key_remote"],"detail":"query-string key refused on a
+# non-loopback request"}`), so the SPEC-04 §3.7 bind matrix requires the project
+# token for it. The zone is decided by the SOCKET PEER, not by the bind address:
+# a request arriving through the published port presents docker's bridge gateway
+# (a private 172.x address = lan). With the secret declared, the shipped
+# `X-Sentry-Auth` form
+# (`Sentry sentry_version=7, sentry_key=…, sentry_secret=…`) is accepted there
+# (the form SPEC-04 §2.4 prefers; accepted-forms table:
+# docs/sentinel-compat.md §1) — measured live: `200 {"id":"…"}`.
+#
+# loopback_dsn stays true for the loopback zone (requests that reach the
+# daemon's own 127.0.0.1 inside the container), where the DSN public key alone
+# is still admitted. It is NOT what admits the quickstart: the canary the daemon
+# injects at boot posts through the real HTTP path with an `X-Sentry-Auth`
+# header too (internal/sentinel/canary.go), so the query form is not on this
+# stack's ingest path at all.
+#
+# This is a documented DEV placeholder: rotate both keys before anything real
+# reports here. `trouble config explain projects` renders a declared secret as
+# `secret (set)`, never the value (SPEC-12 §3.1 redaction), so a project row
+# with a secret survives the TROUBLE-SCRUB-008 persistence-boundary re-scan.
 [[projects]]
 id = "1"
 slug = "trouble-dev"
 public_key = "0123456789abcdef0123456789abcdef"
+secret_key = "fedcba9876543210fedcba9876543210"
 quota_epm = 600
 enabled = true
 

@@ -41,6 +41,23 @@ type UpgradeOptions struct {
 	CurrentBin   string         // defaults to os.Executable()
 	RestartUnit  bool           // default true: restart the unit after the rename
 	RestartScope string         // "user" | "system" (default: cfg.Lifecycle.SystemdScope)
+
+	// FromVersion / ToVersion are the release versions of the binary being
+	// replaced and of the staged one (SPEC-12 §3.6 step 5's from_version /
+	// to_version). Empty means "this process's own triple", which is right for
+	// to_version when the caller IS the staged build and for from_version when
+	// nothing was swapped before it. They are not derivable at run time (the
+	// previous binary is a file), so an operator or script that knows the
+	// versions states them.
+	FromVersion string
+	ToVersion   string
+
+	// Record is the ledger seam the §3.6 steps are written through. Nil runs
+	// the recipe unrecorded; `trouble upgrade` installs a writer so the park,
+	// resume and rollback steps are in the ledger even though the daemon is
+	// stopped for the whole rename. It is the same RecordWriter seam the rest
+	// of the package writes records through — one shape, not two.
+	Record RecordWriter
 }
 
 // InstallOptions is one operator install request.
@@ -174,9 +191,25 @@ func RunUpgrade(ctx context.Context, cfg Config, o UpgradeOptions) error {
 		return fmt.Errorf("%w: no --to binary or --rollback given", types.CodeLifecycle011)
 	}
 
+	// §3.6 records: every step of the recipe lands in the ledger. The CLI
+	// writes them itself (it can run with no daemon alive — the park step IS a
+	// `systemctl stop`), so a failed upgrade is reconstructible from the ledger
+	// alone. A writer that is absent (o.Record nil) leaves the recipe
+	// unrecorded, which is why the CLI installs one at every call site.
+	writeRecord := func(d types.RecordDraft) error {
+		if o.Record == nil {
+			return nil
+		}
+		_, err := o.Record.Append(ctx, d)
+		return err
+	}
+
 	plan := upgradePlan{
 		CurrentBinary: bin,
 		NewBinary:     o.To,
+		FromVersion:   o.FromVersion,
+		ToVersion:     o.ToVersion,
+		Record:        writeRecord,
 		Park: func(ctx context.Context) (int, error) {
 			// SPEC-12 §4.2: the daemon's drain parks in-flight plays. Stopping
 			// the unit is therefore the park step, and a unit that will not stop

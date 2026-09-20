@@ -1164,6 +1164,57 @@ docker compose run --rm \
 docker compose ps                           # trouble turns healthy on the checker's next run (interval 30s)
 docker compose down                         # tear down; `-v` also drops the state volume
 ```
+**The release procedure (SPEC-12 §3.4/§3.6).** A release is a tag plus a stamped build, and the two are
+one act: tag the commit `vMAJOR.MINOR.PATCH` (annotated or lightweight), then build from that commit —
+`make bin` / `make release` stamp `Version` with the raw `git describe --tags --always --dirty` output, so
+the binaries report the tag's own name.
+
+```
+git tag v0.1.1 && git push --tags   # ← the release act (foreman/owner; a worker never tags)
+make bin                            # bin/troubled + bin/trouble, stamped from the tag
+bin/trouble --version               # → v0.1.1 <sha> <build_time> [stamped]
+```
+
+**On a tagless tree nothing is broken and nothing is invented.** `git describe --tags --always --dirty`
+then returns the bare short sha (`275bcd3`, or `275bcd3-dirty`), `make bin` stamps `VERSION` with it, and
+`trouble --version` prints `<sha> <sha> <time> [stamped]`: stamped and healthy, just not a release. Only
+when git cannot answer at all (an exported tarball with no `.git`) does the Makefile's `|| echo 0.0.0-dev`
+fire, and *that* is the unstamped posture — `0.0.0-dev` / `unknown`, `/health.json` `degraded` with
+`detail.reason="unstamped_build"`, one `lifecycle` record, and `trouble install` refusing to enable the
+unit without `--force`. `ReleaseVersion` (SPEC-12 §3.4) narrows a describe stamp to the release it
+describes for records, health rows and backup names (`v0.1.1-3-gabc1234` → `v0.1.1`) while leaving
+`0.0.0-dev` and a bare sha alone, because neither is a release.
+
+**Upgrading a host from release N to release N+1.** The recipe's own records carry `from_version` and
+`to_version` (SPEC-12 §3.6), so the operation is checkable from the ledger alone:
+
+```
+trouble upgrade --to /usr/local/bin/troubled.new --config /etc/trouble/config.toml
+# stage → self-check → park (systemctl stop, the drain parks in-flight plays) → backup
+# → rename-over → systemctl restart → READY, or rollback within lifecycle.upgrade_ready_timeout
+scripts/upgrade_cross_version.sh          # the same path as a test: two stamped builds, real ledger
+```
+
+The staged binary is a *download*, never a hand-copied file — verify it against `manifest.json` from
+`make release` (`sha256` is passed to the recipe) before renaming anything into place. `backups/bin/`
+holds `<from_version>-<git_sha>` for `lifecycle.rollback_depth` generations, so `trouble upgrade
+--rollback` restores the previous release by the same rename recipe. Two facts from the ledger say what
+happened: `{"stage":"upgrade","step":"park",…}` with the parked count when it is knowable, and
+`{"stage":"upgrade","step":"resume"|"rollback","from_version":..,"to_version":..}` with the §3.4 actor
+triple of the build that made the decision.
+
+**Verifying a release before it is tagged.** The cross-version path needs two *stamped* builds, not two
+tags, so it runs on any tree:
+
+```
+scripts/upgrade_cross_version.sh     # builds v0.0.9 and v0.1.0 from this tree, runs the §3.6 path,
+                                     # asserts park → rename → READY and the versioned ledger chain
+```
+
+A tagless tree is the normal state between releases, so a red result here is a real regression in the
+upgrade recipe, never "no tags available". The release act itself belongs to the owner: do not tag a
+commit to make a test pass.
+
 ## 15. The GitReins guard: its scan surface and its test window (TRBL-014)
 
 The Tier 1 guard is only a signal if a clean tree is green. Two independent defects made every judge

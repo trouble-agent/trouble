@@ -100,6 +100,8 @@ func StallCheck(ctx context.Context, cfg Config) (stallVerdict, error)
 func RenderUnits(cfg Config) ([]unitTemplate, error)      // 006 on a non-renderable ExecStart
 func AuditUnits(cfg Config, scope Scope) ([]types.ConfigValue, error) // OnFailure present → 016
 func Upgrade(ctx context.Context, cfg Config, plan upgradePlan) error  // 011 on park failure
+func ReleaseVersion(stamp string) string                               // §3.4: describe stamp → release version
+func UpgradeRecord(step, fromVersion, toVersion string, parked int) types.RecordDraft // §3.6 step record
 func CheckSchemaCompat(stateRoot string, maxSupported int) error       // 012
 func ForwardLoop(ctx context.Context, cfg Config) error                // spool → envelope → ack → trim
 func TopologyDecisions(cfg Config) []types.TopologyDecision
@@ -790,6 +792,53 @@ Three package-level variables in `internal/lifecycle`, set at link time, never a
 | `GitSHA` | `-X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$(git rev-parse --short=7 HEAD)` | `unknown` |
 | `BuildTime` | `-X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)` | `1970-01-01T00:00:00.000Z` |
 
+**The release identity: a tag, the describe stamp, and the release version (v0.1.1a).** A release is
+identified by an annotated or lightweight git tag named `vMAJOR.MINOR.PATCH` (this suite's own release
+series: `v0.1.0`, `v0.1.1`), and `Version` is stamped with the raw `git describe` output rather than a
+hand-written string, so **what the binary reports is what the tree was**. `git describe --tags --always
+--dirty` has exactly six output shapes; all six are measured on the reference host (2026-09-19) and all
+six are normative here:
+
+| Stamp | Tree |
+|---|---|
+| `v0.1.0` | the tagged commit, clean |
+| `v0.1.0-dirty` | the tagged commit, uncommitted changes |
+| `v0.0.9-3-gabc1234` | three commits past the tag: `<tag>-<count>-g<sha>` |
+| `v0.0.9-3-gabc1234-dirty` | the same, uncommitted changes |
+| `<short-sha>` | **no tag anywhere in the repository** — `--always` is the fallback |
+| `<short-sha>-dirty` | the same, uncommitted changes |
+
+The last two are the shape this repository produces today, and the fallback in the table above is what
+the Makefile's `|| echo 0.0.0-dev` adds when even the sha is unavailable (a build from an exported tarball
+with no `.git`). **A tagless tree is therefore not an error: it is the unstamped posture, by design** —
+`Version=0.0.0-dev`, `GitSHA=unknown`, `/health.json` `status="degraded"` with
+`detail.reason="unstamped_build"`, one `lifecycle` record, and `trouble install` refusing to enable the
+unit without `--force`. What is forbidden is a build that reports a *release* it cannot prove: nothing in
+the code path may synthesise a version, and `git describe`'s `-dirty` and `-N-g<sha>` suffixes may never
+be trimmed into one (next paragraph).
+
+**`ReleaseVersion(stamp)` is the ONE mapping from a stamp to a release version (v0.1.1a).** Every record,
+health row, backup name and topology row that must name a *release* rather than a *build* goes through
+this function; a second hand-written trimmer is a defect. Its rules, in order:
+
+1. A stamp whose first dot-separated field is not a number is not a version at all — a bare short sha,
+   `unknown`, or the `-dirty` form of either — and is returned **verbatim**. So is `0.0.0-dev`: it is the
+   sentinel for "no release", and truncating it to `0.0.0` would report a release that does not exist.
+2. A leading `v` is dropped once, and a trailing `-dirty` with it.
+3. A git-describe suffix is dropped whole (`-<count>-g<sha>`): the count is the DEV distance to the tag,
+   so `v0.0.9-3-gabc1234` reports `v0.0.9`, the release it describes. The sha is not lost — it is the
+   `GitSHA` field of the same §3.4 triple, which is exactly where a commit identity belongs.
+4. What is left of a hyphen suffix attached to a digit goes too, so `v0.1.0-rc1` reports `v0.1.0`.
+5. The `v` is put back only when it was there, and the result is always a **prefix** of the stamp, never a
+   re-render of the parsed fields: a stamp that still does not normalize to MAJOR.MINOR.PATCH after those
+   cuts is returned whole. The function never invents and never truncates a version, and it is idempotent
+   (`ReleaseVersion(ReleaseVersion(x)) == ReleaseVersion(x)`), because a resume record re-states the
+   version a park named.
+
+The mapping is total and cannot fail: an unparsable stamp degrades to "report the bytes that were
+stamped", which is the honest degradation. It is pinned by
+`internal/lifecycle/upgrade_version_test.go::TestReleaseVersionMapping` against all six measured shapes.
+
 Build line (Makefile `build` target, applied to **every** binary — `troubled`, `trouble`):
 
 ```
@@ -967,6 +1016,39 @@ darwin, that same optimisation, since the platform call is reached through `fsyn
 6. **Rollback**: if READY does not arrive within `lifecycle.upgrade_ready_timeout` (30s), the unit's
    `OnFailure=` fires the escalate unit and `trouble upgrade --rollback` restores `backups/bin/<previous>` by
    the same rename recipe.
+
+**The upgrade record contract (v0.1.1a).** Every step above is one `lifecycle` record whose `payload` is
+exactly `{stage:"upgrade", step:<park|resume|rollback>, from_version, to_version}` plus `parked` on `park`
+alone, and whose `actor` is the running binary's §3.4 triple — which is what lets the same append-only file
+say which build acted before and after the swap. Five rules:
+
+- **`from_version` and `to_version` are RELEASE versions**, produced by `ReleaseVersion` (§3.4), never the raw
+  describe stamp: a record carrying `v0.0.9-3-gabc1234` cannot be compared with the `v0.1.0` a health row or a
+  later record reports, which is the question the pair exists to answer. `from_version` is the release being
+  replaced, `to_version` the release being installed; on **rollback the pair is reversed** (`from` = the
+  version being removed, `to` = the version being restored), because the rollback is itself a swap.
+- **The chain is ordered and append-only**: `park` precedes the rename, `resume` (or `rollback`) follows the
+  READY verdict, and no step is ever rewritten or removed — the park a crashed upgrade left behind is the
+  record that makes the completing run's resume legal rather than a guess.
+- **`parked` is present only when the count is KNOWABLE.** A park performed by stopping the unit (§3.6 step 2
+  in production) is not observable from outside the process, so the key is omitted rather than reported as
+  `0`: an absent count and a zero count are different facts, and a fabricated zero is worse than a missing key.
+- **`from_version`/`to_version` are inputs, not lookups.** The previous binary is a FILE and a version stamp
+  is not recoverable from one at run time (the §3.4 stamps exist only inside a running process, and the
+  `debug/buildinfo` settings a Go binary carries do not include them). The recipe therefore takes both
+  releases as inputs — the running process's own triple is the default for whichever side the caller does not
+  state — and a caller that cannot supply them records the unstamped `0.0.0-dev` honestly rather than
+  inventing a version.
+- **The backup is named for what it CONTAINS**: `backups/bin/<from_version>-<git_sha>`, with the version half
+  the release being replaced and the sha half the running process's. Naming it from the running triple filed a
+  v0.0.9 binary under a v0.1.0 name on the documented upgrade flow (where the process running the recipe IS
+  the new build), which made the rollback inventory advertise a version it did not hold.
+
+The record shape is pinned by `internal/lifecycle/upgrade_version_test.go::TestUpgradeRecordShape` (field by
+field, both branches) and the cross-version chain — including the crash between park and rename — by
+`TestCrossVersionUpgradePath`, whose two builds are `cmd/troubled` compiled from one tree with two different
+§3.4 stamp sets (`v0.0.9` and `v0.1.0`). **No release tag is created by that test**: tagging is a release act,
+and the path it proves needs two stamped builds, not two tags.
 
 **Spawned foremen survive the restart.** A spawned foreman is a separate process (SPEC-08). `worktrees-meta/
 <tsk_id>.json` records `{pid, worktree, task_id, branch, started_ts, state}`; on boot the daemon re-adopts a
@@ -1199,7 +1281,7 @@ minted and the range is unchanged.
 | TROUBLE-LIFECYCLE-008 | transient | heartbeat file stale beyond `heartbeat_stale_after`, or the daemon's liveness surface is unreadable (`/health.json` unreachable while the heartbeat is fresh) | checker exit 8, alarm line with `detail.class` | distinguish dashboard-wedged from daemon-dead via `detail.class` |
 | TROUBLE-LIFECYCLE-009 | permanent | ledger sequence stall: `seq_age > max_seq_age` with an unchanged `ledger_last_seq` across two checker runs | checker exit 9; escalation after `confirm_runs` | inspect the writer, the spool, and the disk |
 | TROUBLE-LIFECYCLE-010 | transient | escalation hook failed on every configured channel (`trouble-escalate@` or the checker's channel run) | line in `escalate.log`, exit non-zero | fix at least one channel; an empty channel list is an install failure (016) |
-| TROUBLE-LIFECYCLE-011 | transient | upgrade park failed, or resume is not possible from the ledger | **upgrade aborted before the rename**; old binary keeps running and keeps serving | fix the park blocker, retry |
+| TROUBLE-LIFECYCLE-011 | transient | upgrade park failed, a park that cannot be PERSISTED (the §3.6 step-2 record refused by the ledger), or resume is not possible from the ledger | **upgrade aborted before the rename**; old binary keeps running and keeps serving | fix the park blocker, retry |
 | TROUBLE-LIFECYCLE-012 | permanent | `schema_version` in the current ledger generation exceeds this binary's `max_supported` | refuse to start, exit 13, ledger untouched | run the newer binary, or set `lifecycle.migrate.downgrade_ok=true` deliberately |
 | TROUBLE-LIFECYCLE-013 | permanent | a secret-bearing file is not 0600, or secret-shaped material is present in `/proc/self/cmdline` | exit 13 (argv case: refuse to start) | `chmod 600`; move the value into the EnvironmentFile |
 | TROUBLE-LIFECYCLE-014 | permanent | forward protocol version unsupported (upstream or downstream) | satellite stops forwarding, `/health.json` degraded, spool retained | align `hub.protocol_version` by upgrading one side |
@@ -1298,6 +1380,7 @@ Files and pass thresholds (all numbers normative regressions):
 | `internal/lifecycle/heartbeat_test.go` | fake clock over 2h ⇒ 240 writes, drift <100ms; 10k concurrent reads never observe invalid JSON; heartbeat write while the ledger writer is blocked ⇒ heartbeat still fresh | drift <100ms; 0 parse errors; blocked-writer case passes |
 | `internal/lifecycle/stallcheck_test.go` | httptest `/health.json`: probe/consume advancing seq ⇒ exit 0; frozen seq with `seq_age` 400s ⇒ 009/exit 9; HTTP 500 + fresh heartbeat ⇒ 008/exit 8; HTTP 500 + stale heartbeat ⇒ 008/exit 8 with a different `detail.class` | detection bound ≤420s over a `{stall_start, run_ts}` table; `breach_count` gating at 2 |
 | `internal/lifecycle/upgrade_test.go` | ETXTBSY regression (naive write fails, rename path succeeds); park failure ⇒ 011 **and the binary byte-identical to before**; 3 parked plays + 1 applied mutating call ⇒ resume re-checks, never re-applies; READY timeout ⇒ escalate | 0 re-applications; park-failure ⇒ 0 renames |
+| `internal/lifecycle/upgrade_version_test.go` | **AC-27/AC-25, the release contract and the prev→next path (QA-TROUBLE-7)**: `ReleaseVersion` over all six measured `git describe --tags --always --dirty` shapes plus the four that are not versions (bare sha, `-dirty` sha, `unknown`, empty) and idempotence; the upgrade record body field by field on both branches; the step ORDER of park→resume and park→rollback; the park a refused ledger cannot persist ⇒ 011 with 0 renames; **`TestCrossVersionUpgradePath`** — two `cmd/troubled` builds stamped `v0.0.9` and `v0.1.0` from one tree, the first installed and STARTED, the recipe killed with its park durable in a real ledger file, then completed from that on-disk state: live path 0755 carrying the staged build, the live binary reporting `v0.1.0` when executed, `backups/bin/v0.0.9-…` holding the previous build, and the ledger chain park(child)→park→resume read back from the same file; **`TestCrossVersionUpgradeRollbackOnReadyTimeout`** — READY never arrives within the CONFIGURED `lifecycle.upgrade_ready_timeout`, the live path is restored to the v0.0.9 bytes, and the ledger carries a `rollback` record with the pair reversed | every mapping row asserted, 0 rows reported as a version they are not; 2 records per completed upgrade (park, resume) and per rollback (park, rollback) with both version fields a release version and no `parked` on a non-park step; the killed upgrade's park survives in the same file and the completing run states it again; the deadline that fired is the configured one (elapsed ≥ it, the error naming it); 0 renames on a refused park |
 | `internal/lifecycle/schema_test.go` | v2 record with a v1 binary ⇒ 012/exit 13; tolerant read preserves unknown payload keys; downgrade refusal; forward `protocol_version=2` ⇒ 014; `schema_version>max` on the local ledger ⇒ SPEC-01's refusal | exit 13, ledger bytes unchanged (sha256 of every file compared) |
 | `internal/lifecycle/forward_test.go` | httptest hub on the sentinel route: 200-record/512KB batch bounds; gzip; item type `trouble_forward`; duplicate batch ⇒ same `rec_id`, hub ledger count unchanged; 429 + `Retry-After: 3` ⇒ next attempt ≥3s; 1MB budget vs 4×256KB ⇒ oldest evicted, 1 exact `EstLost` gap, 2MB reserve intact; torn last line + bad CRC cases; `from_seq` hole ⇒ `satellite_seq_gap` | batch ≤200 recs and ≤512KB decompressed; 0 duplicate hub records; eviction `EstLost` exact (footer-derived); gap records always present |
 | `internal/lifecycle/units_test.go` | render both units; `systemd-analyze verify` on a temp unit root; `systemd-analyze security` score reported; `OnFailure=` present ⇒ 016 absent/present cases; `trouble install --root <tmp>` writes only into the temp root | verify clean; `--root` writes 0 files outside the temp root |

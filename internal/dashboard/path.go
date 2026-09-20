@@ -43,3 +43,22 @@ func ExpandTokenPath(p string) (string, error) {
 	}
 	return filepath.Join(home, rest), nil
 }
+
+// DefaultTokenPath is the SPEC-10 §3.4 default `dashboard.token_file`, resolved
+// to an absolute path: `~/.config/trouble/dashboard-tokens.json` under the
+// current user's home directory.
+//
+// It is the single expression both sides of the store boundary resolve through.
+// The daemon reaches the default through Config.normalize()/DefaultConfig(); the
+// operator CLI has to name the same file when no config declares one, and it
+// used to name it with os.UserConfigDir() instead — which honours
+// XDG_CONFIG_HOME, while the shipped default's documented and daemon-reachable
+// form is `~/`. On a host with XDG_CONFIG_HOME set, the CLI therefore minted
+// into `$XDG_CONFIG_HOME/trouble/dashboard-tokens.json` while the daemon read
+// `$HOME/.config/trouble/dashboard-tokens.json`: the mint succeeded, printed a
+// token, and that token 401'd everywhere — TROUBLE-DASHBOARD-002's signature,
+// by a second route. ONE function for the default means the two can no longer
+// drift; the checked-in default string itself stays the spec's `~/` form.
+func DefaultTokenPath() (string, error) {
+	return ExpandTokenPath(DefaultConfig().TokenFile)
+}

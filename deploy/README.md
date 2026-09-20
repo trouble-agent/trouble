@@ -153,6 +153,15 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
    as the container's own uid, inside the volume (measured: trap 4 in
    `docs/operations.md` §14).
 
+   `-e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token` is equally
+   load-bearing, and for the same class of reason: the container configs declare
+   `dashboard.token_file` under `/data/state`, which does not exist on a host, so
+   a mint run WITHOUT it would write your `~/.config/trouble/dashboard-tokens.json`
+   while the daemon reads the `/data/state` path — the token then 401s with
+   nothing naming the two paths. The mint now prints the store it wrote and warns
+   when the resolved config declares a different one, so the mismatch is visible
+   instead of silent.
+
 3. Tear down: `docker compose down` keeps the state volume; `-v` drops it.
 
 Builds from a git **worktree** stamp `nogit00` unless `GIT_SHA` is passed as in

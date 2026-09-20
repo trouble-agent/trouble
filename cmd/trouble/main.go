@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,14 +94,84 @@ func run(args []string) int {
 	}
 }
 
-// defaultTokenPath mirrors the dashboard.token_file default (SPEC-10 §3.4).
-func defaultTokenPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
+// defaultTokenPath is the dashboard.token_file default (SPEC-10 §3.4), resolved
+// the way the DAEMON resolves it: one shared expression, in
+// internal/dashboard.DefaultTokenPath.
+//
+// Why it is not computed here: the CLI used to derive the default from
+// os.UserConfigDir(), which honours XDG_CONFIG_HOME, while the daemon's
+// documented default is the `~/` form under $HOME. On a host with
+// XDG_CONFIG_HOME set, the CLI minted into
+// $XDG_CONFIG_HOME/trouble/dashboard-tokens.json while the daemon read
+// $HOME/.config/trouble/dashboard-tokens.json — the mint printed a token and
+// that token 401'd everywhere, by a second route to the same defect TRBL-063
+// reports. Both sides now ask the same function.
+func defaultTokenPath() (string, error) {
+	return dashboard.DefaultTokenPath()
+}
+
+// storeNotice is the feedback the dashboard token verbs owe an operator: WHICH
+// file this verb is addressing, and — when the resolved config declares a
+// different `dashboard.token_file` — that the daemon is reading another file.
+//
+// Why: a mint against a config declaring a store the CLI is not writing used to
+// print a success line and a token while the token 401'd with no legible cause:
+// nothing named the path, and the daemon's own `token store is empty` warning
+// had scrolled past. Silence is what made the divergence invisible (TRBL-063),
+// so the store is always named, on the same stream as the success line, before
+// the write.
+//
+// cfgDeclaredStore is the absolute `dashboard.token_file` the CONFIG FILE
+// declares (never a flag or an env var), or "" when no config file declares
+// one. The warning is printed only when that path differs from storePath, so
+// the no-config case stays a single line.
+//
+// Remedy line: the two switches that make the sides agree. The CLI side is
+// spelled as the env var because the documented container mint runs the CLI in
+// the container image, where the daemon's store lives under /data/state.
+func storeNotice(w io.Writer, verb, storePath, cfgDeclaredStore string) {
+	fmt.Fprintf(w, "dashboard token store: %s\n", storePath)
+	if cfgDeclaredStore == "" || cfgDeclaredStore == storePath {
+		return
 	}
-	return filepath.Join(dir, "trouble", "dashboard-tokens.json")
+	fmt.Fprintf(w, "WARNING: the resolved config declares dashboard.token_file = %s, but `dashboard token %s` addresses %s.\n", cfgDeclaredStore, verb, storePath)
+	fmt.Fprintf(w, "  the daemon reads the config's path, so a token minted here will not authenticate. To agree:\n")
+	fmt.Fprintf(w, "    CLI:    TROUBLE_DASHBOARD_TOKEN_FILE=%s\n", cfgDeclaredStore)
+	fmt.Fprintf(w, "    daemon: --dashboard-token_file=%s\n", cfgDeclaredStore)
+}
+
+// configDeclaredStore returns the absolute `dashboard.token_file` declared by
+// the config FILE at cfgPath, or "" when that file declares none (or does not
+// exist, which Resolve tolerates as the no-config case).
+//
+// The file layer is read by re-running the SAME resolution the daemon runs
+// (lifecycle.Resolve) with no flags and no environment: a key whose winning
+// source is `file` is the operator's declaration, and a key that still carries
+// the compiled default is one the file does not declare. Reading the resolved
+// values instead of parsing the TOML here keeps one parser and one precedence
+// table for both processes — the property this whole notice exists to defend.
+func configDeclaredStore(cfgPath string) string {
+	res, err := lifecycle.Resolve(nil, nil, cfgPath)
+	if err != nil {
+		// A config that does not load is the daemon's boot failure to report,
+		// not this notice's: an unreadable file declares nothing legible here.
+		return ""
+	}
+	for _, cv := range res.Values {
+		if cv.Key != "dashboard.token_file" || cv.Source != "file" {
+			continue
+		}
+		declared, _ := cv.Value.(string)
+		if declared == "" {
+			return ""
+		}
+		abs, err := dashboard.ExpandTokenPath(declared)
+		if err != nil {
+			return ""
+		}
+		return abs
+	}
+	return ""
 }
 
 // writeTokenEnv places TROUBLE_DASHBOARD_TOKEN=<plaintext> into the env file
@@ -224,13 +295,20 @@ func captureConfig(args []string) []string {
 	return out
 }
 
+// resolvedConfigPath is the config file `resolve` hands to lifecycle.Resolve:
+// the --config override when one was given, else the config_path default. It is
+// factored out so the dashboard token verbs can name the SAME file the daemon
+// would read without re-deriving (or guessing) a path.
+func resolvedConfigPath() string {
+	if cfgPathOverride != "" {
+		return cfgPathOverride
+	}
+	return defaultConfigPath()
+}
+
 // resolve loads the resolved config for a verb. A config problem is exit 13.
 func resolve(args []string) (lifecycle.Resolved, int) {
-	cfgPath := cfgPathOverride
-	if cfgPath == "" {
-		cfgPath = defaultConfigPath()
-	}
-	res, err := lifecycle.Resolve(captureConfig(args), os.Environ(), cfgPath)
+	res, err := lifecycle.Resolve(captureConfig(args), os.Environ(), resolvedConfigPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		return lifecycle.Resolved{}, 13
@@ -468,7 +546,12 @@ func cmdDashboard(args []string) int {
 	}
 	path := res.Config.Dashboard.TokenFile
 	if path == "" {
-		path = defaultTokenPath()
+		def, err := defaultTokenPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+			return 13
+		}
+		path = def
 	}
 	// SPEC-10 §3.2: the shipped default is a ~/ path. Resolve it with the same
 	// helper the daemon's store uses, so the file this CLI mints into is the
@@ -481,8 +564,13 @@ func cmdDashboard(args []string) int {
 	}
 
 	if verb == "list" {
-		return listTokens(path, *asJSON)
+		return listTokens(os.Stdout, os.Stderr, path, *asJSON, configDeclaredStore(resolvedConfigPath()))
 	}
+
+	// Which store this verb addresses, and the divergence warning when the
+	// resolved config names a different one (TRBL-063). Printed before the
+	// write so the path is on screen even if the store write then fails.
+	storeNotice(os.Stderr, verb, path, configDeclaredStore(resolvedConfigPath()))
 
 	// The plaintext is shown exactly once, here: this is the only code path in
 	// the repository that can mint a dashboard token (SPEC-10 §3.2).
@@ -574,19 +662,24 @@ type tokenFileView struct {
 	Tokens  []types.Token `json:"tokens"`
 }
 
-func listTokens(path string, asJSON bool) int {
+func listTokens(stdout, stderr io.Writer, path string, asJSON bool, cfgDeclaredStore string) int {
+	// The read side owes the same feedback as the mint: which store was read,
+	// and the divergence warning when the config names another one. An operator
+	// debugging a 401 needs to know the list they are looking at is not the
+	// daemon's store (TRBL-063).
+	storeNotice(stderr, "list", path, cfgDeclaredStore)
 	b, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "dashboard token list: %v\n", err)
+		fmt.Fprintf(stderr, "dashboard token list: %v\n", err)
 		return 13
 	}
 	var tf tokenFileView
 	if err := json.Unmarshal(b, &tf); err != nil {
-		fmt.Fprintf(os.Stderr, "dashboard token list: %v\n", err)
+		fmt.Fprintf(stderr, "dashboard token list: %v\n", err)
 		return 13
 	}
 	if asJSON {
-		enc := json.NewEncoder(os.Stdout)
+		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(tf.Tokens)
 		return 0
@@ -596,7 +689,7 @@ func listTokens(path string, asJSON bool) int {
 		if t.Revoked {
 			state = "revoked"
 		}
-		fmt.Printf("%-28s %-22s %-9s created=%s last_used=%s\n", t.ID, strings.Join(scopeStrings(t.Scopes), ","), state, t.CreatedTS, t.LastUsedTS)
+		fmt.Fprintf(stdout, "%-28s %-22s %-9s created=%s last_used=%s\n", t.ID, strings.Join(scopeStrings(t.Scopes), ","), state, t.CreatedTS, t.LastUsedTS)
 	}
 	return 0
 }

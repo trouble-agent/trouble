@@ -105,3 +105,12 @@ paths = [
 ]
 regexTarget = "line"
 regexes = ["evicted_keys"]
+
+[[allowlists]]
+description = "the documented synthetic DSN credential used in the README quickstart curl and the historical commits that carried it: a sequential-hex placeholder (0123456789abcdef...) that is not and never was a credential. Scoped to the exact placeholder on the line, so a real key pasted into README or history is still caught."
+paths = [
+  '''(^|/)README\.md$''',
+  '''^\.gitreins/history/.*\.patch$''',
+]
+regexTarget = "line"
+regexes = ['''0123456789abcdef0123456789abcdef''']

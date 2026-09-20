@@ -230,14 +230,41 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
 * `specs/SPEC-11-skills.md` — the skill loop, in full.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
+## Getting the source
+
+```
+git clone https://github.com/trouble-agent/trouble
+cd trouble
+```
+
+The module path is `github.com/trouble-agent/trouble`, so the operator CLI and the
+daemon also install directly from a checkout-free environment:
+
+```
+go install github.com/trouble-agent/trouble/cmd/trouble@latest    # operator CLI
+go install github.com/trouble-agent/trouble/cmd/troubled@latest   # the daemon
+```
+
+**Go 1.26.0 or newer is required** (`go.mod` declares `go 1.26.0`) — the daemon core
+uses the 1.26 language and stdlib surface and will not build on older toolchains.
+Nothing else is needed: no cgo, no third-party dependencies, no external service
+for a first boot.
+
 ## Build and test
 
 ```
-go build ./...
+make bin                                     # the stamped build (version/GitSHA/BuildTime)
+go build ./...                               # unstamped: fine for a quick compile check
 go test -count=1 ./internal/...              # the CI gate
 go test -count=1 -short ./internal/...        # skips the large fixtures and the 60s load test
 go test -count=1 -run TestLoadIngestThroughput ./internal/sentinel/   # SPEC-04 §7's load test
+go test -count=1 ./...                       # everything, including cmd/ and the e2e smoke
 ```
+
+`make bin` is the build that matters: `go build` alone leaves the binary *unstamped*,
+which `/health.json` reports as a degraded posture (`version=0.0.0-dev`,
+`git_sha=unknown`) by design — see SPEC-12 §3.4. Use the plain `go build ./...` form
+only to check that the tree compiles.
 
 `-short` keeps the whole tree safe to run in parallel (the load test degrades to a
 correctness smoke: one request in flight per worker and no throughput/latency/RSS

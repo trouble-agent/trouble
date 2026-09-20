@@ -561,6 +561,51 @@ func (r *Runtime) reconnect(ctx context.Context) bool {
 	return true
 }
 
+// WaitDrained polls the queue's own drain state until it holds or `timeout`
+// elapses. The drain condition — lag == 0 AND pending == 0 — is exactly
+// "every entry XADDed so far has been delivered to the consumer AND acked":
+// the XACK that empties the pending list is the same batch call that advances
+// the client's acked watermark (SetLastAcked), so once the condition holds,
+// reading `redis.last_acked_id` (the health stanza's cursor) cannot observe
+// the pre-ack state, no matter how the caller got here. That makes it the
+// bounded wait a caller uses to order a watermark read on the ack instead of
+// racing it — the level-based form, which needs no registration and is immune
+// to completion events that fired before the caller began waiting.
+func (r *Runtime) WaitDrained(ctx context.Context, timeout time.Duration) bool {
+	if r == nil {
+		return false
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		c := r.clientRef()
+		if c == nil {
+			return false
+		}
+		gi, gerr := c.GroupInfo(ctx)
+		var pending Pending
+		var perr error
+		if gerr == nil {
+			pending, perr = c.Pending(ctx)
+		}
+		switch {
+		case gerr == nil && perr == nil:
+			if gi.Lag == 0 && pending.Count == 0 {
+				return true
+			}
+		case CodeOf(gerr) == types.CodeHub004 || CodeOf(perr) == types.CodeHub004:
+			// A transient 004 (the probe itself failed): keep polling until
+			// the deadline rather than failing the wait.
+		default:
+			return false
+		}
+		remain := time.Until(deadline)
+		if remain <= 0 || ctx.Err() != nil {
+			return false
+		}
+		sleepCtx(ctx, min(remain, 5*time.Millisecond))
+	}
+}
+
 // Ingest is the ingestion-path seam the composition root mounts in front of the
 // sentinel's ledger sink when the profile is light-hub (SPEC-13 §4.2).
 //

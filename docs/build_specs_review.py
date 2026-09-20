@@ -2,9 +2,9 @@
 """Build specs-review.html — every spec rendered, with a linked TOC and per-file anchors.
 Order: INDEX first, then SPEC-01..12, TYPES last. Dark theme, code blocks styled,
 spec-to-spec links resolved to anchors."""
-import glob, html as H, markdown, os, re
+import glob, html as H, markdown, os, re, subprocess
 
-REPO = '~/trouble'
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ORDER = ['specs/SPEC-INDEX.md'] + sorted(glob.glob(f'{REPO}/specs/SPEC-0*.md')) + \
         ['specs/SPEC-TYPES.md'] + [p for p in sorted(glob.glob(f'{REPO}/specs/SPEC-1*.md'))]
 
@@ -81,9 +81,9 @@ Review order suggestion: SPEC-INDEX (scope + cut line) → any SPEC-n (each is s
 </header>
 <div class="toc"><h2>Contents ({len(ORDER)} files)</h2>{toc_html}</div>
 {''.join(sections)}
-<div class="footer">generated from ~/trouble/specs/ · main @ {os.popen('git -C ~/trouble log --oneline -1').read().strip()} · print-friendly: each section page-breaks</div>
+<div class="footer">generated from <code>specs/</code> · {os.popen('git -C ' + REPO + ' log --oneline -1').read().strip()} · print-friendly: each section page-breaks</div>
 </div></body></html>"""
 
-out = '~/trouble/docs/specs-review.html'
+out = os.path.join(REPO, 'docs', 'specs-review.html')
 open(out, 'w').write(page)
 print(f"wrote {out} ({os.path.getsize(out)//1024} KB, {len(ORDER)} specs)")

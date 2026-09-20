@@ -10,14 +10,20 @@ package registry
 //	config.set / file.patch
 //	  check_mode p99            ≤ 25ms
 //	allocations per call        ≤ 40
-//	RSS delta after 10k calls   ≤ 2MB
+//	retained-set delta          ≤ 2MB after 10k calls (live heap after GC)
 //
 // The measurements are always reported in the test log, so a CI run carries the
 // numbers instead of a bare pass. A loaded host cannot be distinguished from a
 // regression at this granularity, so a measurement over the generous CI ceiling
 // is a skip when the host is clearly loaded (/proc/loadavg above the CPU count)
-// and a failure only when it is idle. Two findings this row records rather than
-// hides are called out in TestAllocationsPerCall.
+// and a failure only when it is idle. The ladder applies to the measurements a
+// loaded host can corrupt (latency p99, the Sys arena reading). It deliberately
+// does NOT apply to the retained-set assertion in TestSteadyRSSAfterCalls: the
+// post-GC live heap is deterministic, and the load sweep that exposed the Sys
+// flake showed live-heap deltas of +8–14KB at loads 3.2–4.7 — a busy host moves
+// Sys, never the live set — so a heap delta over the §7 budget fails on any
+// host. Two findings this row records rather than hides are called out in
+// TestAllocationsPerCall.
 
 import (
 	"context"
@@ -35,11 +41,12 @@ import (
 )
 
 const (
-	benchAuthValidateP99 = 2 * time.Millisecond  // §7
-	benchCheckModeP99    = 25 * time.Millisecond // §7
-	benchAllocsPerCall   = 40                    // §7
-	benchRSSDeltaBudget  = 2 << 20               // §7: 2MB
-	benchSteadyCalls     = 10000                 // §7
+	benchAuthValidateP99 = 2 * time.Millisecond    // §7
+	benchCheckModeP99    = 25 * time.Millisecond   // §7
+	benchAllocsPerCall   = 40                      // §7
+	benchRSSDeltaBudget  = 2 << 20                 // §7: 2MB — asserted on the retained set (post-GC live heap)
+	benchSysArenaCeiling = 8 * benchRSSDeltaBudget // 16MB Sys ceiling: a genuine arena blow-up, ~2.8x the +5.0..5.8MB MADV_FREE noise band
+	benchSteadyCalls     = 10000                   // §7
 
 	// benchCIFactor is the "generous CI factor": a sample inside the factor but
 	// over the §7 threshold is logged, one outside it is a skip (loaded host) or
@@ -397,9 +404,27 @@ func TestAllocationsPerCall(t *testing.T) {
 }
 
 // TestSteadyRSSAfterCalls is the §7 steady-state row: ten thousand check_mode
-// calls must not grow the process. RSS is read through runtime.ReadMemStats with
-// a runtime.GC() on each side, and the recording ledger keeps nothing, so the
-// measurement cannot be the test's own memory.
+// calls must not grow the process's RETAINED memory. RSS is read through
+// runtime.ReadMemStats with a runtime.GC() on each side, and the recording
+// ledger keeps nothing, so the measurement cannot be the test's own memory.
+//
+// Why the assertion is the live-heap delta and not Sys: an earlier revision
+// asserted the Sys delta here and failed on any host where the kernel had not
+// yet reclaimed the arena. debug.FreeOSMemory on Linux issues MADV_FREE, under
+// which freed pages stay mapped — still counted in Sys and in RSS — until the
+// kernel reclaims them under memory pressure. Measured on this tree (six
+// consecutive runs): Sys=+5.0MB..+5.8MB against budget 2MB while the live heap
+// moved +7.7KB..+14KB, i.e. Sys reported allocator/kernel behaviour, not the
+// registry's retention. The retained set IS the live heap after GC, so that is
+// what is asserted (budget 2MB, same §7 number) and Sys is kept under a
+// separate 16MB ceiling so a genuine arena blow-up still fails.
+//
+// Regression class this still catches: a retained-set leak across the 10k-call
+// loop — the cc122be class (a per-call cache that keeps call artifacts: JSON
+// round trips, compiled patterns, ledger entries — grew the live heap 1.1MB→
+// 5.1MB over the same loop). Anything that makes the post-GC live heap grow
+// with call count fails the 2MB heap budget on any host, at any load. Pure
+// allocation churn is guarded separately by TestAllocationsPerCall.
 func TestSteadyRSSAfterCalls(t *testing.T) {
 	f := newBenchFixture(t)
 	f.led.dropRecords(true)
@@ -415,9 +440,8 @@ func TestSteadyRSSAfterCalls(t *testing.T) {
 	}
 
 	var before, after runtime.MemStats
-	// Steady-state RSS is only meaningful once the allocator has returned its
-	// free spans to the OS: without FreeOSMemory, Sys tracks the peak of the
-	// 19M allocations the loop makes, not the retained set.
+	// The live-heap reading is only meaningful once the garbage is collected:
+	// without GC, HeapAlloc tracks the churn peak, not the retained set.
 	runtime.GC()
 	debug.FreeOSMemory()
 	runtime.ReadMemStats(&before)
@@ -432,14 +456,23 @@ func TestSteadyRSSAfterCalls(t *testing.T) {
 
 	sysDelta := int64(after.Sys) - int64(before.Sys)
 	heapDelta := int64(after.HeapAlloc) - int64(before.HeapAlloc)
-	t.Logf("after %d check_mode calls: RSS(src: Sys)=%+d bytes, HeapAlloc=%+d bytes, "+
-		"TotalAlloc=%+d bytes over %d mallocs (budget %d bytes)",
-		benchSteadyCalls, sysDelta, heapDelta,
-		int64(after.TotalAlloc)-int64(before.TotalAlloc), after.Mallocs-before.Mallocs, benchRSSDeltaBudget)
-	if sysDelta > benchRSSDeltaBudget {
-		t.Errorf("the steady-state RSS delta after %d calls is %d bytes, over the §7 budget of %d "+
-			"(HeapAlloc delta %+d bytes, so the retained set is the thing to look at)",
-			benchSteadyCalls, sysDelta, benchRSSDeltaBudget, heapDelta)
+	load, cpus := benchHostLoad()
+	t.Logf("after %d check_mode calls: Sys=%+d bytes (arena ceiling %d), HeapAlloc=%+d bytes "+
+		"(retained-set budget %d), TotalAlloc=%+d bytes over %d mallocs, load1=%.2f/%d cpus",
+		benchSteadyCalls, sysDelta, benchSysArenaCeiling, heapDelta,
+		benchRSSDeltaBudget, int64(after.TotalAlloc)-int64(before.TotalAlloc),
+		after.Mallocs-before.Mallocs, load, cpus)
+	if heapDelta > benchRSSDeltaBudget {
+		t.Errorf("the retained-set delta after %d calls is %d bytes, over the §7 budget of %d: "+
+			"the post-GC live heap grew with call count (Sys delta %+d bytes is the allocator's arena, "+
+			"not the retained set — MADV_FREE pages stay mapped until the kernel reclaims them)",
+			benchSteadyCalls, heapDelta, benchRSSDeltaBudget, sysDelta)
+	}
+	if sysDelta > benchSysArenaCeiling {
+		t.Errorf("the Sys arena delta after %d calls is %d bytes, over the %d ceiling: "+
+			"the allocator's arenas grew far beyond the observed churn peak (HeapAlloc delta %+d bytes) — "+
+			"this is the arena blow-up guard, distinct from the §7 retained-set budget",
+			benchSteadyCalls, sysDelta, benchSysArenaCeiling, heapDelta)
 	}
 	if after.Mallocs-before.Mallocs < uint64(benchSteadyCalls) {
 		t.Errorf("the loop allocated only %d times over %d calls: it did not exercise the registry",

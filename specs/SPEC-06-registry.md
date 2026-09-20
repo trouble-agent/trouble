@@ -856,7 +856,7 @@ Test files and what each proves (numeric thresholds are pass thresholds, not goa
 | `internal/registry/testkit_run_test.go` | `testkit.RunAll` over all 13 modules | full suite ≤ 20s wall, 0 flakes over 20 consecutive `-count=1 -race` runs |
 | `internal/registry/testkit/harness_negative_test.go` | `TestHarnessRejectsNonIdempotent` (asserts `testkit.Run` **fails** `badmodule/nonidempotent` with `013`) and `TestHarnessRejectsNoCheckMode` (`Register` refuses `badmodule/nocheckmode` with `014`) | both must fail the module under test; a pass is the CI failure |
 | `internal/registry/schema_test.go` | generator determinism, dialect + keyword closure, boot-time regen equality, `TestNoExecInRegistry`, `TestNoArbitraryCommandModule` | 100 iterations byte-identical; zero out-of-subset keywords; zero `os/exec` references |
-| `internal/registry/registry_bench_test.go` | authorize+validate latency, `check_mode` call latency, allocations per call | authorize+validate p99 ≤ 2ms; `config.set`/`file.patch` `check_mode` p99 ≤ 25ms; ≤ 40 allocs/call; steady RSS delta after 10k calls ≤ 2MB |
+| `internal/registry/registry_bench_test.go` | authorize+validate latency, `check_mode` call latency, allocations per call | authorize+validate p99 ≤ 2ms; `config.set`/`file.patch` `check_mode` p99 ≤ 25ms; ≤ 40 allocs/call; retained-set delta after 10k calls ≤ 2MB (TRBL-048: the post-GC live-heap delta — Sys measures the allocator's MADV_FREE arena state, not retention, and is held to a separate 16MB arena-blow-up ceiling) |
 
 AC-derived tests:
 

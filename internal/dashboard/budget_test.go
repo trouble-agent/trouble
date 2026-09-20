@@ -805,91 +805,125 @@ func driveLoad(addr, token string, window time.Duration) (int, []time.Duration, 
 // which keeps the quiet-host (spec) budgets.
 func loadAvgDashboard() float64 { return loadfence.LoadAvg1() }
 
-// dashboardRenderBudget scales the §7 20ms render p99 with the load the
-// measurement runs under: 20ms × (1 + load/16), clamped to a 40ms ceiling.
-// The p99 is a per-request wall clock: it absorbs the descheduling of the
-// helper's goroutines under parallel package execution (this run measured
-// 31ms at load_avg_1m ~19 with the parent binary itself contending for CPU,
-// vs ≤20ms quiet). Past 2x, the host is no longer the explanation — the next
-// real step is a render-path regression, which the ceiling still catches.
-func dashboardRenderBudget(load float64) time.Duration {
-	if load < 4 {
-		return renderP99
-	}
-	budget := time.Duration(float64(renderP99) * (1 + load/16))
+// hostCalibration resolves the SPEC-01 §7a host profile ONCE per test
+// process (TRBL-053): the CPU pilot is 3 × ~30 ms, and every scaled gate in
+// this file consumes the same measurement instead of re-running it per
+// assertion. The I/O pilot is skipped on purpose (Measure("") — the
+// documented no-scratch path): this file's time gates are a render wall
+// clock and a localhost request rate, neither of which touches the block
+// device the I/O pilot models, and §2.9's byte ceilings are retained state at
+// a fixed request count — a request-normalized quantity no host-speed term
+// belongs in.
+var (
+	hostProfileOnce sync.Once
+	hostProfile     loadfence.Profile
+)
+
+func hostCalibration() loadfence.Profile {
+	hostProfileOnce.Do(func() { hostProfile = loadfence.Measure("") })
+	return hostProfile
+}
+
+// dashboardRenderBudget scales the §7 20 ms render p99 with the SPEC-01 §7a
+// host profile (QA-TROUBLE-5, adopted here by TRBL-053): budget × CPUScale()
+// — the CPU pilot's multiple times load contention — clamped to a 40 ms
+// ceiling. The p99 is a per-request wall clock measured inside the helper
+// (template render + fragment write, no disk), so its host term is CPU speed
+// and scheduling. Load alone graded this gate backwards: it pinned a quiet
+// slower box to the bare 20 ms while handing a busier faster one the same
+// 2× ladder (the §7a inversion — 9,747 ms vs a 9,000 ms bar at load 3.99 on
+// the ledger's twin of this gate). CPUScale is clamped so the budget only
+// ever loosens relative to the spec number; a quiet reference-class host
+// (multiple 1, load ~0) asserts the §7 20 ms exactly. The ceiling stays:
+// past 40 ms the host is no longer the explanation — the next real step is
+// a render-path regression, which the ceiling still catches.
+func dashboardRenderBudget(prof loadfence.Profile) time.Duration {
+	budget := time.Duration(float64(renderP99) * prof.CPUScale())
 	if budget > 2*renderP99 {
 		budget = 2 * renderP99
 	}
 	return budget
 }
 
-// dashboardRPSFloor scales the §7 request-rate row with the load the
-// measurement runs under. The floor asserts the parent can drive the rate;
-// under full-suite parallel load the parent binary contends with every other
-// test (this run measured 88 rps against the 0.9×100 floor at load ~19, with
-// a 98 rps control window — the host, not the dashboard, sets the ceiling).
-// The driver-side floor scales down with observed load — budgetRPS × 0.9 ×
-// 20/(load+16), floored at budgetRPS × 0.4 — while the serving side's own
-// capability stays checked by the control-window ratio below; a quiet host
-// keeps the full 0.9× spec floor. The clamp keeps the gate meaningful: below
-// 40 rps the dashboard is failing the row on any host.
-func dashboardRPSFloor(load float64) float64 {
-	if load < 4 {
-		return float64(budgetRPS) * 0.9
-	}
-	floor := float64(budgetRPS) * 0.9 * 20.0 / (load + 16.0)
+// dashboardRPSFloor scales the §7 request-rate row's DRIVER-side floor with
+// the SPEC-01 §7a host profile (QA-TROUBLE-5, adopted here by TRBL-053):
+// budgetRPS × 0.9 / CPUScale(). The parent drives over real TCP and contends
+// with every other test binary; under parallel suite load it is the driver's
+// CPU, not the dashboard, that sets the achievable rate (this run: 88 rps
+// against the 0.9×100 floor at load ~19, with a 98 rps control window — the
+// host, not the dashboard, was the ceiling). A rate is a floor, so it moves
+// DOWN with the host's measured slowdown: CPUScale ≥ 1 by clamp, division
+// keeps the quiet reference-class host at the full 0.9× spec floor, and the
+// 0.4× clamp keeps the gate meaningful — below 40 rps the dashboard fails
+// the row on any host. The serving side's own capability stays checked by
+// the load-immune control-window ratio in TestBudgetDashboardRSS.
+func dashboardRPSFloor(prof loadfence.Profile) float64 {
+	floor := float64(budgetRPS) * 0.9 / prof.CPUScale()
 	if floor < float64(budgetRPS)*0.4 {
 		floor = float64(budgetRPS) * 0.4
 	}
 	return floor
 }
 
-// TestBudgetDashboardScaling pins the load-aware dashboard budgets: quiet
-// hosts keep the spec numbers, the observed full-suite failure point (31ms
-// p99, 88 rps at load ~19) passes both, the clamps hold, and neither budget
-// decreases with load.
+// TestBudgetDashboardScaling pins the host-calibrated dashboard budgets
+// (SPEC-01 §7a model): a reference-class profile keeps the spec numbers, the
+// observed full-suite failure point (31ms p99, 88 rps at load ~19) passes
+// both, the clamps hold, and neither budget's monotonicity flips with load.
 func TestBudgetDashboardScaling(t *testing.T) {
 	renderCases := []struct {
-		load float64
+		prof loadfence.Profile
 		want time.Duration
 	}{
-		{0, 20 * time.Millisecond},   // no /proc/loadavg → spec budget
-		{3.9, 20 * time.Millisecond}, // quiet host: §7 asserted directly
-		{4, 25 * time.Millisecond},   // 20ms × (1+4/16)
-		{16, 40 * time.Millisecond},  // the 2x ceiling
-		{19, 40 * time.Millisecond},  // observed 31ms p99 at load ~19
-		{80, 40 * time.Millisecond},  // the ceiling
+		// Reference class (multiple 1, quiet): the §7 budget asserted as-is.
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 0}, 20 * time.Millisecond},
+		// Slow-but-quiet box (multiple 2): the §7a term loosens the bar where
+		// the old load_avg-only ladder pinned it to the bare 20 ms.
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 2, Load: 0}, 40 * time.Millisecond},
+		// Quiet box with a descheduling blip in the pilot: the clamp never
+		// tightens a budget below the reference number.
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 0.5, Load: 0}, 20 * time.Millisecond},
+		// Busy reference-class box: 1 × (1 + 19/16) → the 2× ceiling.
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 19}, 40 * time.Millisecond},
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 80}, 40 * time.Millisecond}, // the ceiling
 	}
 	for _, c := range renderCases {
-		if got := dashboardRenderBudget(c.load); got != c.want {
-			t.Errorf("dashboardRenderBudget(%.1f) = %s, want %s", c.load, got, c.want)
+		if got := dashboardRenderBudget(c.prof); got != c.want {
+			t.Errorf("dashboardRenderBudget(io %.2f cpu %.2f load %.1f) = %s, want %s", c.prof.IOMultiple, c.prof.CPUMultiple, c.prof.Load, got, c.want)
 		}
 	}
 	rpsCases := []struct {
-		load float64
+		prof loadfence.Profile
 		want float64
 	}{
-		{0, 90},               // quiet floor: 0.9 × 100
-		{3.9, 90},             //
-		{4, 90},               // curve starts continuous with the quiet floor
-		{19, 51.428571428571}, // 0.9 × 100 × 20/35, observed 88 rps here
-		{31, 40},              // 0.9 × 100 × 20/47 = 38.3, clamped to 0.4 × 100
-		{80, 40},              // the 0.4 clamp
+		{loadfence.Profile{CPUMultiple: 1, Load: 0}, 90}, // quiet floor: 0.9 × 100
+		// Slow box: the floor divides by the measured multiple (rate floor
+		// moves DOWN with the host's slowdown, mirroring SPEC-01 §7a item 1).
+		{loadfence.Profile{CPUMultiple: 2, Load: 0}, 45},
+		// Blip in the pilot: clamp at the reference floor.
+		{loadfence.Profile{CPUMultiple: 0.5, Load: 0}, 90},
+		// Busy reference-class box: 90 / (1 + 19/16) = 90 / 2.1875 = 41.1.
+		{loadfence.Profile{CPUMultiple: 1, Load: 19}, 41.142857142857},
+		// Clamps: 90 / 3.9375 = 22.9 → the 0.4× floor; deep oversubscription.
+		{loadfence.Profile{CPUMultiple: 1, Load: 31}, 40},
+		{loadfence.Profile{CPUMultiple: 1, Load: 80}, 40},
 	}
 	for _, c := range rpsCases {
-		if got := dashboardRPSFloor(c.load); math.Abs(got-c.want) > 0.01 {
-			t.Errorf("dashboardRPSFloor(%.1f) = %.2f, want %.2f", c.load, got, c.want)
+		if got := dashboardRPSFloor(c.prof); math.Abs(got-c.want) > 0.01 {
+			t.Errorf("dashboardRPSFloor(cpu %.2f load %.1f) = %.2f, want %.2f", c.prof.CPUMultiple, c.prof.Load, got, c.want)
 		}
 	}
-	// Floors must never increase as load grows (more load never raises the
-	// bar); budgets must never decrease with load (checked in the render table
-	// above by its shape).
-	prev := dashboardRPSFloor(0)
-	for _, load := range []float64{0, 3.9, 4, 19, 31, 80} {
-		if got := dashboardRPSFloor(load); got > prev {
-			t.Errorf("dashboardRPSFloor(%.1f) = %.2f > previous %.2f: the floor must never increase with load", load, got, prev)
+	// Floors must never increase as the host term grows (more load or a
+	// slower pilot never raises the bar); budgets must never decrease (the
+	// render table above pins the budget side by its shape).
+	prev := dashboardRPSFloor(loadfence.Profile{CPUMultiple: 1, Load: 0})
+	for _, prof := range []loadfence.Profile{
+		{CPUMultiple: 0.5, Load: 0}, {CPUMultiple: 1, Load: 0},
+		{CPUMultiple: 1, Load: 19}, {CPUMultiple: 1, Load: 31}, {CPUMultiple: 1, Load: 80},
+	} {
+		if got := dashboardRPSFloor(prof); got > prev {
+			t.Errorf("dashboardRPSFloor(cpu %.2f load %.1f) = %.2f > previous %.2f: the floor must never increase as the host slows", prof.CPUMultiple, prof.Load, got, prev)
 		}
-		prev = dashboardRPSFloor(load)
+		prev = dashboardRPSFloor(prof)
 	}
 }
 
@@ -987,21 +1021,34 @@ func TestRetainedVerdictMeasuresRetentionNotChurn(t *testing.T) {
 
 // TestBudgetDashboardLoadFenceIsForceable pins the SKIP path §2.9a relies on:
 // with the fence's documented override set, an oversubscribed host reports an
-// explicit SKIP instead of a red gate, and the load-scaled wall-clock budgets
-// read the same forced number rather than the machine's real load.
+// explicit SKIP instead of a red gate, and the host-calibrated wall-clock
+// budgets read the same forced number rather than the machine's real load
+// (TROUBLE_HOST_CALIB pins the Profile both budgets consume).
 func TestBudgetDashboardLoadFenceIsForceable(t *testing.T) {
 	t.Setenv(loadfence.EnvLoadOverride, "50")
+	t.Setenv(loadfence.EnvCalibOverride, "2")
+	// Deliberately NOT hostCalibration(): that one-shot cache must never be
+	// filled from inside a t.Setenv scope, or the forced profile would leak
+	// into every later gate in the process (this test runs before
+	// TestBudgetDashboardRSS). Measure("") resolves the same env path — and
+	// with both overrides set no pilot runs, so the call is cheap.
+	prof := loadfence.Measure("")
+	if !prof.Forced {
+		t.Fatalf("loadfence.Measure(\"\") = %v; want Forced with %s set", prof, loadfence.EnvCalibOverride)
+	}
 	if got := loadAvgDashboard(); got != 50 {
 		t.Fatalf("loadAvgDashboard() = %v with %s set; want 50", got, loadfence.EnvLoadOverride)
 	}
 	if !loadfence.Oversubscribed(loadAvgDashboard()) {
 		t.Fatalf("load 50 does not cross the %v fence: the forced SKIP path is unreachable", loadfence.FenceLoadAvg)
 	}
-	if got, want := dashboardRenderBudget(loadAvgDashboard()), 2*renderP99; got != want {
-		t.Errorf("dashboardRenderBudget(forced 50) = %v; want the %v ceiling", got, want)
+	// 2 × (1 + 50/16) = 8.25 → the 40 ms ceiling.
+	if got, want := dashboardRenderBudget(prof), 2*renderP99; got != want {
+		t.Errorf("dashboardRenderBudget(forced) = %v; want the %v ceiling", got, want)
 	}
-	if got, want := dashboardRPSFloor(loadAvgDashboard()), float64(budgetRPS)*0.4; got != want {
-		t.Errorf("dashboardRPSFloor(forced 50) = %v; want the 0.4× floor %v", got, want)
+	// 90 / 8.25 = 10.9 → the 0.4× floor.
+	if got, want := dashboardRPSFloor(prof), float64(budgetRPS)*0.4; got != want {
+		t.Errorf("dashboardRPSFloor(forced) = %v; want the 0.4× floor %v", got, want)
 	}
 }
 
@@ -1180,13 +1227,16 @@ func TestBudgetDashboardRSS(t *testing.T) {
 	const gate = "TestBudgetDashboardRSS"
 
 	// The render p99 is a quiet-host number: it is a per-request wall clock
-	// inside the helper, so under parallel package execution it absorbs the
-	// helper's descheduling (31ms observed at load ~19 vs ≤20ms quiet) — the
-	// budget scales with observed load like every other wall-clock gate in
-	// this repo.
-	p99Budget := dashboardRenderBudget(load)
+	// inside the helper, so it absorbs both the helper's descheduling AND the
+	// host's measured single-thread speed. The SPEC-01 §7a profile (QA-TROUBLE-5,
+	// adopted here by TRBL-053) supplies both terms: budget × CPUScale(), clamped
+	// so the §7 20 ms can only ever loosen, never tighten (the load_avg-only
+	// ladder it replaces pinned a quiet slower box to the bare 20 ms — the §7a
+	// inversion — while handing a busier faster one the same 2× ceiling).
+	prof := hostCalibration()
+	p99Budget := dashboardRenderBudget(prof)
 	if got := time.Duration(st.Dashboard.RenderP99NS); got > p99Budget {
-		t.Errorf("p99 render = %v, §7 requires ≤%v on a quiet host (load_avg_1m=%.2f)", got, p99Budget, load)
+		t.Errorf("p99 render = %v, §7 requires ≤%v on a quiet host (host profile %v)", got, p99Budget, prof)
 	}
 
 	// 1. Steady-state slope — a HARD failure, deliberately not fenced: the
@@ -1244,8 +1294,8 @@ func TestBudgetDashboardRSS(t *testing.T) {
 	// vs 98 rps = 90%).
 	dashRPS := float64(dashCount) / window.Seconds()
 	ctrlRPS := float64(ctrlCount) / window.Seconds()
-	if dashRPS < dashboardRPSFloor(load) {
-		t.Errorf("achieved %.0f rps, the row asks for %d rps (load_avg_1m=%.2f; the quiet-host floor is %.0f rps)", dashRPS, budgetRPS, load, float64(budgetRPS)*0.9)
+	if dashRPS < dashboardRPSFloor(prof) {
+		t.Errorf("achieved %.0f rps, the row asks for %d rps (host profile %v; the quiet-host floor is %.0f rps)", dashRPS, budgetRPS, prof, float64(budgetRPS)*0.9)
 	}
 	if ctrlRPS > 0 && dashRPS < ctrlRPS*0.75 {
 		t.Errorf("dashboard window served %.0f rps vs control %.0f rps (%.0f%%): the dashboard, not the host, is the bottleneck", dashRPS, ctrlRPS, 100*dashRPS/ctrlRPS)

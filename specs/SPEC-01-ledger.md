@@ -1093,8 +1093,10 @@ relative to the reference numbers, never tighten one (a budget the reference hos
 here), and `TROUBLE_HOST_CALIB` pins the multiples so an operator override still wins over automatic
 calibration. Rules the tests follow:
 
-1. `TestRebuildBudget` (§7 row `index_test.go`): the enforced 9,000 ms budget and 60 MiB/s floor are
-   multiplied by `Scale()`. On a quiet reference-class host the scale is exactly 1 and the §7 numbers are
+1. `TestRebuildBudget` (§7 row `index_test.go`): the enforced 9,000 ms budget is multiplied by `Scale()`, and
+   the 60 MiB/s scan-rate floor is divided by it (`60 / Scale()`) — a TIME scales up with the box's
+   slowdown, a RATE scales down, which keeps §3.6's agreement (512 MiB ÷ 60 MiB/s = 8.5 s ≈ 9,000 ms) true
+   by construction on every host. On a quiet reference-class host the scale is exactly 1 and the §7 numbers are
    asserted unchanged; the load_avg-only relaxation ladder it replaces (load ≥ 4 → 30,000 ms / 20 MiB/s) is
    removed — it was the inversion.
 2. `TestQueryLatency` `Sources()`: §7 states ≤ 200 µs **at 5,000 sources**; the §7 fixture is

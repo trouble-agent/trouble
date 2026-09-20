@@ -1,0 +1,23 @@
+{
+  "wave_id": "trouble-2026-09-20-21-55-52",
+  "project": "trouble",
+  "repo": "~/trouble",
+  "base": "main",
+  "base_sha_local": "3f7a820",
+  "note": "No remote exists for this repo (publish act pending a the maintainer decision); worktrees are cut from LOCAL main, not origin/main.",
+  "budget": 12,
+  "dispatched": 5,
+  "rows": [
+    {"id": "TRBL-059", "priority": "P1", "branch": "wt/TRBL-059", "worktree": "~/worktrees/trouble-TRBL-059", "files": ["internal/types (Codeplane types)", "internal/sentinel/**", "internal/ladder/**", "internal/research/**", "internal/issues/**"], "merge_order": 1},
+    {"id": "TRBL-060", "priority": "P1", "branch": "wt/TRBL-060", "worktree": "~/worktrees/trouble-TRBL-060", "files": ["internal/ledger/**", "internal/types (PageToken)"], "merge_order": 2},
+    {"id": "TRBL-061", "priority": "P2", "branch": "wt/TRBL-061", "worktree": "~/worktrees/trouble-TRBL-061", "files": ["internal/sentinel/**", "internal/hub/**", "internal/lifecycle (registry key)"], "merge_order": 3},
+    {"id": "TRBL-062", "priority": "P1", "branch": "wt/TRBL-062", "worktree": "~/worktrees/trouble-TRBL-062", "files": ["docker-compose.yml", "deploy/container/**", "deploy/README.md", "docs/sentinel-compat.md"], "merge_order": 4},
+    {"id": "TRBL-063", "priority": "P2", "branch": "wt/TRBL-063", "worktree": "~/worktrees/trouble-TRBL-063", "files": ["cmd/trouble/main.go", "cmd/trouble/main_test.go", "internal/dashboard/path.go"], "merge_order": 5}
+  ],
+  "held_back": [
+    {"id": "TRBL-064", "why": "docs-only, touches docs/operations.md which TRBL-062 also edits (deploy/README.md) - serial next tick to avoid a docs conflict"},
+    {"id": "TRBL-065", "why": "new cmd/trouble hub verb; cmd/trouble/main.go is claimed by TRBL-063 this wave"},
+    {"id": "TRBL-066", "why": "Makefile + deploy/README.md, both adjacent to TRBL-062's surface"},
+    {"id": "TRBL-049", "why": "blocked: owner decision outside the repo (~/specs clone or session cwd policy)"}
+  ]
+}

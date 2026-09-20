@@ -175,3 +175,13 @@
 {"id":175,"timestamp":"2026-09-20T14:24:52","event_type":"task_created","task_id":"TRBL-064","actor":"foreman","detail":"{\"id\":\"TRBL-064\",\"status\":\"pending\"}","tick_number":null}
 {"id":176,"timestamp":"2026-09-20T14:24:52","event_type":"task_created","task_id":"TRBL-065","actor":"foreman","detail":"{\"id\":\"TRBL-065\",\"status\":\"pending\"}","tick_number":null}
 {"id":177,"timestamp":"2026-09-20T14:24:52","event_type":"task_created","task_id":"TRBL-066","actor":"foreman","detail":"{\"id\":\"TRBL-066\",\"status\":\"pending\"}","tick_number":null}
+{"id":178,"timestamp":"2026-09-20T22:03:00","event_type":"task_updated","task_id":"TRBL-059","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":179,"timestamp":"2026-09-20T22:03:04","event_type":"task_updated","task_id":"TRBL-060","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":180,"timestamp":"2026-09-20T22:03:04","event_type":"task_updated","task_id":"TRBL-061","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":181,"timestamp":"2026-09-20T22:03:04","event_type":"task_updated","task_id":"TRBL-062","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":182,"timestamp":"2026-09-20T22:03:04","event_type":"task_updated","task_id":"TRBL-063","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":183,"timestamp":"2026-09-20T22:03:04","event_type":"task_dispatched","task_id":"TRBL-059","actor":"foreman","detail":"tick trouble-2026-09-20-21-55-52 wave: worktree ~/worktrees/trouble-TRBL-059 branch wt/TRBL-059 base main@3f7a820","tick_number":null}
+{"id":184,"timestamp":"2026-09-20T22:03:04","event_type":"task_dispatched","task_id":"TRBL-060","actor":"foreman","detail":"tick trouble-2026-09-20-21-55-52 wave: worktree ~/worktrees/trouble-TRBL-060 branch wt/TRBL-060 base main@3f7a820","tick_number":null}
+{"id":185,"timestamp":"2026-09-20T22:03:04","event_type":"task_dispatched","task_id":"TRBL-061","actor":"foreman","detail":"tick trouble-2026-09-20-21-55-52 wave: worktree ~/worktrees/trouble-TRBL-061 branch wt/TRBL-061 base main@3f7a820","tick_number":null}
+{"id":186,"timestamp":"2026-09-20T22:03:04","event_type":"task_dispatched","task_id":"TRBL-062","actor":"foreman","detail":"tick trouble-2026-09-20-21-55-52 wave: worktree ~/worktrees/trouble-TRBL-062 branch wt/TRBL-062 base main@3f7a820","tick_number":null}
+{"id":187,"timestamp":"2026-09-20T22:03:04","event_type":"task_dispatched","task_id":"TRBL-063","actor":"foreman","detail":"tick trouble-2026-09-20-21-55-52 wave: worktree ~/worktrees/trouble-TRBL-063 branch wt/TRBL-063 base main@3f7a820","tick_number":null}

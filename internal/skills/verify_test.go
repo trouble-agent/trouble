@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -75,8 +76,21 @@ func TestVerifyHappyPathAndFailures(t *testing.T) {
 	}
 }
 
-// TestVerifyBudget pins §7's numeric budgets.
+// TestVerifyBudget pins §7 item 3's numeric budget (SPEC-11: 100
+// parse+canonicalize+ed25519-verify cycles ≤ 200 ms). The 200 ms is a
+// reference-host measurement (SPEC-01 §1 recorded the reference class; SPEC-01
+// §7a is the calibration model), so it is scaled by the host's measured CPU
+// speed and load via loadfence.CPUScale(): on a quiet reference-class host the
+// scale is 1 and the spec number is enforced unchanged, on a slower box the bar
+// follows that box's own measured cost, and TROUBLE_HOST_CALIB pins it for
+// falsification. The artifact's ed25519 verify cost is host-invariant; the box
+// is not. The -race build keeps its existing unconditional skip (the spec
+// number is a plain-build measurement).
 func TestVerifyBudget(t *testing.T) {
+	if raceEnabled {
+		t.Skip("absolute parse+verify budgets are measured without -race")
+	}
+	budget := time.Duration(float64(200*time.Millisecond) * loadfence.Measure(t.TempDir()).CPUScale())
 	kp := newKeyPair(t, "skills-2026", types.TrustRelease)
 	_, signed := kp.sign(t, goldenArtifactTOML, playBytes())
 	start := time.Now()
@@ -89,8 +103,8 @@ func TestVerifyBudget(t *testing.T) {
 			t.Fatalf("verify %d: %v", i, err)
 		}
 	}
-	if elapsed := time.Since(start); elapsed > 200*time.Millisecond && !raceEnabled {
-		t.Fatalf("100 parse+canonicalize+verify cycles took %s, over the 200ms budget", elapsed)
+	if elapsed := time.Since(start); elapsed > budget {
+		t.Fatalf("100 parse+canonicalize+verify cycles took %s, over the %s budget (200 ms x cpu-scale, SPEC-01 §7a)", elapsed, budget)
 	}
 }
 

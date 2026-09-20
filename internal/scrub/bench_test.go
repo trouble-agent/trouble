@@ -173,6 +173,7 @@ func TestScrubBudget(t *testing.T) {
 	// an order-of-magnitude shift, far past 2x, and every loop's factor is
 	// logged so a widening is never silent.
 	suiteFactor := 1.0
+	suiteApplied := 1.0
 	suiteWorst := 0.0
 	report := func(name string, budget time.Duration, measured time.Duration) {
 		t.Helper()
@@ -202,12 +203,15 @@ func TestScrubBudget(t *testing.T) {
 		})
 		if sf, active := loadfence.SuiteContention(frac); active {
 			suiteFactor = sf
+			suiteApplied = sf
 		}
 		if frac > suiteWorst {
 			suiteWorst = frac
 		}
 		return dur
 	}
+
+	_ = suiteWorst // kept for the diagnostic line below; the gate uses suiteApplied
 
 	one := cleanPayload(1024)
 	big := cleanPayload(256 * 1024)
@@ -242,7 +246,7 @@ func TestScrubBudget(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Logf("suite-wait: worst measured-loop wait fraction %.3f (term max x2)", suiteWorst)
+	t.Logf("suite-wait: worst measured-loop wait fraction %.3f; factor APPLIED to the ceilings above x%.2f (term max x2)", suiteWorst, suiteApplied)
 	t.Logf("full set %d B carrying a secret = %s (all 17 enabled rules run here; "+
 		"§3.9 budgets 60 µs/KiB for a full pass)", len(sec), withSecret)
 	if withSecret > 50*time.Millisecond {

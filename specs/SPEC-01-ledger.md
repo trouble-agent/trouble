@@ -1105,6 +1105,19 @@ calibration. Rules the tests follow:
    µs, the bound, and the cpu scale.
 3. `TestVerifyBudget` (SPEC-11 §7, item 3): the 200 ms budget for 100 parse+canonicalize+verify cycles scales by
    `CPUScale()`; the artifact's own `ed25519` verify cost is invariant, the host is not.
+4. `TestFsyncCountIsStructural` (§7 row `durability_test.go`): the exact form
+   `FsyncCalls == ceil(records/max_batch_records)` is **not host-deterministic** and is replaced by the
+   bounded range `want ≤ FsyncCalls ≤ want+1`. The §2.1 loss window REQUIRES a partial batch to flush when
+   `fsync_window_ms` expires — that is the crash-loss contract — and the writer's run loop re-arms the
+   window timer after every flush, so whether one legal flush catches a still-partial batch inside the
+   measured region is host scheduling, not ledger behavior (2026-09-18 CI measured delta 26 vs want 25 at
+   load with zero product change; a 24 h test-only window was also tried and REJECTED: with no other
+   producers the boot lifecycle record's batch never fills and `Open` deadlocks — the window must stay able
+   to flush). Fewer than `want` still fails (durability lost), more than one catch-up in a 25-batch region
+   still fails (small-group flushes), and the fsync/record bar is exact `1/4096` when the run had no
+   catch-up, bounded `2/4096` when it did — an order of magnitude below any per-small-group regression.
+   The amortized-cost contract (1.94 µs/rec; ≥ 100k rec/s on the reference host) remains enforced by
+   `TestAmortizedThroughput`.
 
 No §7 number is relaxed: a reference-class host meets every original figure, and every scaled assertion
 still fails on a genuine multi-x regression regardless of which host it lands on.

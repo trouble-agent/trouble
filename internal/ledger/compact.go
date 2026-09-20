@@ -336,11 +336,18 @@ func (l *Ledger) compact(ctx context.Context, day string, rp RetentionPolicy, dr
 		res.ErrorCode = string(types.CodeLedger007)
 		return res, ledgerErr(types.CodeLedger007, ReasonCompaction, "cannot fsync the ledger directory", err)
 	}
+	// §3.7a: the new generation gets its sidecar before anything is unlinked, so
+	// the file that becomes authoritative is already describable.
+	l.writeGenerationSidecar(to)
 	// only now may the previous generation and the parts be unlinked
 	for _, p := range de.Parts {
 		if err := os.Remove(filepath.Join(l.root, p.File)); err != nil && !os.IsNotExist(err) {
 			l.idx.markDegraded(ReasonIO)
 		}
+		// Retention = drop whole generations (§3.7a): the file, its .idx and (in
+		// the hub profile) its archive marker go together. Leaving a stale
+		// sidecar behind would let an .idx describe a file it does not match.
+		removeSidecar(l.root, p.File)
 	}
 	_ = syncDir(l.root)
 	l.idx.replaceDay(day, []*partInfo{{
@@ -414,6 +421,10 @@ func (l *Ledger) ExpireDays() ([]string, error) {
 			if err := os.Remove(filepath.Join(l.root, p.File)); err == nil || os.IsNotExist(err) {
 				removed = append(removed, p.File)
 			}
+			// §3.7a: retention drops the generation file and its .idx together,
+			// so a dropped generation leaves no sidecar describing a file that
+			// is gone.
+			removeSidecar(l.root, p.File)
 		}
 		l.idx.removeDay(de.Day)
 	}

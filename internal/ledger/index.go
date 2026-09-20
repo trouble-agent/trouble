@@ -363,6 +363,26 @@ func (ix *index) dayEntries() []*dayEntry {
 	return out
 }
 
+// partIndex returns a snapshot of every indexed part keyed by file name. The
+// §2.3a page walk needs it because a part discovered after the boot rebuild (or
+// one the rebuild scanned in a projected mode) may not carry its Samples on the
+// authoritativeFiles() copy, and the index's copy is the one the rebuild filled.
+func (ix *index) partIndex() map[string]partInfo {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	out := make(map[string]partInfo, len(ix.days))
+	for _, d := range ix.dayOrder {
+		de := ix.days[d]
+		if de == nil {
+			continue
+		}
+		for _, p := range de.Parts {
+			out[p.File] = *p
+		}
+	}
+	return out
+}
+
 func (ix *index) day(day string) *dayEntry {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()

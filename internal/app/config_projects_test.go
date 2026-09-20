@@ -13,7 +13,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -29,10 +28,12 @@ func bootConfigRefused(t *testing.T, cfgBody, root string, ingestPort int, args 
 		t.Fatalf("write config: %v", err)
 	}
 	// The context bound is deliberately looser than the wait it bounds: an
-	// exhausted wait budget must be reported by the wait, which knows the load
-	// and may skip, never by the context, whose cancellation reaches RunDaemon
-	// as an error and so looks exactly like the refusal under test.
-	ctx, cancel := context.WithTimeout(context.Background(), scaledBootBudget(bootReadyBase, bootLoadAvg(), runtime.NumCPU())+bootCtxGrace)
+	// exhausted wait budget must be reported by the wait, which knows the host
+	// term and may skip, never by the context, whose cancellation reaches
+	// RunDaemon as an error and so looks exactly like the refusal under test.
+	// It resolves the SAME host term the wait does (measured I/O tier × load
+	// contention, SPEC-01 §7a), so the grace stays a grace on every host.
+	ctx, cancel := context.WithTimeout(context.Background(), hostTermFor(bootReadyBase).Budget+bootCtxGrace)
 	defer cancel()
 	ready := make(chan struct{}, 1)
 	done := make(chan error, 1)

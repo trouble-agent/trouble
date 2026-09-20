@@ -23,7 +23,7 @@ func TestConcurrencySharedEngine(t *testing.T) {
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----\n",
 		"http://" + testPubKeyA + ":0123456789abcdef0123456789abcdef@hooks.example:7643/7",
 		"no secret here at all, just a journal line",
-		"~/projects/trouble/internal/scrub/engine.go",
+		"/home/user/projects/trouble/internal/scrub/engine.go",
 	}
 	want := make([]string, len(payloads))
 	for i, p := range payloads {

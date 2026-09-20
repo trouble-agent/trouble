@@ -1,12 +1,43 @@
 #!/usr/bin/env python3
 """Build specs-review.html — every spec rendered, with a linked TOC and per-file anchors.
 Order: INDEX first, then SPEC-01..12, TYPES last. Dark theme, code blocks styled,
-spec-to-spec links resolved to anchors."""
-import glob, html as H, markdown, os, re
+spec-to-spec links resolved to anchors.
 
-REPO = '~/trouble'
-ORDER = ['specs/SPEC-INDEX.md'] + sorted(glob.glob(f'{REPO}/specs/SPEC-0*.md')) + \
-        ['specs/SPEC-TYPES.md'] + [p for p in sorted(glob.glob(f'{REPO}/specs/SPEC-1*.md'))]
+Usage:  python3 docs/build_specs_review.py
+Run from anywhere; the repository root is derived from this file's location, so the
+script carries no host path of its own and no checkout location is written into the
+generated HTML.
+"""
+import glob, html as H, markdown, os, re, subprocess
+
+DOCS = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(DOCS)
+SPECS = os.path.join(REPO, 'specs')
+
+ORDER = [os.path.join(SPECS, 'SPEC-INDEX.md')] + \
+        sorted(glob.glob(os.path.join(SPECS, 'SPEC-0*.md'))) + \
+        [os.path.join(SPECS, 'SPEC-TYPES.md')] + \
+        sorted(glob.glob(os.path.join(SPECS, 'SPEC-1*.md')))
+
+
+def repo_state():
+    """How the renderer's own checkout looked when this page was generated.
+
+    Deliberately NOT "the HEAD revision": a generated page cannot name the
+    commit that contains it, so a revision string here is always one revision
+    stale and would name a tree whose specs differ from the ones rendered.
+    Report the revision together with whether the tree was clean instead.
+    """
+    try:
+        head = subprocess.run(['git', '-C', REPO, 'rev-parse', '--short', 'HEAD'],
+                              capture_output=True, text=True, check=False)
+        dirty = subprocess.run(['git', '-C', REPO, 'status', '--porcelain'],
+                               capture_output=True, text=True, check=False)
+        rev = head.stdout.strip() or 'unknown'
+        return f"{rev}{' (working tree with local edits)' if dirty.stdout.strip() else ''}"
+    except OSError:
+        return 'unknown'
+
 
 md = markdown.Markdown(extensions=['tables', 'fenced_code', 'toc', 'codehilite'],
                        extension_configs={'codehilite': {'guess_lang': False}})
@@ -81,9 +112,9 @@ Review order suggestion: SPEC-INDEX (scope + cut line) → any SPEC-n (each is s
 </header>
 <div class="toc"><h2>Contents ({len(ORDER)} files)</h2>{toc_html}</div>
 {''.join(sections)}
-<div class="footer">generated from ~/trouble/specs/ · main @ {os.popen('git -C ~/trouble log --oneline -1').read().strip()} · print-friendly: each section page-breaks</div>
+<div class="footer">generated from the spec suite in this repository · {repo_state()} · print-friendly: each section page-breaks</div>
 </div></body></html>"""
 
-out = '~/trouble/docs/specs-review.html'
+out = os.path.join(DOCS, 'specs-review.html')
 open(out, 'w').write(page)
 print(f"wrote {out} ({os.path.getsize(out)//1024} KB, {len(ORDER)} specs)")

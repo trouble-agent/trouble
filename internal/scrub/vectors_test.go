@@ -83,7 +83,7 @@ func positiveVectors() []vector {
 		},
 		{
 			id: "P13", target: types.TgEventMsg, project: "1",
-			in:     `~/projects/trouble/internal/scrub/engine.go:118`,
+			in:     testHomePath + ":118",
 			out:    `[REDACTED:path_home_root]/projects/trouble/internal/scrub/engine.go:118`,
 			byRule: map[string]int{"path_home_root": 1},
 		},

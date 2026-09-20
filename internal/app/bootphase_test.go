@@ -98,8 +98,8 @@ func TestBootPhaseTableAttributesTheReadyLatency(t *testing.T) {
 	// consecutive marks is the EARLIER one — the table is labeled that way, and
 	// the last mark (`ready`) closes the sequence rather than opening a phase.
 	st := h.d.Ledger.Status()
-	t.Logf("boot-to-READY %s attributed over %d phases (load_avg %.2f / %d cores)",
-		total.Round(time.Millisecond), len(seen)-1, hostLoadAvg1(), runtime.NumCPU())
+	t.Logf("boot-to-READY %s attributed over %d phases (load_avg %.2f / %d cores; host term %s)",
+		total.Round(time.Millisecond), len(seen)-1, hostLoadAvg1(), runtime.NumCPU(), hostLine())
 	var widest, second time.Duration
 	var widestName, secondName string
 	for i := 1; i < len(seen); i++ {

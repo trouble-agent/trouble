@@ -258,5 +258,7 @@ S. **PRD v2.4 amendments (write docs/prd-amendments-v2.4.md, not a new HTML):** 
 6. The v0.1 cut line is respected: no spec section describes a deferred feature as
    in-scope; deferred items appear only in SPEC-INDEX's deferred table.
 7. Report at the end: files written + sizes + section counts + types count + AC coverage
-   table. Commit: "specs: SPEC-01..12 + SPEC-TYPES + INDEX (quorum-folded v2.4 brief)"
-   with co-author trailer Co-authored-by: <private name> <private email>.
+   table. Commit: "specs: SPEC-01..12 + SPEC-TYPES + INDEX (quorum-folded v2.4 brief)".
+   This repo is headed for a public org: commits are authored by the AI identity
+   only — totalwindupflightsystems <totalwindupflightsystems@gmail.com> — with no
+   co-author trailers and no personal names or personal addresses.

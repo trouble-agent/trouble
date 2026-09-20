@@ -636,7 +636,7 @@ Vector and conformance files are CI-fatal. Names are exact so the selfcheck and 
 | P10 | `https://deploy:hunter2@registry.internal/v2/` | `https://deploy:[REDACTED:url_basic_auth]@registry.internal/v2/` | `url_basic_auth:1` |
 | P11 | `http://a1b2c3d4e5f60718293a4b5c6d7e8f90:0123456789abcdef0123456789abcdef@hooks.example:7643/7` | `http://a1b2c3d4e5f60718293a4b5c6d7e8f90:[REDACTED:dsn_secret]@hooks.example:7643/7` | `dsn_secret:1` |
 | P12 | `AKIAIOSFODNN7EXAMPLE` in a log line | `[REDACTED:cloud_key_shape]` | `cloud_key_shape:1` |
-| P13 | `~/projects/trouble/internal/scrub/engine.go:118` | `[REDACTED:path_home_root]/projects/trouble/internal/scrub/engine.go:118` | `path_home_root:1` |
+| P13 | `/home/user/projects/trouble/internal/scrub/engine.go:118` | `[REDACTED:path_home_root]/projects/trouble/internal/scrub/engine.go:118` | `path_home_root:1` |
 | P14 | a 48-char mixed base64 blob `Qw9zXk2Lm7Tp4Rv8Bn1Yh6Jd3Fg0Sa5Ce2Ui9Ol4Wq7` | `[REDACTED:entropy_token]` | `entropy_token:1` |
 
 **Negative vectors — the output must be byte-identical and `Redactions` must be `0`.**

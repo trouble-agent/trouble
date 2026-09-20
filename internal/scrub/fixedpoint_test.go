@@ -129,7 +129,7 @@ func generatePayloads(n int) []string {
 		"-----BEGIN RSA PRIVATE KEY-----\n%s\n-----END RSA PRIVATE KEY-----\n",
 		`user bob <bob@%s.example> from 203.0.113.7`,
 		`{"user": "%s", "ip_address": "10.0.0.%d"}`,
-		`open ~/%s/config.toml failed`,
+		`open /home/user/%s/config.toml failed`,
 		`aws AKIAIOSFODNN7EXAMPLE and gh token ghp_%s`,
 		`file %s and a plain sentence with no secret at all`,
 	}

@@ -111,7 +111,7 @@ Proof (same build, same config, same token, only one line added):
 ```toml
 [dashboard]
 bind = "127.0.0.1:7644"
-token_file = "~/.config/trouble/dashboard-tokens.json"   # absolute
+token_file = "/home/user/.config/trouble/dashboard-tokens.json"   # absolute
 ```
 
 ```

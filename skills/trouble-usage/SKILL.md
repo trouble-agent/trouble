@@ -63,7 +63,7 @@ the CLI mints a valid `tdt_` token and the daemon answers
 ```toml
 [dashboard]
 bind = "127.0.0.1:7644"
-token_file = "~/.config/trouble/dashboard-tokens.json"
+token_file = "/home/user/.config/trouble/dashboard-tokens.json"
 ```
 
 Then `bin/trouble dashboard token create --config config.toml --label me --scopes read,write`
@@ -110,10 +110,10 @@ Treat that query as part of "is the daemon healthy", not as a debugging step.
 ## Working config (throwaway, verified)
 
 ```toml
-state_root = "~/dogfood-trouble/state"        # NOT under /tmp: TROUBLE-LIFECYCLE-004 refuses it
-config_path = "~/dogfood-trouble/config.toml"
+state_root = "/home/user/dogfood-trouble/state"        # NOT under /tmp: TROUBLE-LIFECYCLE-004 refuses it
+config_path = "/home/user/dogfood-trouble/config.toml"
 [secrets]
-environment_file = "~/dogfood-trouble/trouble.env"   # mode 0600, or boot refuses
+environment_file = "/home/user/dogfood-trouble/trouble.env"   # mode 0600, or boot refuses
 [stall]
 max_seq_age = "300s"
 [checker]
@@ -123,7 +123,7 @@ confirm_runs = 2
 bind = "127.0.0.1:7643"
 [dashboard]
 bind = "127.0.0.1:7644"
-token_file = "~/.config/trouble/dashboard-tokens.json"
+token_file = "/home/user/.config/trouble/dashboard-tokens.json"
 [verify]
 zone_windows = "loopback=10m lan=15m tailnet=20m public=30m"
 [escalate]

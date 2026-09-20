@@ -12,6 +12,11 @@ import (
 // each is compiled, present and fires; the optional rules likewise; and a
 // deliberately missing mandatory rule returns TROUBLE-SCRUB-006.
 
+// The fixture home root every path vector uses. It is deliberately generic:
+// the shipped home_roots default ("/home/*") covers it, so rule 17 is exercised
+// against the DEFAULT configuration rather than a fixture-only one.
+const testHomePath = "/home/user/projects/trouble/internal/scrub/engine.go"
+
 var mandatoryFixtures = map[string]string{
 	"private_key_block":    "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAx3Zk\n-----END RSA PRIVATE KEY-----\n",
 	"private_key_inline":   `secret_key: "aVeryLongBase64LookingValue12345678"`,
@@ -29,7 +34,7 @@ var mandatoryFixtures = map[string]string{
 	"entropy_token":        "Qw9zXk2Lm7Tp4Rv8Bn1Yh6Jd3Fg0Sa5Ce2Ui9Ol4Wq7",
 	"pii_email_ip":         "contact alice@example.com from 203.0.113.9",
 	"pii_identity_kv":      `{"user": "alice"}`,
-	"path_home_root":       "~/projects/trouble/internal/scrub/engine.go",
+	"path_home_root":       testHomePath,
 	"path_disclosure":      "open /srv/data/app/logs/trouble.log failed",
 }
 

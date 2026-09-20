@@ -132,13 +132,71 @@ func TestMessageNormIsAFixedPoint(t *testing.T) {
 }
 
 // TestMasksRemovedTheDocumentedSubstrings covers the SPEC-03 §3.1 mask set.
+//
+// The fixture home segment is the generic `/home/appuser`, and the forbidden
+// list carries the SUBSTITUTED values (`/home/appuser`, `appuser`) — the point
+// of the test is that whatever a host's home root is, the account name never
+// reaches the output.
+//
+// Which step is load-bearing, established by reverting each one in turn:
+//
+//   - the basename pass (`rePath` → last segment) is what removes `/home/appuser`
+//     from THIS fixture: it consumes the whole absolute-path token and emits
+//     `x.log`. Deleting it leaves `file /home/appuser/x.log` in the output and
+//     this test fails — that is the RED proof.
+//   - `deadbeefcafe` (12 hex) only goes because `reLongHex` runs before that
+//     pass; `/tmp/abc123/x.log` only masks to `x.log` because the digit masks
+//     run before it too.
+//   - the home-prefix pass (`reHome`) is SUBSUMED by the basename pass in the
+//     current pipeline order — `rePath`'s alphabet is a superset of `reHome`'s,
+//     so every token `reHome` could match has already been consumed. Deleting
+//     `reHome` alone does not change any output (verified: reverting only that
+//     line leaves this package green). That is recorded here rather than
+//     asserted, so an ordering change that makes the home-prefix pass
+//     load-bearing is a deliberate revisit, not a surprise.
 func TestMasksRemovedTheDocumentedSubstrings(t *testing.T) {
-	in := "2026-09-16T09:00:01.004Z pid=4242 port=8080 id 1234567890 hash deadbeefcafe file ~/x.log"
+	in := "2026-09-16T09:00:01.004Z pid=4242 port=8080 id 1234567890 hash deadbeefcafe file /home/appuser/x.log"
 	out := maskMessage(in)
-	for _, forbidden := range []string{"2026-09-16T09:00:01.004Z", "4242", "8080", "1234567890", "deadbeefcafe", "~", "opuser"} {
-		if strings.Contains(out, forbidden) {
-			t.Errorf("mask set left %q in %q", forbidden, out)
+	for _, f := range []string{
+		"2026-09-16T09:00:01.004Z", "4242", "8080", "1234567890", "deadbeefcafe",
+		"/home/appuser", "appuser",
+	} {
+		if strings.Contains(out, f) {
+			t.Errorf("mask set left %q in %q", f, out)
 		}
+	}
+	// The home segment must be gone for the absolute-path shapes the mask set
+	// actually handles. Note the residual, observed on this build and NOT
+	// introduced by the fixture rename: a BARE home directory token
+	// (`/home/appuser` with no trailing segment) keeps its account name after
+	// the basename pass (`→ "appuser"`), because the rule emits the last
+	// segment and for a one-segment token that segment IS the account. The
+	// fixture above uses the nested shape, which is the shape the rule is
+	// defined on; the bare-home residual is recorded here and in the TRBL-047
+	// report rather than asserted, because closing it changes production
+	// masking and is not this task's scope.
+	for _, extra := range []string{
+		"cd /home/appuser/etc/trouble.x && ls",
+		"path=/home/appuser/logs/daemon.log",
+		"socket /home/appuser/run/trouble.sock",
+	} {
+		got := maskMessage(extra)
+		if strings.Contains(got, "appuser") {
+			t.Errorf("home root survived masking: %q → %q", extra, got)
+		}
+	}
+	// Recorded residual, not an assertion: a BARE home token (`/home/appuser`
+	// with no trailing segment) keeps its account name, because the basename
+	// pass emits the last segment and for a one-segment token that segment IS
+	// the account. Observed on this build and not introduced by the fixture
+	// rename; closing it changes production masking and is out of TRBL-047's
+	// scope, so it is logged for the report instead of asserted.
+	if bare := maskMessage("cd /home/appuser && ls"); strings.Contains(bare, "appuser") {
+		t.Logf("RESIDUAL (pre-existing, out of TRBL-047 scope): a bare home token masks to the "+
+			"account name: %q → %q", "cd /home/appuser && ls", bare)
+	}
+	if got := maskMessage("open /srv/logs/trouble.log failed"); !strings.Contains(got, "trouble.log") {
+		t.Errorf("basename-resolved path lost its basename: %q", got)
 	}
 	if !strings.Contains(out, "x.log") {
 		t.Errorf("the basename must survive masking: %q", out)

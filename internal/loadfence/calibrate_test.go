@@ -88,6 +88,14 @@ func TestMeasureOverrideForcesBothMultiples(t *testing.T) {
 // TestMeasureDegradesToReferenceOnPilotFailure: a host with no writable scratch
 // space (or a read-only filesystem) must not lose its budget model. The I/O
 // multiple falls back to the reference number and the CPU pilot still runs.
+// The CPU pilot always runs (it needs no filesystem), so the raw CPUMultiple is
+// whatever this host measured — legitimately BELOW 1 on a box faster than the
+// reference class (this host measured 0.41, i.e. ~2.4x reference speed). The
+// invariant the package guarantees is never a raw multiple: it is that the
+// scale a budget consumes (Scale()/CPUScale()) is >= 1, via clamp1 inside
+// Scale()/CPUScale(). A raw multiple is never clamped in Measure(): clamping
+// there would discard the real measurement and make the profile lie about the
+// host.
 func TestMeasureDegradesToReferenceOnPilotFailure(t *testing.T) {
 	t.Setenv(EnvCalibOverride, "")
 	missing := filepath.Join(t.TempDir(), "does-not-exist", "nested")
@@ -95,11 +103,14 @@ func TestMeasureDegradesToReferenceOnPilotFailure(t *testing.T) {
 	if p.IOMultiple != 1 {
 		t.Errorf("IOMultiple = %v on an unusable pilot dir, want the reference 1", p.IOMultiple)
 	}
-	if p.CPUMultiple < 1 {
-		t.Errorf("CPUMultiple = %v, want >= 1 even when the I/O pilot failed", p.CPUMultiple)
+	if p.CPUMultiple <= 0 {
+		t.Errorf("CPUMultiple = %v, want > 0 (the CPU pilot needs no scratch space and must still run)", p.CPUMultiple)
 	}
-	if p.Scale() < 1 {
-		t.Errorf("Scale() = %v, want >= 1", p.Scale())
+	if got := p.Scale(); got < 1 {
+		t.Errorf("Scale() = %v, want >= 1 (clamp1 must never tighten a budget)", got)
+	}
+	if got := p.CPUScale(); got < 1 {
+		t.Errorf("CPUScale() = %v, want >= 1 (clamp1 must never tighten a budget, even when the raw CPUMultiple is %v)", got, p.CPUMultiple)
 	}
 }
 

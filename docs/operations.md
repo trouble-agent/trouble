@@ -636,6 +636,70 @@ minted in one call, all distinct, strictly increasing;
 `TestEncodeULIDLayout`). Any package that mints ids (ledger `rec_id`, sentinel
 `event_id`, group `grp_`) inherits the fix.
 
+### The ledger test suite's footprint and its cap
+
+`go test ./...` must complete under the QA harness's **3 GiB** memory cgroup. The
+suite met that cap in the size of its fixtures, not in the shape of its decode,
+and the first fixture over 3 GiB was **AC-6**: `TestAC6AppendOnlyLedger` appended
+1,000,000 records (a single **472 MiB** day file at the time of the failure) and
+then held three copies of that file at once — each per-file `os.ReadFile` buffer,
+the concatenated `before` image, and the line-header slice `splitLines` builds
+over the whole image. Peak live therefore grew with the *ledger*, and the decode
+loop died on the first allocation it could not serve:
+
+```
+runtime: out of memory: cannot allocate 4194304-byte block (1659863040 in use)
+fatal error: out of memory
+goroutine 49 ... [running]:
+encoding/json.(*decodeState).object(...)
+github.com/trouble-agent/trouble/internal/ledger.decodeRecord(...)
+        internal/ledger/index.go:820 +0x65
+github.com/trouble-agent/trouble/internal/ledger.TestAC6AppendOnlyLedger(...)
+        internal/ledger/ac_test.go:61 +0xb37
+```
+
+Measured on this host with `ulimit -v 2900000` (a 2.9 GB address-space cap: no
+swap, no cgroup escape). The same invocation with the fix in place passes; the
+numbers below are RSS (`/usr/bin/time -v`, "Maximum resident set size") for the
+AC-6 test alone:
+
+| Shape | Peak RSS | AC-6 wall |
+|---|---|---|
+| buffered image (before) | **2,092,484 KiB ≈ 2.0 GiB** | 45.2 s |
+| streaming image (after) | **696,180 KiB ≈ 680 MiB** | 40.8 s |
+
+The fix is a shape change, not a smaller fixture: every one of the 1,000,001
+records is still decoded and asserted (`rec_id`, `origin.host_id`,
+`origin.source`, `actor.id`, `actor.kind`), the seq contiguity check is
+unchanged, and the before/after byte comparison is now a **streamed** SHA-256
+over the same file names in the same order, truncated to the before image's
+length. Peak live is O(1) in ledger bytes; the only structure that still scales
+with the record count is the `[]uint64` of seqs the hole check genuinely needs
+(~8 MB at 1M records).
+
+The second fixture worth naming is `TestQueryLatency` (500,000 groups / 500,000
+incidents): its `applyFixtureRecords` batches 50,000 pairs at a time and the
+index holds the rest, so it peaks around **340 MiB** RSS on its own and releases
+it before the package's next test. It was never the OOM.
+
+`internal/ledger/footprint_test.go` is the mechanical guard. On an **87.1 MiB**,
+**20,000 records** fixture it measures peak `HeapInuse` growth for the shipped
+streaming decode (**2.6-5.0 MiB** across runs, GC churn moves it; 2.96-5.71% of
+the fixture) against a BUFFERED control arm that holds the same image the old
+AC-6 did (**176.5 MiB**, and 89.3 MiB before the control itself warms): the
+streaming arm must stay under **12MB** and under a quarter of the control's peak,
+and the control arm must itself peak at no less than the fixture's size or the
+test fails as vacuous. `TestLedgerFootprintIsDocumented` ties the `12MB` bound,
+the fixture size, the `3 GiB` cap and the `decodeRecord` frame to this section,
+so neither number can drift alone.
+
+Requirement: **the ledger suite's peak live set must stay under 1 GiB** (`AC-6`
+measured 680 MiB, the largest single test; the whole package peaks at 1.7 GiB
+because the pgx-free `TestAckImpliesDurable` forks a second `go test` binary and
+`TestQueryLatency` holds its 500k/500k index). No fixture may reintroduce a
+whole-file image; new fixture code that needs to hash or scan files uses
+`hashFileBytes`/`decodeLedgerFile`.
+
 ## 12. The research rung (SPEC-07)
 
 The research rung asks Off-by-One for a pre-solved answer before an agent is

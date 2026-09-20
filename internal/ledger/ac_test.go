@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +18,14 @@ import (
 // TestAC6AppendOnlyLedger: seq has no holes, every line parses, every record has
 // non-empty origin.host_id/origin.source and a rec_id, and no byte of a written
 // file changes.
+//
+// Memory: the before/after images are hashed as they are STREAMED and each line
+// is decoded one at a time, so the suite's live set is O(1) in the file set
+// rather than O(ledger bytes). At 1M records the ledger is ~472 MiB and the old
+// shape held three copies of it at once (the per-file buffer, the concatenated
+// `before` image, and the whole-image line-header slice), which is what pushed
+// the decode loop past a 3 GiB cap (see TestDecodeFootprintIsBounded, which
+// pins the bound this test now stays inside).
 func TestAC6AppendOnlyLedger(t *testing.T) {
 	n := 1000000
 	if testing.Short() {
@@ -38,42 +47,25 @@ func TestAC6AppendOnlyLedger(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	ents, err := os.ReadDir(root)
+	// Pass 1 — the before image: hash the raw file bytes in file-name order and
+	// count bytes without retaining them, then stream the same files a second
+	// time to decode every line. Both passes are bounded by the line reader's
+	// 1 MiB buffer.
+	beforeHash := sha256.New()
+	var beforeLen int64
+	var seqs []uint64
+	records := 0
+	beforeNames, err := ledgerFileNames(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var before []byte
-	var seqs []uint64
-	records := 0
-	for _, e := range ents {
-		if e.IsDir() || fileRE(e.Name()) == "" {
-			continue
+	for _, name := range beforeNames {
+		nb, herr := hashFileBytes(beforeHash, filepath.Join(root, name), -1)
+		if herr != nil {
+			t.Fatal(herr)
 		}
-		b, rerr := os.ReadFile(filepath.Join(root, e.Name()))
-		if rerr != nil {
-			t.Fatal(rerr)
-		}
-		before = append(before, b...)
-		for _, ln := range splitLines(b) {
-			if len(bytes.TrimSpace(ln)) == 0 {
-				continue
-			}
-			rec, derr := decodeRecord(ln, true)
-			if derr != nil || rec == nil {
-				t.Fatalf("%s: unparsable line", e.Name())
-			}
-			records++
-			if rec.RecID == "" {
-				t.Fatalf("seq %d has no rec_id", rec.Seq)
-			}
-			if rec.Origin.HostID == "" || rec.Origin.Source == "" {
-				t.Fatalf("seq %d has an empty origin: %+v", rec.Seq, rec.Origin)
-			}
-			if rec.Actor.ID == "" || rec.Actor.Kind == "" {
-				t.Fatalf("seq %d has an empty actor: %+v", rec.Seq, rec.Actor)
-			}
-			seqs = append(seqs, rec.Seq)
-		}
+		beforeLen += nb
+		records += decodeLedgerFile(t, filepath.Join(root, name), &seqs)
 	}
 	if records != n+1 {
 		t.Errorf("parsed %d records, want %d", records, n+1)
@@ -87,7 +79,7 @@ func TestAC6AppendOnlyLedger(t *testing.T) {
 	if len(seqs) > 0 && seqs[0] != 1 {
 		t.Errorf("first seq = %d, want 1", seqs[0])
 	}
-	beforeHash := sha256.Sum256(before)
+	beforeSum := beforeHash.Sum(nil)
 
 	// reopen: recovery + index rebuild must not rewrite a single byte
 	l2 := testLedgerAt(t, root, clk)
@@ -95,33 +87,107 @@ func TestAC6AppendOnlyLedger(t *testing.T) {
 	if err := l2.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var after []byte
-	ents2, err := os.ReadDir(root)
+
+	// Pass 2 — the after image: hash exactly the same number of leading bytes,
+	// in the same file-name order. A file set that only ever grows by appending
+	// (same file, or a new part that sorts last) keeps the before image as the
+	// after image's prefix, which is the property AC-6 asserts.
+	afterHash := sha256.New()
+	var afterLen int64
+	afterNames, err := ledgerFileNames(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, e := range ents2 {
-		if e.IsDir() || fileRE(e.Name()) == "" {
-			continue
+	for _, name := range afterNames {
+		want := beforeLen - afterLen
+		if want <= 0 {
+			break
 		}
-		b, rerr := os.ReadFile(filepath.Join(root, e.Name()))
-		if rerr != nil {
-			t.Fatal(rerr)
+		nb, herr := hashFileBytes(afterHash, filepath.Join(root, name), want)
+		if herr != nil {
+			t.Fatal(herr)
 		}
-		after = append(after, b...)
+		afterLen += nb
 	}
-	if len(after) < len(before) {
-		t.Fatalf("the ledger shrank across a reopen: %d → %d bytes", len(before), len(after))
+	if afterLen < beforeLen {
+		t.Fatalf("the ledger shrank across a reopen: %d → %d bytes", beforeLen, afterLen)
 	}
-	if !bytes.Equal(after[:len(before)], before) {
+	if !bytes.Equal(beforeSum, afterHash.Sum(nil)) {
 		t.Errorf("a written byte changed across a reopen: %s vs %s",
-			hex.EncodeToString(beforeHash[:8]), hex.EncodeToString(hashOf(after[:len(before)])[:8]))
+			hex.EncodeToString(beforeSum[:8]), hex.EncodeToString(afterHash.Sum(nil)[:8]))
 	}
 }
 
-func hashOf(b []byte) []byte {
-	h := sha256.Sum256(b)
-	return h[:]
+// ledgerFileNames returns the ledger file names directly under root, in the
+// os.ReadDir (file-name) order the before/after images are concatenated in.
+func ledgerFileNames(root string) ([]string, error) {
+	ents, err := os.ReadDir(root)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range ents {
+		if e.IsDir() || fileRE(e.Name()) == "" {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	return names, nil
+}
+
+// hashFileBytes writes at most max bytes of path into dst (max < 0 means the
+// whole file) and returns how many bytes it consumed. It never holds more than
+// one page-sized buffer.
+func hashFileBytes(dst io.Writer, path string, max int64) (int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	var src io.Reader = f
+	if max >= 0 {
+		src = io.LimitReader(f, max)
+	}
+	return io.Copy(dst, src)
+}
+
+// decodeLedgerFile streams one ledger file and appends the seq of every line
+// that parses, asserting the per-record invariants AC-6 names. It holds one
+// line at a time.
+func decodeLedgerFile(t *testing.T, path string, seqs *[]uint64) int {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	name := filepath.Base(path)
+	n := 0
+	werr := walkLines(f, func(line []byte, _ int64, _ bool) error {
+		if len(bytes.TrimSpace(line)) == 0 {
+			return nil
+		}
+		rec, derr := decodeRecord(line, true)
+		if derr != nil || rec == nil {
+			return fmt.Errorf("%s: unparsable line", name)
+		}
+		if rec.RecID == "" {
+			return fmt.Errorf("seq %d has no rec_id", rec.Seq)
+		}
+		if rec.Origin.HostID == "" || rec.Origin.Source == "" {
+			return fmt.Errorf("seq %d has an empty origin: %+v", rec.Seq, rec.Origin)
+		}
+		if rec.Actor.ID == "" || rec.Actor.Kind == "" {
+			return fmt.Errorf("seq %d has an empty actor: %+v", rec.Seq, rec.Actor)
+		}
+		*seqs = append(*seqs, rec.Seq)
+		n++
+		return nil
+	})
+	if werr != nil {
+		t.Fatal(werr)
+	}
+	return n
 }
 
 // fileRE reports the matched ledger file name, or "" when it is not one.

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // stateRootPlaceholder is the token the compiled-in do-not-touch floor carries;

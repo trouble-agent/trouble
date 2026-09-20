@@ -271,10 +271,13 @@ in a follow-up commit. Until then the suite is built against the scope keys abov
 
 ### 6.3 Module path rename
 
-If the publish org/name differs from `github.com/totalwindupflightsystems/trouble`, the migration is a
-single mechanical pass: `go.mod` module line plus the import prefixes in `internal/**` and `cmd/**`. No
-spec pins the import path in a wire format, a ledger record, or a schema — the module path appears in Go
-source only. This is deliberate.
+The module path is `github.com/trouble-agent/trouble` (org `trouble-agent`, accepted 2026-09-17). The
+rename from the pre-publish placeholder was executed as this section predicted: one mechanical pass over
+`go.mod` plus the import prefixes — 372 files, 495 insertions against 495 deletions, every changed line a
+path-only substitution (`gofmt -l` clean, `go build ./...`, `go vet ./...`, `selfcheck` PASS). No spec
+pins the import path in a wire format, a ledger record, or a schema — the module path appears in Go
+source and in `Makefile`/`Dockerfile` ldflag targets only. This is deliberate: a future org change stays a
+single sed.
 
 ### 6.4 Single-tenant per host, always
 

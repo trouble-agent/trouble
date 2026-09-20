@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/loadfence"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/loadfence"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 func TestDeriveClassSlugVectors(t *testing.T) {

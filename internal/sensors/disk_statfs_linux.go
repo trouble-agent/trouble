@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // diskPlatformReason is empty on Linux: the disk sensor is implemented here.

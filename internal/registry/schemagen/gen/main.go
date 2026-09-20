@@ -8,7 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry"
 )
 
 func main() {

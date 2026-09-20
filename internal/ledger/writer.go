@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // pending is one queued record awaiting the group commit. A group carries

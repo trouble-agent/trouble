@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/ladder"
-	"github.com/totalwindupflightsystems/trouble/internal/ledger"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/ladder"
+	"github.com/trouble-agent/trouble/internal/ledger"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // wiring_test.go drives the adapters through a real ledger on a temp state root:

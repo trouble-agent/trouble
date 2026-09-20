@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestCanaryLandsThroughTheHTTPPath pins §3.8: the canary is injected as a real

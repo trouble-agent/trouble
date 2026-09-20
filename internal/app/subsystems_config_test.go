@@ -28,9 +28,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/dashboard"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // localDuckbrainStub stands in for the SPEC-09 §3.10 local-first backend: it

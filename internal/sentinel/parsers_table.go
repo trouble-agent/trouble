@@ -3,7 +3,7 @@ package sentinel
 import (
 	"sort"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // builtinParsers is the v0.1 parser table of §3.5 in configured order. Order is

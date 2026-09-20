@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // park_test.go is the SPEC-05 §7 row for §3.5 (park and resume): the SIGTERM

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/ledger"
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/ledger"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §7 bench_ingest_test.go: re-runs the ingestion harness with the

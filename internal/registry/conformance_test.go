@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/testkit/badmodule"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry/testkit/badmodule"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 func conformanceDeps() registry.RegistryDeps {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §7 bench_test.go and the §3.9 performance budget.

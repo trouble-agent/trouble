@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // scrubTarget is the SPEC-02 content class used for the ledger copy of a call's

@@ -33,9 +33,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/sensors"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/sensors"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // sensorsEmitter is an emit sink: this test owns the config handoff, not the

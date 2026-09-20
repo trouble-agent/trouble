@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // offer_classification_test.go is TRBL-032. §4.3's rows are statements about

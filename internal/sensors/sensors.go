@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Package sensors is the detection plane (SPEC-03). Six sensor kinds feed one

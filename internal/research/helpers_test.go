@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // fakeDeps is a recording Deps: every appended draft is kept in order, and Scrub

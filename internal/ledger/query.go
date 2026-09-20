@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // groupSort selects the TopGroups ranking (SPEC-01 §2.3: count|rate|trend).

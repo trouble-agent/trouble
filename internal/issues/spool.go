@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // spoolOp is the marshalled payload of a spooled operation (§3.7). The same

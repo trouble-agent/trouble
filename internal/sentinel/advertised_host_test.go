@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // advertised_host_test.go pins the DSN-host gate of SPEC-04 §2.3/§2.3a and

@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // driverError is one lab failure, carrying the SPEC-07 §5 code, the pinned

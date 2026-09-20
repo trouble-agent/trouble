@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §7 shield_test.go: every configured public key survives verbatim in

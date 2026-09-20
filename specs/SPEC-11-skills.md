@@ -825,7 +825,7 @@ build does not register, and cannot express anything except typed tool calls (§
 
 ## 8. hilo impact
 
-Packages/files created (all new, `github.com/totalwindupflightsystems/trouble`):
+Packages/files created (all new, `github.com/trouble-agent/trouble`):
 
 | File | Contents |
 |---|---|

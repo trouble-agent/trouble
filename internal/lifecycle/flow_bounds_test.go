@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // flowBoundsDefaults are the §3.9a numbers, spelled once so the assertions below

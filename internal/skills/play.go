@@ -3,8 +3,8 @@ package skills
 import (
 	"encoding/json"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // DecodePlay parses a play document through SPEC-06's own decoder, so the skills

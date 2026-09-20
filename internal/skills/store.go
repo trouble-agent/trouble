@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // decodePublicKey parses a base64 std 32-byte ed25519 public key.

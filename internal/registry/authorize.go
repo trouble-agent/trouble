@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // policyDecision is the output of the authorize stage (SPEC-06 §2.3).

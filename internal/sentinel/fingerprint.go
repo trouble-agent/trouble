@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // canonicalHeader is the first line of every canonical byte string (§3.3). It

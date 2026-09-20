@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // pullState is pull-state.json (§3.5).

@@ -3,7 +3,7 @@ package scrub
 import (
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Reasons carried by scrub errors. They are a closed vocabulary: an error

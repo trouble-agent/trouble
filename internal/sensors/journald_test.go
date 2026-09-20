@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // journald_test.go covers SPEC-03 §7's journald row against a fake journalctl

@@ -3,7 +3,7 @@ package hub
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The degradation reasons of SPEC-13 §4.3 (`detail.reason` on the health

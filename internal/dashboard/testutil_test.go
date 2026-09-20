@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // testutil_test.go holds the fakes every dashboard test shares. Nothing here

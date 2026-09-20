@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Reopener is the optional driver capability the §3.11 reopen path needs. The

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // advertised_host_test.go pins SPEC-12 §3.1/§3.1g (TRBL-017): `ingest.advertised_host`

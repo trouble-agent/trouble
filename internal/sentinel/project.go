@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // projectEntry is per-project runtime state: the config record, the keys that

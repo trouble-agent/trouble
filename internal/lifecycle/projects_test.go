@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // projects_test.go pins the `[[projects]]` config surface (SPEC-12 §3.1a): the

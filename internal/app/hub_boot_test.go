@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/hub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/hub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // hub_boot_test.go is the composition root's half of SPEC-13: a validated

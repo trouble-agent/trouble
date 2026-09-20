@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // GatesStore reads the current autonomy gates.

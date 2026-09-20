@@ -22,9 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/dashboard"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 const usage = `trouble — incident ladder daemon control

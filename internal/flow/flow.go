@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Deps is the wiring layer's injection of every collaborator (§4). NewFlow takes

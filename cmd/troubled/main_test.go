@@ -24,9 +24,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // childEnvName selects a child mode of this test binary (see TestMain). It is how

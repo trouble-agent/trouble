@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestShippedDefaultDeskIsOffAndValidates is AC1's first half: the desk the

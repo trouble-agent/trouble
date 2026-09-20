@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // ratioGuardFloor is the output size past which the compression-ratio guard of

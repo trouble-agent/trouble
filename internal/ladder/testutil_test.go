@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // testutil_test.go holds the fakes the ladder's tests share. Every collaborator

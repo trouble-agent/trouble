@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // lifecycle_test.go is the §4 startup/shutdown contract driven end to end on

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestOneBugThreePathsIsOneIssue is the AC-22 desk half: the same underlying bug

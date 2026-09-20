@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // breakerState is one storm breaker's live state (SPEC-05 §3.8). A suppression

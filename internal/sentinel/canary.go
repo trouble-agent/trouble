@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // CanaryFingerprint is the reserved fingerprint of the canary (§3.8). The

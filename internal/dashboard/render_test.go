@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // render_test.go is the SPEC-10 §7 row for AC-16 and §2.7/§2.8: the golden

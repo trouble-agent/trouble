@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // driverUnderTest is one driver plus the call counter of its fake backend, so the

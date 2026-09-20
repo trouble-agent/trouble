@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §7: 14 positive vectors (one per rule family plus boundary cases) and

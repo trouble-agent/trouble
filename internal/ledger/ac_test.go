@@ -11,7 +11,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestAC6AppendOnlyLedger: seq has no holes, every line parses, every record has

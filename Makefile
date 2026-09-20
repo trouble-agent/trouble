@@ -13,7 +13,7 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0
 GIT_SHA    ?= $(shell git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
 BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%S.000Z)
 
-LIFECYCLE_PKG = github.com/totalwindupflightsystems/trouble/internal/lifecycle
+LIFECYCLE_PKG = github.com/trouble-agent/trouble/internal/lifecycle
 LDFLAGS = -s -w \
 	-X $(LIFECYCLE_PKG).Version=$(VERSION) \
 	-X $(LIFECYCLE_PKG).GitSHA=$(GIT_SHA) \

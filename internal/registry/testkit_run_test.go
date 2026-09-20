@@ -11,9 +11,9 @@ package registry_test
 import (
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/testkit"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry/testkit"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestConformanceRunAll runs the three obligations of §2.4 over the shipped module

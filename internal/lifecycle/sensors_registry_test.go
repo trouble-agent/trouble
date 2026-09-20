@@ -47,7 +47,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // sensorsConfigSourcePath resolves internal/sensors/config.go from THIS test

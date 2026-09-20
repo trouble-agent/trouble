@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // HeartbeatLoop writes heartbeat.json atomically every cfg.Lifecycle.HeartbeatInterval

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Error is a refusal or failure raised by a registry stage. Every code comes

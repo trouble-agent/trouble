@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // dedup_rewarm_test.go pins SPEC-13 §2.1.1 rule 5a: the two recovery

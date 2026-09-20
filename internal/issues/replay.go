@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Replay drains the spool (§3.7): replay order is (next_try_ts, ts, id), one

@@ -12,13 +12,13 @@ package app
 import (
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/flow"
-	"github.com/totalwindupflightsystems/trouble/internal/issues"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/research"
-	"github.com/totalwindupflightsystems/trouble/internal/sentinel"
-	"github.com/totalwindupflightsystems/trouble/internal/skills"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/flow"
+	"github.com/trouble-agent/trouble/internal/issues"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/research"
+	"github.com/trouble-agent/trouble/internal/sentinel"
+	"github.com/trouble-agent/trouble/internal/skills"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // partialSet returns a set whose every member is live (no refusals recorded,

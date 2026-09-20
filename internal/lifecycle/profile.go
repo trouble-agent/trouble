@@ -27,7 +27,7 @@ package lifecycle
 import (
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The two accepted values of `server.profile` (SPEC-13 §1). They are the only

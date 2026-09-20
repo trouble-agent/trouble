@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestSigCreateCapIsOne pins the §3.8 per-sig create cap: 1 000 ensures for one

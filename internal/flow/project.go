@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // schedulerProject is the slice of the scheduler's project row the proof reads.

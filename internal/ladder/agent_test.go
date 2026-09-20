@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/llm"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/llm"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // agent_test.go is SPEC-05 §7's battery for §2a/§3.7a/§3.12a: the agent stage runs

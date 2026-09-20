@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // consume_test.go is the heart of SPEC-13 §7's consume row: the batch bound, the

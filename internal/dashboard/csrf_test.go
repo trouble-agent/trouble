@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // csrf_test.go is the SPEC-10 §7 row for §2.3: the four checks in order, both

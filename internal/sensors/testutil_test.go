@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // harness wires a Sensors against an in-memory ledger, a controllable clock and

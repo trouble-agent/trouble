@@ -3,7 +3,7 @@ package hub
 import (
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // idemindex.go is the ledger half of SPEC-13 §2.1.1's recovery posture: "the

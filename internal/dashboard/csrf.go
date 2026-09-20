@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // CSRF — SPEC-10 §2.3. Four checks, evaluated in order on every POST; the

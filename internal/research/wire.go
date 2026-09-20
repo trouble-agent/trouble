@@ -15,7 +15,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Digest is sha256 hex truncated to 16 chars: the brief/prompt digest and the

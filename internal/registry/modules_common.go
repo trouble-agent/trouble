@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // decodeArgs strictly decodes normalized args into a module's typed args struct:

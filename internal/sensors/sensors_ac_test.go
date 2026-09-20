@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // sensors_ac_test.go covers the four acceptance criteria this area owns

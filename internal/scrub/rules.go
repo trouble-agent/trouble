@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // RulesVersion is the rule-table identity shipped by this binary (SPEC-02 §4).

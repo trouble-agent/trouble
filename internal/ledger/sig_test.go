@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestVectorTable asserts every published §3.3 row byte-for-byte: the framing of

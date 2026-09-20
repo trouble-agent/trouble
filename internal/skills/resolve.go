@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // VerifyWindow is one open, unfinished verify window (§4.5 rule 3). The spec's

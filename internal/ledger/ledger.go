@@ -14,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SchemaVersionV1 is the record schema version written by this binary.

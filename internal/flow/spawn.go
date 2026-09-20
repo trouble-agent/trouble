@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // budgetMS is the AC-21 trigger→spawn budget: 60 000 ms, measured per spawn.

@@ -3,7 +3,7 @@ package ladder
 import (
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Config is the resolved form of the SPEC-05 §4.3 table: one field per key, the

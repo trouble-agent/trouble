@@ -3,7 +3,7 @@ package skills
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Skills is the composed package surface: one store, one puller, one promoter,

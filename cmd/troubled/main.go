@@ -23,8 +23,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/totalwindupflightsystems/trouble/internal/app"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/app"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }

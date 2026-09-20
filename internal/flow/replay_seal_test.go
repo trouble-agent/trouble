@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // bodyLog records every `/dispatch` body the router received, in order, and lets

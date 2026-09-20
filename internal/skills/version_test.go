@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestDowngradeIsRefused pins §3.3: a lower version than the highest installed for

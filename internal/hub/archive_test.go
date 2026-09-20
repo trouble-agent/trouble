@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // archive_test.go pins SPEC-13 §7's archive row: the plan/export/verify/mark/drop

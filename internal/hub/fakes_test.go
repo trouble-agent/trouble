@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // fakes_test.go carries the two test doubles the queue's semantics are proven

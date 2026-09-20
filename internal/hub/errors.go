@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Reason values carried alongside a TROUBLE-HUB code. They are stable tokens,

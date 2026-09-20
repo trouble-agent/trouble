@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // groupEvent builds an event that groups to one digest (the vector-B stack).

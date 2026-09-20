@@ -10,7 +10,7 @@ package research
 // separate driver because a relayed lab is a different trust and capability
 // domain, not a URL change.
 
-import "github.com/totalwindupflightsystems/trouble/internal/types"
+import "github.com/trouble-agent/trouble/internal/types"
 
 // newWebhook returns the gateway-relayed driver. A missing webhook URL is
 // refused at config validation (SPEC-07 §4.3): a webhook driver with nowhere to

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The persistence-boundary re-scan (SPEC-02 §3.4 point 3, SPEC-01 §4.2).

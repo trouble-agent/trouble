@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Gates returns the current autonomy gates (§3.11). The ladder owns the mode

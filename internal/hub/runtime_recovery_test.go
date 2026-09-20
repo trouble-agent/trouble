@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // runtime_recovery_test.go is the TRBL-031 half of SPEC-13 §4.3's matrix: the

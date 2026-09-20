@@ -801,7 +801,7 @@ resolved config, the ledger writer and the spool, and nothing consumes it in rev
 PRD HTMLs are recovered, the scope keys must be diffed against the real AC text and this table corrected
 in a follow-up commit. Until then the suite is built against the scope keys above.</p>
 <h3 id="63-module-path-rename">6.3 Module path rename</h3>
-<p>If the publish org/name differs from <code>github.com/totalwindupflightsystems/trouble</code>, the migration is a
+<p>If the publish org/name differs from <code>github.com/trouble-agent/trouble</code>, the migration is a
 single mechanical pass: <code>go.mod</code> module line plus the import prefixes in <code>internal/**</code> and <code>cmd/**</code>. No
 spec pins the import path in a wire format, a ledger record, or a schema — the module path appears in Go
 source only. This is deliberate.</p>
@@ -16587,7 +16587,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus <code>internal/hub</code> 
 <tbody>
 <tr>
 <td>Module path</td>
-<td><code>github.com/totalwindupflightsystems/trouble</code> (rename-if-republished is a single sed over go.mod + imports; recorded in SPEC-INDEX §6)</td>
+<td><code>github.com/trouble-agent/trouble</code> (rename-if-republished is a single sed over go.mod + imports; recorded in SPEC-INDEX §6)</td>
 </tr>
 <tr>
 <td>Go version / build</td>
@@ -18757,7 +18757,7 @@ every pull interval cannot flood the ledger — and no refusal is ever dropped.<
 <li>Integration (<code>test/skills_e2e_test.go</code>) — 200-artifact pull: install ≤ 2 s wall (excluding the fetch), RSS delta ≤ 8 MiB (steady RSS budget ≤ 80 MB per SPEC-TYPES §6.1), ledger records appended through the group-commit writer with no per-record fsync (regression: 512 rec/s per-line vs ≈ 515k rec/s amortized), and <code>pulled</code> count equals <code>installed + pending_review + refused</code> exactly.</li>
 </ol>
 <h2 id="8-hilo-impact">8. hilo impact</h2>
-<p>Packages/files created (all new, <code>github.com/totalwindupflightsystems/trouble</code>):</p>
+<p>Packages/files created (all new, <code>github.com/trouble-agent/trouble</code>):</p>
 <table>
 <thead>
 <tr>
@@ -19440,17 +19440,17 @@ is the whole point of the split.</p>
 <tbody>
 <tr>
 <td><code>Version</code></td>
-<td><code>-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.Version=$(git describe --tags --always --dirty)</code></td>
+<td><code>-X github.com/trouble-agent/trouble/internal/lifecycle.Version=$(git describe --tags --always --dirty)</code></td>
 <td><code>0.0.0-dev</code></td>
 </tr>
 <tr>
 <td><code>GitSHA</code></td>
-<td><code>-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.GitSHA=$(git rev-parse --short=7 HEAD)</code></td>
+<td><code>-X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$(git rev-parse --short=7 HEAD)</code></td>
 <td><code>unknown</code></td>
 </tr>
 <tr>
 <td><code>BuildTime</code></td>
-<td><code>-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)</code></td>
+<td><code>-X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)</code></td>
 <td><code>1970-01-01T00:00:00.000Z</code></td>
 </tr>
 </tbody>
@@ -19481,7 +19481,7 @@ is the whole point of the split.</p>
 <code>__ENVFILE__</code>, <code>__MEM_HIGH__</code>, <code>__MEM_MAX__</code>, <code>__WATCHDOG__</code>, <code>__STATE_ROOT__</code>, <code>__DESC__</code>):</p>
 <div class="codehilite"><pre><span></span><code><span class="k">[Unit]</span>
 <span class="na">Description</span><span class="o">=</span><span class="s">__DESC__</span>
-<span class="na">Documentation</span><span class="o">=</span><span class="s">https://github.com/totalwindupflightsystems/trouble</span>
+<span class="na">Documentation</span><span class="o">=</span><span class="s">https://github.com/trouble-agent/trouble</span>
 <span class="na">Wants</span><span class="o">=</span><span class="s">network-online.target</span>
 <span class="na">After</span><span class="o">=</span><span class="s">network-online.target</span>
 <span class="na">StartLimitIntervalSec</span><span class="o">=</span><span class="s">0</span>

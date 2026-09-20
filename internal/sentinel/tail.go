@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // tailPoll is the file tailer's poll interval. Polling (rather than inotify) is

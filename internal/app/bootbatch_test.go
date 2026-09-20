@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestBootInstallsBatchBoundaryAndLadderBridge drives a real boot (the same

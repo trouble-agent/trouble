@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestVerifyHappyPathAndFailures pins §3.2's verification order and the -002/-003

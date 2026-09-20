@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // runtime_test.go pins SPEC-13 §4.1's boot sequence and §4.3's degradation matrix

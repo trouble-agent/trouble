@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Event source kinds (the `payload.source_kind` vocabulary of §4.3's one

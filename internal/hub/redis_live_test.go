@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // redis_live_test.go is the OPT-IN live probe: it runs the hub's queue against a

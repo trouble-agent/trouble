@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // withQueue swaps the fixture's durable queue for a REAL flow-owned store and

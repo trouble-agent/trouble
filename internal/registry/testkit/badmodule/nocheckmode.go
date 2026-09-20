@@ -3,8 +3,8 @@ package badmodule
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // NoCheckArgs is the args schema of the check_mode-less negative module.

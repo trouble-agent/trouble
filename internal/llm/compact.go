@@ -4,7 +4,7 @@ import (
 	"context"
 	"unicode/utf8"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // EstimateTokens is the byte-based token estimator used where no provider `usage`

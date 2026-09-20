@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // payloadSchema is the §3.3 required-key set per op. Every key listed must be

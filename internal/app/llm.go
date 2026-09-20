@@ -1,8 +1,8 @@
 package app
 
 import (
-	"github.com/totalwindupflightsystems/trouble/internal/ladder"
-	"github.com/totalwindupflightsystems/trouble/internal/llm"
+	"github.com/trouble-agent/trouble/internal/ladder"
+	"github.com/trouble-agent/trouble/internal/llm"
 )
 
 // llmAgentPort builds the agent stage's LLM port from the `[llm]` table

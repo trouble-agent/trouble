@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // gates_test.go is the SPEC-05 §7 row for AC-26: the autonomy gate matrix (§3.11),

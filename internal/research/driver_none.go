@@ -11,7 +11,7 @@ package research
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // driverNone is the zero-behaviour driver.

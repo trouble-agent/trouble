@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // rules_test.go covers SPEC-03 §7's rules row: TOML decode parity with

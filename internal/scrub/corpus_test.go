@@ -3,7 +3,7 @@ package scrub
 import (
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §7 corpus_test.go: a 10,000-line corpus of real-shaped journal lines

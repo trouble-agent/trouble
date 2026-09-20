@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // collectorSigGoldenPath is the checked-in value-level pin of §7's collector row:

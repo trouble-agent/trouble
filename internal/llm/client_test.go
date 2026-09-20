@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The client CONTRACT (SPEC-05 §3.7a): one buffered request/response, a

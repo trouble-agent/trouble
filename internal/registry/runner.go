@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Runner is the adapter that satisfies SPEC-05 §2's PlayRunner view of this

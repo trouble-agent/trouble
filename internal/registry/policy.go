@@ -8,7 +8,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // capabilityState is the host's polkit capability for the service verbs

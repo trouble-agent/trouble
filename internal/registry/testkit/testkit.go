@@ -54,10 +54,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 const (

@@ -7,7 +7,7 @@ package research
 // without an agent run it records the agent budget that went unspent — flagged
 // as an estimate, because it is one.
 
-import "github.com/totalwindupflightsystems/trouble/internal/types"
+import "github.com/trouble-agent/trouble/internal/types"
 
 // researchCost is `payload.cost` of a `research` record.
 type researchCost struct {

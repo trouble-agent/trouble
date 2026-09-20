@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // statemachine_test.go is the §7 row for the transition table: 48 legal vectors

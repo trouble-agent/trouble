@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Authentication — SPEC-10 §2.2/§2.4. The middleware chain per request:

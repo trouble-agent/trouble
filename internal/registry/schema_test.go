@@ -20,9 +20,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // shippedModuleCount is the v0.1 regression number: thirteen registered modules

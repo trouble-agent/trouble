@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // vectorEvents builds the three §3.3 events: A (SDK override), B (default

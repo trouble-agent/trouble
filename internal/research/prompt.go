@@ -13,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // promptCaps are the two size limits the prompt builder honours.

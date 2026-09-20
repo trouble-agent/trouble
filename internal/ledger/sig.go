@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // MergeDomain is the pinned merge-key domain separator (SPEC-01 §3.3).

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-03 §3.2 — the PSI measured contract. Every rule below cites the

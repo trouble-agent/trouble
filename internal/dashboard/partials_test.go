@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // partials_test.go is the SPEC-10 §7 row for §2.1.2: the seven fragments, their

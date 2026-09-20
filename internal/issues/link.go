@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Link wires the sig's issue to a board row (SPEC-08) and/or a research brief

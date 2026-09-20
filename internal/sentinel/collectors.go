@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // maxEventBytesDefault caps one assembled collector event (§3.5 guard 4).

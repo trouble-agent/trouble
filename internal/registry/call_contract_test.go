@@ -27,7 +27,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // ac7StageOrder is §2.3's fixed stage order, and the 0-indexed call the spec's

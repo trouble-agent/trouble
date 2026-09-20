@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // capCounters is the §3.8 anti-spray state. Windows are fixed; the counters are

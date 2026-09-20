@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // GenerationPrefix is the artifact schema version, and it is part of the signed

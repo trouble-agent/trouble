@@ -22,8 +22,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The floor as SPEC-06 §3.6 spells it. It is restated here rather than derived

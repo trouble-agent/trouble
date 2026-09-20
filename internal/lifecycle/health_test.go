@@ -3,7 +3,7 @@ package lifecycle
 import (
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // health_test.go pins the §3.3a rule: the status string is degraded (or

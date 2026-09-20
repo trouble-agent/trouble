@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Health aggregation — SPEC-10 §2.9/§3.3. BuildHealth assembles the single

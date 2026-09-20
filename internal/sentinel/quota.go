@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // quotaWindowSeconds is the pinned window length: a fixed 60s tumbling window

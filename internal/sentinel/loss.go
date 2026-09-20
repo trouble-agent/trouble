@@ -9,7 +9,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Dispositions recorded on every `event` record (`payload.disposition`, §3.9).

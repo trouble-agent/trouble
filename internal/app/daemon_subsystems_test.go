@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/issues"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/issues"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // researchLab is the local Off-by-One lab speaking the driver's own wire:

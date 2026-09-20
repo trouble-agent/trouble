@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // canaryObs is one observed canary (§3.10). The ladder records each observation

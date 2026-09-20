@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/testkit/badmodule"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/registry/testkit/badmodule"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // This file is the negative half of AC-23 (SPEC-06 §2.4, §7): the harness must

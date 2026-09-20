@@ -1,7 +1,7 @@
 package registry
 
 import (
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // CapabilityProbeModule is the reserved, non-dispatchable audit subject of

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Config is the single flat resolved config (SPEC-12 §3.1) plus the nested

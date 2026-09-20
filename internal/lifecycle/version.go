@@ -3,7 +3,7 @@
 package lifecycle
 
 import (
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Link-time vars (SPEC-12 §3.4).

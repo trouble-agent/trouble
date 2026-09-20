@@ -14,7 +14,7 @@ import (
 
 	"github.com/godbus/dbus/v5"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-03 §3.3 (D-Bus) and §3.6 (the merge rule).

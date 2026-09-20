@@ -15,8 +15,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	"github.com/totalwindupflightsystems/trouble/internal/sensors"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/sensors"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // playFile is the on-disk TOML shape of a play (SPEC-06 §3.7). Field mapping is

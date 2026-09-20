@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // maxHeaderLine is the pinned 8KB line cap for envelope and item header lines

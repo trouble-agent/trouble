@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestAC24LocalPromoteThenPullDown is AC-24's skills half: host A's agent fix

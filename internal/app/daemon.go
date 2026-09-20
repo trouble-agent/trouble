@@ -16,15 +16,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/dashboard"
-	"github.com/totalwindupflightsystems/trouble/internal/hub"
-	"github.com/totalwindupflightsystems/trouble/internal/ladder"
-	"github.com/totalwindupflightsystems/trouble/internal/ledger"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/sensors"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/dashboard"
+	"github.com/trouble-agent/trouble/internal/hub"
+	"github.com/trouble-agent/trouble/internal/ladder"
+	"github.com/trouble-agent/trouble/internal/ledger"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/sensors"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // daemon.go is the boot sequence of SPEC-12 §4.1 and the drain of §4.2, in code.

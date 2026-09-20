@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/loadfence"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/loadfence"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // budget_test.go is the SPEC-10 §7 row for §2.9: boot with a fixture index of

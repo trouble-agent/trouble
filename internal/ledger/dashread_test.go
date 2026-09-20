@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // dashread_test.go proves the SPEC-10 §3.3 read surface serves every accessor

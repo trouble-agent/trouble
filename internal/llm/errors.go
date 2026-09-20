@@ -30,7 +30,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Failure classes. Every attempt is classified with exactly one of these; the

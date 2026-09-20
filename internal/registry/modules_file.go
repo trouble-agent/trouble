@@ -32,8 +32,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 type fileReadArgs struct {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // ops_test.go covers the operator verbs the CLI calls (SPEC-12 §2.1): escalate

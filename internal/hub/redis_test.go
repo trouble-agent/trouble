@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // redis_test.go pins SPEC-13 §7's redis_test row: EnsureGroup twice (BUSYGROUP is

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Verdict is the stall check outcome (SPEC-12 §3.3).

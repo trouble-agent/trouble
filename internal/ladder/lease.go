@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // leaseTable is the host-wide agent lease (§3.6): one agent run at a time per

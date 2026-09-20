@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // ForwardLoop runs the satellite forward path (SPEC-12 §3.7).

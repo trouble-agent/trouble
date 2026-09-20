@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestEnvelopeFixturesDecode pins the §7 requirement: every fixture in

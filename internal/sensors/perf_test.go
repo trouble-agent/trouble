@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/loadfence"
+	"github.com/trouble-agent/trouble/internal/loadfence"
 )
 
 // perf_test.go covers SPEC-03 §7's perf row: 256 rules across 6 sensors,

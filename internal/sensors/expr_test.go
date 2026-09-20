@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // expr_test.go covers SPEC-03 §7's expr row: the 14 published vectors in both

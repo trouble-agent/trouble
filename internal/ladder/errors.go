@@ -8,7 +8,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Error is a ladder refusal or failure. The class comes from the SPEC-05 §5

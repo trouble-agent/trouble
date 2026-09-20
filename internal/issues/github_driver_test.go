@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestGoldenBodyTemplate pins the §3.9.3 body byte-for-byte. The only token the

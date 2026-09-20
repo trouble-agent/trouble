@@ -14,7 +14,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // recordSink is SPEC-01's ledger (the only writer).

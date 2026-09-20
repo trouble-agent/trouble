@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Test keys (32 lowercase hex, the only form §2.3 accepts).

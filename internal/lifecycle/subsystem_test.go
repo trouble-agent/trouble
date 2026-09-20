@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // documentedIssuesOptIn is the `[issues]` opt-in exactly as SPEC-09 §3.4a and

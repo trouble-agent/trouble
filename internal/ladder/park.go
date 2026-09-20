@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Park is the SIGTERM/upgrade drain (SPEC-05 §3.5): stop admissions → flush the

@@ -59,7 +59,7 @@ RUN set -eux; \
         bt="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"; \
     fi; \
     echo "stamp: version=$version git_sha=$sha build_time=$bt"; \
-    LDFLAGS="-s -w -X github.com/totalwindupflightsystems/trouble/internal/lifecycle.Version=$version -X github.com/totalwindupflightsystems/trouble/internal/lifecycle.GitSHA=$sha -X github.com/totalwindupflightsystems/trouble/internal/lifecycle.BuildTime=$bt"; \
+    LDFLAGS="-s -w -X github.com/trouble-agent/trouble/internal/lifecycle.Version=$version -X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$sha -X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$bt"; \
     mkdir -p /out/bin /out/stage/data/state; \
     chmod 0700 /out/stage/data/state; \
     chmod 0755 /out/stage/data; \

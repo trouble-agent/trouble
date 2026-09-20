@@ -15,8 +15,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 const flowTestSig = "sentinel:sha256v1:9f2c1d3e4b5a6c7d"

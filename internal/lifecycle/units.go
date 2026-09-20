@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/scrub"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/scrub"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 //go:embed units/*.tmpl

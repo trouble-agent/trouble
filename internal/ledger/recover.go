@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // recoveredState is what a successful recovery hands to the writer.

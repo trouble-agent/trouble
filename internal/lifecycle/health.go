@@ -1,7 +1,7 @@
 package lifecycle
 
 import (
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Health assembles the single HealthResponse (SPEC-12 §3.3).

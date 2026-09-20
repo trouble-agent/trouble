@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestGzipBombIsRefused pins §3.7/§6.1: the decompressed cap is a limited

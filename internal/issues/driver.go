@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Writer is SPEC-01's single-writer append port (§2). A *ledger.Ledger satisfies

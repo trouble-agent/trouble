@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Reason tokens attached to a refusal. A reason is a stable token, never prose.

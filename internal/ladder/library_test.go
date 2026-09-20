@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // library_test.go is SPEC-05 §7's battery for §2b: the ladder reads the local skill

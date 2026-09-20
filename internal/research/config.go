@@ -10,7 +10,7 @@ package research
 import (
 	"fmt"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // resolveConfig applies the §4.3 defaults to a raw config map.

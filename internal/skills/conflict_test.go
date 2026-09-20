@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestTwoSkillsOneSigConflict pins §4.5 rule 1: the highest version wins and the

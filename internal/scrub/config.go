@@ -4,7 +4,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Defaults of the [scrub] subtree (SPEC-02 §3.2).

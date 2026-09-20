@@ -54,8 +54,8 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 type flowFileIssueArgs struct {

@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // dispatchPayload is the §3.6 wire body. The key set is pinned: the router

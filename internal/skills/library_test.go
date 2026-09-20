@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // library_test.go is SPEC-11 §7 item 13: the local SKILL.md library (§2b) and its

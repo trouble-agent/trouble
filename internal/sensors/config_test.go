@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // decodeFor folds values over the compiled defaults exactly as New does, with

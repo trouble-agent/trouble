@@ -11,7 +11,7 @@ package sensors
 import (
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // RulePredicate is a compiled rule match list: true when every match entry holds

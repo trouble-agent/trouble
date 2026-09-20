@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // RecordWriter is the narrow ledger seam lifecycle needs (SPEC-12 §4.5).

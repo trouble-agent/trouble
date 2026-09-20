@@ -1,4 +1,4 @@
-module github.com/totalwindupflightsystems/trouble
+module github.com/trouble-agent/trouble
 
 go 1.26.0
 

@@ -2232,7 +2232,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 
 | Decision | Value |
 |---|---|
-| Module path | `github.com/totalwindupflightsystems/trouble` (rename-if-republished is a single sed over go.mod + imports; recorded in SPEC-INDEX §6) |
+| Module path | `github.com/trouble-agent/trouble` (rename-if-republished is a single sed over go.mod + imports; recorded in SPEC-INDEX §6) |
 | Go version / build | Go 1.26, `CGO_ENABLED=0`, `-trimpath -ldflags="-s -w"` |
 | State root | `~/.local/state/trouble` (0700, never /tmp) with `ledger/ spool/ worktrees-meta/ skills-local/ backups/` |
 | Ledger file set | `ledger/YYYY-MM-DD.jsonl` + `ledger/YYYY-MM-DD.N.gen.jsonl` generations after compaction |

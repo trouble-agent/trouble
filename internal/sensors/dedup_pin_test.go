@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TRBL-009 AC1 PIN — the refuted half, pinned as SATISFIED so a future change

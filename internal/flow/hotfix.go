@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // hotfixGate runs the §3.7 gate chain. It returns the first failing gate's code

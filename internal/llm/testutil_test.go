@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // testutil_test.go holds the fixtures the llm tests share: a recording httptest

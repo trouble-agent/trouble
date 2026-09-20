@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // dbDocument is the anchor document of §3.10: one document per sig, keyed by

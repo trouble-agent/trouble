@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/registry/validate"
+	"github.com/trouble-agent/trouble/internal/registry"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/registry/validate"
 )
 
 // TestSchemaDialectClosed is the dialect half of SPEC-06 §2.4, asserted from the

@@ -38,7 +38,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // serverDefaults is the SPEC-13 §2.1 / §2.1.1 default for every key of the

@@ -34,8 +34,9 @@ hand on 2026-09-17 (`c363daf`, go1.26.5). See
 | specs | `specs/SPEC-INDEX.md` + `SPEC-01..13` | authority; `python3 specs/tools/selfcheck.py` must pass before spec commits |
 
 Build: `make bin` (stamped), `make build`, `make check`, `make smoke-e2e`.
-Module path is frozen (`github.com/totalwindupflightsystems/trouble`) — never
-rename it (see the project prompt in the scheduler).
+Module path is `github.com/trouble-agent/trouble` (renamed from the
+pre-publish placeholder in a single mechanical pass — go.mod plus import
+prefixes, SPEC-INDEX §6.3).
 
 ## The 4 traps (each one stopped a real run)
 

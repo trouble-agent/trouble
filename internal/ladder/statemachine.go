@@ -5,7 +5,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // The transition table is DATA (SPEC-05 §7): 48 legal edges (T01–T48) and 13

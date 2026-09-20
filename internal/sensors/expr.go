@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // This file is SPEC-03 §3.4: ONE expression dialect, defined once here and

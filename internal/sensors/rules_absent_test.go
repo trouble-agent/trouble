@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // inotifyRow returns the inotify row of Health(), and fails when it is missing —

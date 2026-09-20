@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // route is one row of the §2.1 table — the only source of routes. Scope ""

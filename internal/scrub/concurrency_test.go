@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-02 §6 concurrency: Engine holds immutable compiled rules and an immutable

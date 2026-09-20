@@ -20,8 +20,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // procHertz is USER_HZ, the unit of /proc/<pid>/stat's utime/stime and of

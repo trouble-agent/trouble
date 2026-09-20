@@ -3,8 +3,8 @@ package hub
 import (
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SPEC-13 §2.1 default values for the runtime keys that are not already carried

@@ -11,7 +11,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Probe refreshes the registration proof of every configured project (§3.5).

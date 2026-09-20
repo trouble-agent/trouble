@@ -1,7 +1,7 @@
 package lifecycle
 
 import (
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TopologyDecisions returns the T1..T5 decision rows verbatim (SPEC-12 §3.7).

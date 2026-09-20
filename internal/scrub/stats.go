@@ -3,7 +3,7 @@ package scrub
 import (
 	"sync/atomic"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // statSet is the cumulative process counter set behind Engine.Stats()

@@ -11,7 +11,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // subjectFacts is everything the derivation reads about an incident's subject:

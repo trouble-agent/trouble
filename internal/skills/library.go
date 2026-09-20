@@ -23,7 +23,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Defaults for the `local_*` keys, applied when the config leaves them unset.

@@ -786,9 +786,9 @@ Three package-level variables in `internal/lifecycle`, set at link time, never a
 
 | Variable | ldflags (exact) | Fallback when unset |
 |---|---|---|
-| `Version` | `-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.Version=$(git describe --tags --always --dirty)` | `0.0.0-dev` |
-| `GitSHA` | `-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.GitSHA=$(git rev-parse --short=7 HEAD)` | `unknown` |
-| `BuildTime` | `-X github.com/totalwindupflightsystems/trouble/internal/lifecycle.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)` | `1970-01-01T00:00:00.000Z` |
+| `Version` | `-X github.com/trouble-agent/trouble/internal/lifecycle.Version=$(git describe --tags --always --dirty)` | `0.0.0-dev` |
+| `GitSHA` | `-X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$(git rev-parse --short=7 HEAD)` | `unknown` |
+| `BuildTime` | `-X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)` | `1970-01-01T00:00:00.000Z` |
 
 Build line (Makefile `build` target, applied to **every** binary — `troubled`, `trouble`):
 
@@ -821,7 +821,7 @@ Rules:
 ```ini
 [Unit]
 Description=__DESC__
-Documentation=https://github.com/totalwindupflightsystems/trouble
+Documentation=https://github.com/trouble-agent/trouble
 Wants=network-online.target
 After=network-online.target
 StartLimitIntervalSec=0

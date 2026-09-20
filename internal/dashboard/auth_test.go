@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // auth_test.go is the SPEC-10 §7 row for §2.2/§2.4/§3.2: the scope matrix, the

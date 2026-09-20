@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // ops.go is the operator-facing surface of SPEC-12 §2.1 that the CLI calls

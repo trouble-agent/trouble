@@ -21,15 +21,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/flow"
-	"github.com/totalwindupflightsystems/trouble/internal/issues"
-	"github.com/totalwindupflightsystems/trouble/internal/ladder"
-	"github.com/totalwindupflightsystems/trouble/internal/ledger"
-	"github.com/totalwindupflightsystems/trouble/internal/lifecycle"
-	"github.com/totalwindupflightsystems/trouble/internal/research"
-	"github.com/totalwindupflightsystems/trouble/internal/sentinel"
-	"github.com/totalwindupflightsystems/trouble/internal/skills"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/flow"
+	"github.com/trouble-agent/trouble/internal/issues"
+	"github.com/trouble-agent/trouble/internal/ladder"
+	"github.com/trouble-agent/trouble/internal/ledger"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/research"
+	"github.com/trouble-agent/trouble/internal/sentinel"
+	"github.com/trouble-agent/trouble/internal/skills"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Subsystems is the set of late-landing subsystems the daemon holds. A nil

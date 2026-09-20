@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // fakeClock is an adjustable clock: the monotonic side moves with the wall side.

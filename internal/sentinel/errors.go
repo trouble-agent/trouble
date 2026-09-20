@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Error is a sentinel failure with its code, its HTTP status family and the

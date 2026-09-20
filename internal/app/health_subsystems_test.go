@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/issues"
-	"github.com/totalwindupflightsystems/trouble/internal/skills"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/issues"
+	"github.com/trouble-agent/trouble/internal/skills"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // rowOf returns the health row for a subsystem name.

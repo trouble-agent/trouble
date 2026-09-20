@@ -23,7 +23,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // SpoolBounds are the flow queue's bounds (§3.9a). The defaults mirror the

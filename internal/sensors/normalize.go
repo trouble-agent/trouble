@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // This file is the sensors-side implementation of the norm_version 1 signature

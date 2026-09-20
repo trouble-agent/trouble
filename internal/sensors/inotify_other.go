@@ -5,7 +5,7 @@ package sensors
 import (
 	"context"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // There is no non-Linux file-watch implementation: inotify is a Linux

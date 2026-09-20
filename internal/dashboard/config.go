@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Config is the resolved form of the SPEC-10 §3.4 table: one field per

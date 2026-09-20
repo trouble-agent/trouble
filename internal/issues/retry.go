@@ -5,7 +5,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // attemptBudget is one operation's sleep budget: the sum of in-operation sleeps

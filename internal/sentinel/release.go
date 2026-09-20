@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Regression verdicts carried by `payload.regression` (§3.4).

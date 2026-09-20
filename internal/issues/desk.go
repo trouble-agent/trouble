@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Deps carries every collaborator of the desk. Nothing in this package opens a

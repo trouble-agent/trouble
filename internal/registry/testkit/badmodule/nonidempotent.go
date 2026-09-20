@@ -16,8 +16,8 @@ import (
 	"context"
 	"os"
 
-	"github.com/totalwindupflightsystems/trouble/internal/registry/schemagen"
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/registry/schemagen"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // CounterArgs is the args schema of the non-idempotent negative module.

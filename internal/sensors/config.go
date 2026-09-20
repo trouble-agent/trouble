@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // sensorConfig is the decoded, resolved configuration of the detection plane

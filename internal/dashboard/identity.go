@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // Identity seam — SPEC-10 §2.5. The interface is unexported by construction:

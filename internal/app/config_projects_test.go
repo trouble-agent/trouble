@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // bootConfigRefused boots RunDaemon against a config file and returns the error

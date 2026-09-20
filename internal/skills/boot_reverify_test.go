@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/totalwindupflightsystems/trouble/internal/types"
+	"github.com/trouble-agent/trouble/internal/types"
 )
 
 // TestBootReverificationQuarantinesTamperedArtifacts pins §3.5: every boot

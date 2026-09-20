@@ -93,8 +93,14 @@ func TestRebuildBudget(t *testing.T) {
 	prof := loadfence.Measure(t.TempDir())
 	scale := prof.Scale()
 	load := prof.Load
+	// The budget (a TIME) scales UP by the box's slowdown; the scan-rate floor
+	// (a RATE) scales DOWN by the same factor, so the §3.6 agreement
+	// (512 MiB ÷ 60 MiB/s = 8.5 s ≈ 9,000 ms) is preserved by construction and
+	// both bars are exactly the spec numbers on a quiet reference-class host.
+	// (Multiplying the floor by the scale — as a first cut here did — demanded
+	// 281 MiB/s from a box whose own pilots measured 71: incoherent.)
 	budgetMS := int(float64(DefaultIndexBuildBudgetMS) * scale)
-	rateFloor := 60.0 * scale
+	rateFloor := 60.0 / scale
 	if raceEnabled {
 		// -race decodes 5-10x slower everywhere, so the structural ceiling is
 		// asserted on fixed wide bars rather than a scaled one.

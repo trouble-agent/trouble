@@ -518,6 +518,20 @@ func flowDeps(d *Daemon, subs *Subsystems, hostID string, actor types.Actor, clk
 	return deps
 }
 
+// routeModesOf converts the lifecycle-declared per-class table into the
+// sentinel's typed form. Same values, one conversion, no re-validation: the
+// sentinel's boot check is the judge of the vocabulary.
+func routeModesOf(in map[string]string) map[string]sentinel.RouteMode {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]sentinel.RouteMode, len(in))
+	for k, v := range in {
+		out[k] = sentinel.RouteMode(v)
+	}
+	return out
+}
+
 // buildSentinel constructs the SPEC-04 server on the preflight-held project
 // set. It returns the human-readable refusal reason instead of an error: a
 // sentinel that cannot build must never fail the daemon (the sensors still
@@ -541,6 +555,17 @@ func buildSentinel(d *Daemon, hostID string, projects []types.Project) (*sentine
 		Actor:          lifecycle.Actor(types.ActorDaemon, "troubled"),
 		Projects:       projects,
 		ProxyTrust:     "loopback",
+		// AC-28 (TRBL-061): the resolved [sentinel.routes] surface and the
+		// auto rule's topology inputs are projected here once, so the
+		// sentinel judges exactly what the operator declared — a refused
+		// route policy (TROUBLE-SENTINEL-023) is this subsystem's refusal
+		// record, and 0 listeners open.
+		Routes: sentinel.RouteConfig{
+			Default:  sentinel.RouteMode(d.Cfg.Routes.Default),
+			PerClass: routeModesOf(d.Cfg.Routes.PerClass),
+		},
+		HubURL:  d.Cfg.Hub.URL,
+		HubMode: d.Cfg.Hub.Mode,
 		// `require_secret` is the sentinel's per-request secret requirement, and
 		// SPEC-12 §3.1 gives the operator one key for it: loopback_dsn. With it
 		// on (the default) a loopback request authenticates with the DSN public

@@ -75,6 +75,12 @@ const (
 	CodeSentinel020 ErrorCode = "TROUBLE-SENTINEL-020" // transient, 200 spool write failed
 	CodeSentinel021 ErrorCode = "TROUBLE-SENTINEL-021" // permanent, 405 wrong method
 	CodeSentinel022 ErrorCode = "TROUBLE-SENTINEL-022" // permanent, 415 unsupported media type
+	// CodeSentinel023 is §3.10a's boot-time route-policy refusal: the
+	// [sentinel.routes] table carries an unknown route name, an empty
+	// sig-prefix key, or a `proxy` selector while no hub endpoint is
+	// configured. The record names the offending entry and 0 HTTP responses
+	// are served (the listener never binds).
+	CodeSentinel023 ErrorCode = "TROUBLE-SENTINEL-023" // permanent, boot refusal (exit 13)
 )
 
 // CodeClass is the canonical class of every code this repository emits
@@ -123,6 +129,7 @@ var CodeClass = map[ErrorCode]ErrorClass{
 	CodeSentinel020: ErrClassTransient,
 	CodeSentinel021: ErrClassPermanent,
 	CodeSentinel022: ErrClassPermanent,
+	CodeSentinel023: ErrClassPermanent,
 }
 
 // HasClass reports whether the code's class matches class. (Named HasClass, not

@@ -82,6 +82,19 @@ type Config struct {
 	Projects                 []types.Project
 	Collectors               CollectorConfig
 
+	// Routes is the [SPEC-12-resolved] [sentinel.routes] surface (SPEC-04
+	// §3.10a): `sentinel.routes.default` + `sentinel.routes.per_class`, the
+	// transport-route policy resolved by lifecycle's registry (TRBL-061). The
+	// zero value is the documented posture — auto with no per-class overrides
+	// — and the vocabulary and topology consistency are validated at boot
+	// (validateRoutePolicy, TROUBLE-SENTINEL-023).
+	Routes RouteConfig
+	// HubURL and HubMode are the [SPEC-12-resolved] topology inputs of the
+	// auto rule (§3.10a): a hub endpoint exists when HubURL is set AND
+	// HubMode is "satellite". Sentinel never re-reads the file for them.
+	HubURL  string
+	HubMode string
+
 	// [SPEC-12-resolved] State root for the spool and the collector offsets
 	// (§3.5, §3.9 place both inside the pinned state root of SPEC-01 §6.1).
 	SpoolDir string
@@ -240,6 +253,12 @@ func (c *Config) validate() *Error {
 	}
 	if _, _, err := parsePerIPRate(c.PerIPRate); err != nil {
 		return errf(types.CodeSentinel009, "per_ip_rate is not \"<n>/min, burst <n>\"", causeAdvertisedHost)
+	}
+	// AC-28: the [sentinel.routes] policy of §3.10a is part of boot
+	// validation; the listener never binds on a route policy that cannot be
+	// honoured (TROUBLE-SENTINEL-023).
+	if rerr := c.validateRoutePolicy(); rerr != nil {
+		return rerr
 	}
 	return nil
 }

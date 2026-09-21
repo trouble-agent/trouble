@@ -411,6 +411,9 @@ func (w *writer) rollPart(op string) {
 	}))
 }
 
+// closeCurrent syncs and closes the current file, then writes its §3.7a `.idx`
+// sidecar. The sidecar is written here — at the moment the file stops being the
+// live file — so a closed generation always has a sidecar that describes it.
 func (w *writer) closeCurrent() {
 	if w.cur == nil {
 		return
@@ -422,6 +425,9 @@ func (w *writer) closeCurrent() {
 	w.st.records = w.cur.records
 	w.mu.Unlock()
 	_ = syncDir(w.l.root)
+	// The file just stopped being the live file: it is now a closed generation,
+	// which is exactly when §3.7a requires its sidecar.
+	w.l.writeGenerationSidecar(partName(w.cur.day, w.cur.gen, w.cur.part))
 	w.cur = nil
 }
 

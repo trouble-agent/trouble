@@ -131,6 +131,12 @@ type Options struct {
 	MaxSchema int              // highest schema_version this binary understands (1)
 	Now       func() time.Time // injectable clock; production = time.Now
 
+	// PageSizeDefault and PageSizeMax are the §2.3a / §2.5 page clamps
+	// (`page_size_default` 500, `page_size_max` 5000). A size above the max is
+	// clamped, never refused.
+	PageSizeDefault int
+	PageSizeMax     int
+
 	// HostID is the SPEC-12 host identity stamped into the origin of the
 	// housekeeping records the ledger authors itself (§4.1). SPEC-12 owns the
 	// value; an empty value degrades to "unknown-host" rather than blocking.
@@ -282,6 +288,24 @@ type Ledger struct {
 	scrubRefusals  atomic.Uint64
 	compactionRuns atomic.Int64
 	lastCompaction atomic.Int64
+
+	// sidecar accounting (SPEC-01 §3.7a): the .idx is derived state, so a failed
+	// write is counted and the generation file is unaffected.
+	sidecarFailures      atomic.Uint64
+	sidecarRebuildsCount atomic.Uint64
+
+	// sidecarMu guards the parsed-sidecar cache. A page must not pay a rebuild
+	// for every file it touches on every call (§3.7a: "an accelerator").
+	sidecarMu    sync.Mutex
+	sidecarCache map[string]sidecarEntry
+}
+
+// sidecarEntry is one cached sidecar plus the file identity it was built from,
+// so a file that changed under the process is re-derived rather than trusted.
+type sidecarEntry struct {
+	gi    types.GenerationIndex
+	size  int64
+	state sidecarState
 }
 
 // origin builds the origin of a ledger-authored housekeeping record (§4.1).
@@ -314,13 +338,14 @@ func Open(ctx context.Context, o Options) (*Ledger, error) {
 		return nil, err
 	}
 	l := &Ledger{
-		opts:    o,
-		root:    o.Root,
-		lock:    lock,
-		now:     o.Now,
-		scrub:   scrub.MandatoryScan,
-		idx:     newIndex(o.Index, o.Root, o.Zone, o.MaxSchema),
-		started: o.Now(),
+		opts:         o,
+		root:         o.Root,
+		lock:         lock,
+		now:          o.Now,
+		scrub:        scrub.MandatoryScan,
+		idx:          newIndex(o.Index, o.Root, o.Zone, o.MaxSchema),
+		started:      o.Now(),
+		sidecarCache: map[string]sidecarEntry{},
 	}
 	if o.ScrubVerify != nil {
 		l.scrub = o.ScrubVerify
@@ -450,6 +475,12 @@ func applyDefaults(o *Options) {
 	}
 	if o.MaxSchema == 0 {
 		o.MaxSchema = SchemaVersionV1
+	}
+	if o.PageSizeDefault == 0 {
+		o.PageSizeDefault = DefaultPageSize
+	}
+	if o.PageSizeMax == 0 {
+		o.PageSizeMax = DefaultPageSizeMax
 	}
 	if o.Now == nil {
 		o.Now = time.Now

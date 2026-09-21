@@ -8,16 +8,88 @@
   "budget": 12,
   "dispatched": 5,
   "rows": [
-    {"id": "TRBL-059", "priority": "P1", "branch": "wt/TRBL-059", "worktree": "~/worktrees/trouble-TRBL-059", "files": ["internal/types (Codeplane types)", "internal/sentinel/**", "internal/ladder/**", "internal/research/**", "internal/issues/**"], "merge_order": 1},
-    {"id": "TRBL-060", "priority": "P1", "branch": "wt/TRBL-060", "worktree": "~/worktrees/trouble-TRBL-060", "files": ["internal/ledger/**", "internal/types (PageToken)"], "merge_order": 2},
-    {"id": "TRBL-061", "priority": "P2", "branch": "wt/TRBL-061", "worktree": "~/worktrees/trouble-TRBL-061", "files": ["internal/sentinel/**", "internal/hub/**", "internal/lifecycle (registry key)"], "merge_order": 3},
-    {"id": "TRBL-062", "priority": "P1", "branch": "wt/TRBL-062", "worktree": "~/worktrees/trouble-TRBL-062", "files": ["docker-compose.yml", "deploy/container/**", "deploy/README.md", "docs/sentinel-compat.md"], "merge_order": 4},
-    {"id": "TRBL-063", "priority": "P2", "branch": "wt/TRBL-063", "worktree": "~/worktrees/trouble-TRBL-063", "files": ["cmd/trouble/main.go", "cmd/trouble/main_test.go", "internal/dashboard/path.go"], "merge_order": 5}
+    {
+      "id": "TRBL-059",
+      "priority": "P1",
+      "branch": "wt/TRBL-059",
+      "worktree": "~/worktrees/trouble-TRBL-059",
+      "files": [
+        "internal/types (Codeplane types)",
+        "internal/sentinel/**",
+        "internal/ladder/**",
+        "internal/research/**",
+        "internal/issues/**"
+      ],
+      "merge_order": 1
+    },
+    {
+      "id": "TRBL-060",
+      "priority": "P1",
+      "branch": "wt/TRBL-060",
+      "worktree": "~/worktrees/trouble-TRBL-060",
+      "files": [
+        "internal/ledger/**",
+        "internal/types (PageToken)"
+      ],
+      "merge_order": 2,
+      "merged_commit": "57cbdd7",
+      "status": "merged+judged (tier2 COMPLETE, job-2b13e1517ace4282b74d3820292dd6b9)"
+    },
+    {
+      "id": "TRBL-061",
+      "priority": "P2",
+      "branch": "wt/TRBL-061",
+      "worktree": "~/worktrees/trouble-TRBL-061",
+      "files": [
+        "internal/sentinel/**",
+        "internal/hub/**",
+        "internal/lifecycle (registry key)"
+      ],
+      "merge_order": 3
+    },
+    {
+      "id": "TRBL-062",
+      "priority": "P1",
+      "branch": "wt/TRBL-062",
+      "worktree": "~/worktrees/trouble-TRBL-062",
+      "files": [
+        "docker-compose.yml",
+        "deploy/container/**",
+        "deploy/README.md",
+        "docs/sentinel-compat.md"
+      ],
+      "merge_order": 4
+    },
+    {
+      "id": "TRBL-063",
+      "priority": "P2",
+      "branch": "wt/TRBL-063",
+      "worktree": "~/worktrees/trouble-TRBL-063",
+      "files": [
+        "cmd/trouble/main.go",
+        "cmd/trouble/main_test.go",
+        "internal/dashboard/path.go"
+      ],
+      "merge_order": 5
+    }
   ],
   "held_back": [
-    {"id": "TRBL-064", "why": "docs-only, touches docs/operations.md which TRBL-062 also edits (deploy/README.md) - serial next tick to avoid a docs conflict"},
-    {"id": "TRBL-065", "why": "new cmd/trouble hub verb; cmd/trouble/main.go is claimed by TRBL-063 this wave"},
-    {"id": "TRBL-066", "why": "Makefile + deploy/README.md, both adjacent to TRBL-062's surface"},
-    {"id": "TRBL-049", "why": "blocked: owner decision outside the repo (~/specs clone or session cwd policy)"}
-  ]
+    {
+      "id": "TRBL-064",
+      "why": "docs-only, touches docs/operations.md which TRBL-062 also edits (deploy/README.md) - serial next tick to avoid a docs conflict"
+    },
+    {
+      "id": "TRBL-065",
+      "why": "new cmd/trouble hub verb; cmd/trouble/main.go is claimed by TRBL-063 this wave"
+    },
+    {
+      "id": "TRBL-066",
+      "why": "Makefile + deploy/README.md, both adjacent to TRBL-062's surface"
+    },
+    {
+      "id": "TRBL-049",
+      "why": "blocked: owner decision outside the repo (~/specs clone or session cwd policy)"
+    }
+  ],
+  "progress_note": "RE-FIRED TICK UPDATE 2026-09-20 19:41 local: TRBL-062/063 merged+judged by the first invocation. TRBL-060 merged at 57cbdd7 by the re-fired invocation (branch gates + merged-tree gates green, tier1 flip done [05c812a0 = TRBL-014 harness baseline], tier2 verdict COMPLETE after evaluator.max_input_tokens 1M->1.5M fix). TRBL-059/061 workers still live (sessions 20260920_183137_0bd95c / 20260920_183222_61d67f). Merge order unchanged."
 }

@@ -114,11 +114,14 @@ func (d *Desk) BodyOf(inc types.Incident, ev Evidence, driver string) string {
 		if cpBytes, err := json.Marshal(inc.Codeplane); err == nil {
 			b.WriteString("**Codeplane bundle**\n\n```json\n")
 			b.Write(cpBytes)
-			b.WriteString("\n```\n")
+			// The separating blank line belongs to the block, not to the
+			// evidence marker: without a bundle the §3.9.3 golden must stay
+			// byte-identical, so the marker line below is untouched.
+			b.WriteString("\n```\n\n")
 		}
 	}
 
-	b.WriteString("\n**Evidence bundle (scrubbed)**\n\n```\n")
+	b.WriteString("**Evidence bundle (scrubbed)**\n\n```\n")
 	b.WriteString(strings.Join(ev.Lines, "\n"))
 	b.WriteString("\n```\n\n")
 

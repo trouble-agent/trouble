@@ -201,3 +201,4 @@
 {"id":201,"timestamp":"2026-09-22T19:38:09","event_type":"task_updated","task_id":"QA-TROUBLE-9","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":202,"timestamp":"2026-09-22T19:38:09","event_type":"task_updated","task_id":"TRBL-065","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":203,"timestamp":"2026-09-22T19:38:10","event_type":"task_updated","task_id":"TRBL-066","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":204,"timestamp":"2026-09-22T19:40:08","event_type":"task_completed","task_id":"TRBL-066","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}

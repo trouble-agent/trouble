@@ -194,3 +194,6 @@
 {"id":194,"timestamp":"2026-09-20T23:17:44","event_type":"task_completed","task_id":"TRBL-063","actor":"foreman","detail":"merged e2ce663; worker 4626802; build+vet+cmd/trouble+dashboard tests green on the merged tree; second defect (XDG_CONFIG_HOME divergence) fixed and proven live","tick_number":null}
 {"id":195,"timestamp":"2026-09-20T23:21:58","event_type":"task_completed","task_id":"TRBL-062","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":196,"timestamp":"2026-09-20T23:21:58","event_type":"task_completed","task_id":"TRBL-062","actor":"foreman","detail":"merged 6f1e706; worker ac3dca5; live stack proof 401->200 + event+group one digest; README conflict resolved by union","tick_number":null}
+{"id":197,"timestamp":"2026-09-22T19:05:02","event_type":"task_completed","task_id":"TRBL-059","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":198,"timestamp":"2026-09-22T19:05:02","event_type":"task_completed","task_id":"TRBL-060","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":199,"timestamp":"2026-09-22T19:05:02","event_type":"task_completed","task_id":"TRBL-061","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}

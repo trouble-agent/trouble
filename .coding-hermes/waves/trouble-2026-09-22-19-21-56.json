@@ -32,6 +32,11 @@
       "gitreins": "in_progress"
     }
   ],
-  "merge_order": ["QA-TROUBLE-9", "TRBL-065", "TRBL-066"],
-  "status": "dispatched"
+  "merge_order": [
+    "QA-TROUBLE-9",
+    "TRBL-065",
+    "TRBL-066"
+  ],
+  "status": "done",
+  "recovery_note": "re-fire r2 2026-09-22: QA-TROUBLE-9 merged+judged+row closed; TRBL-066 merged d01cd02; TRBL-065 worker still live at r2 start (harvest pending)"
 }

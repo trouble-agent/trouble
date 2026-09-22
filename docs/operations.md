@@ -1102,29 +1102,50 @@ against a daemon that is serving perfectly. Without a token file the daemon stil
 serves and logs `dashboard token store is empty ... reason=missing`, and every
 request fails closed with `401`.
 
-**Redis degradation (SPEC-13).** With the standalone profile the daemon does not
-consult Redis at all, so `docker compose stop redis` changes nothing: `trouble`
-stays `Up`, `/health.json` keeps answering `200`, and `ledger_last_seq` keeps
-advancing (measured: 89 → 104 across the stop). When the light-hub profile lands,
-its documented behaviour — degrade to standalone ingestion, no event loss, no
-restart — must be re-proved against this same before/after sequence.
+**Redis degradation (SPEC-13).** The two profiles answer a Redis outage in
+opposite ways, and both answers are designed (SPEC-13 §1 property 4, §4.3).
+With the standalone profile the daemon does not consult Redis at all, so
+`docker compose stop redis` changes nothing: `trouble` stays `Up`, `/health.json`
+keeps answering `200`, and `ledger_last_seq` keeps advancing (measured: 89 → 104
+across the stop).
 
-`deploy/container/config.light-hub.toml` carries the wire-up shape for that
-profile (`server.profile = "light-hub"`, `server.redis.url =
-redis://redis:6379/0`, `server.duckbrain.namespace`, and the
-`require_persistence`/`check_policy` preflight knobs of SPEC-13 §2.1.1). The
-`[server]` surface is registered as ordinary config keys, so that file RESOLVES
-and the light-hub profile passes the boot gate — measured: `trouble config
-explain --config deploy/container/config.light-hub.toml --json` lists all 29
-`server.*` rows with their source, and a scratch boot of the same file reaches
-`/health.json` with `server.profile=light-hub` recorded in the boot `config`
-record. It is still **not** the compose default, because the profile's runtime
-(the Redis stream + consumer group, the dedup gate and the DuckBrain archival
-tier, SPEC-13 §2.3) is `internal/hub`'s and is not built in this tree: a
-light-hub boot serves on the standalone in-process path (the daemon logs a
-warning saying so) and `/health.json` carries no `hub` stanza. Switch the
-compose volume source to this file when that package lands; do not delete the
-keys to make it boot.
+The light-hub profile's runtime — the Redis stream + consumer group, the dedup
+gate and the DuckBrain archival tier (SPEC-13 §2.3) — is `internal/hub`'s and
+**is built in this tree** (delivered by TRBL-029 and TRBL-031). A light-hub
+boot serves through that plumbing, `hub.Status` is registered into
+`HealthResponse.Hub` (SPEC-13 §4.1 step 4), and `/health.json` carries a `hub`
+stanza. Measured on this tree against `deploy/container/config.light-hub.toml`
+(redis 7.4.11, under the compose `redis` service's own posture — `appendonly
+yes`, `--maxmemory-policy noeviction`): at rest, `/health.json` reports
+`profile=light-hub`, `enabled=true`, `redis.stream=trouble:ingest`,
+`redis.group=ledger-writers`, `redis.aof=true`, `redis.policy=noeviction`,
+`redis.dedup_window=redis`; and one event through the on-ramp produces the
+ledger `event` + `group` + `incident` records on one sig, with the stream entry
+acked (`XPENDING` 0).
+
+Stop the redis container and the hub degrades instead of failing — the
+SPEC-13 §4.3 "Redis lost at runtime" row with `require_redis=false`:
+`/health.json` answers `status=degraded` with
+`hub.degraded_reason=redis_unavailable`, the dedup window flips `redis` → `lru`
+(SPEC-13 §3.4), the ledger gains a `redis_lost` record (TROUBLE-HUB-004), and a
+POST during the outage is answered `429` with `Retry-After: 1` and writes no
+ledger record — senders hold the event in their own spools (that row's
+"local spools hold"), so nothing is lost.
+Start the same container with NO daemon restart and the hub recovers
+(measured ~4s): `status=ok`, `dedup_window` back to `redis`, a `redis_restored`
+lifecycle record, and the next POST is `200` with its stream entry acked.
+
+The light-hub profile is still **not** the compose default, for a different
+reason than availability: `docker-compose.yml` mounts
+`deploy/container/config.toml` (standalone) so a first boot needs no external
+services, while the `redis` service it already defines runs under the SPEC-13
+§2.1.1 preflight constraints (`appendonly yes`, `noeviction`) — so running the
+hub is a one-line volume switch on the same stack, not a second stack. Switch
+the compose volume source to `deploy/container/config.light-hub.toml` to run
+the hub, and set `server.duckbrain.namespace` to this host's id first: with the
+DuckBrain endpoint unset the archival tier pauses (TROUBLE-HUB-009) while
+ingestion keeps serving — a designed pause, not a boot failure. Do not delete
+the keys to make a boot pass.
 
 **Building from a git worktree.** A worktree checkout's `.git` is a one-line
 gitfile pointing at the main clone's `.git/worktrees/<name>` — not a directory

@@ -16,11 +16,11 @@ import (
 
 func codeplaneBundle() types.CodeplaneContext {
 	return types.CodeplaneContext{
-		Side:     "sentinel",
-		Sig:      testSig,
-		GroupID:  "grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH",
-		Project:  "7",
-		Release:  "payment-api@2.4.1",
+		Side:      "sentinel",
+		Sig:       testSig,
+		GroupID:   "grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH",
+		Project:   "7",
+		Release:   "payment-api@2.4.1",
 		Regressed: true,
 		Recent: []types.SigCount{{
 			Sig:   testSig,

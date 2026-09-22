@@ -71,6 +71,31 @@ make bin
 bin/troubled --config "$CONFIG_DIR/config.toml"
 ```
 
+A checkout supplied by a source transfer (an exported tarball, `git archive`,
+a release archive — anything without `.git`) gives `make bin` nothing to
+derive the version stamp from, and the pair comes out unstamped:
+`trouble --version` prints
+`0.0.0-dev unknown <build-time> [UNSTAMPED (degraded; trouble install
+refuses to enable the unit without --force)]` and the health request below
+returns `status="degraded"` with `detail.reason="unstamped_build"`. That is
+the designed posture for a build git could not stamp, not a broken build —
+`trouble install` merely refuses to enable the unit without `--force`. To
+stamp it anyway, pass the short sha of the commit your transfer was made
+from — the same `GIT_SHA` the container path passes as a build arg (step 2
+of the compose quickstart below); on the command line it overrides the
+Makefile default whose fallback is the `unknown` sentinel:
+
+```sh
+make bin GIT_SHA=<short-sha-of-the-transferred-source>
+bin/trouble --version   # → 0.0.0-dev <sha> <build-time> [stamped]
+```
+
+`VERSION` still reports `0.0.0-dev` — with no git history there is no tag to
+describe — but the stamped/unstamped verdict keys on the sha alone, so an
+explicit `GIT_SHA` reports `[stamped]` and installs without `--force`. The
+`nogit00` worktree placeholder and the degraded-by-design rationale are
+covered in `docs/operations.md` §14.
+
 In a second terminal, verify both listener contracts and send the first event.
 Replace `PUBLIC_KEY` with the 32-character lowercase hexadecimal `public_key`
 you placed in the config; this is the documented loopback `sentry_key` auth form,

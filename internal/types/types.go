@@ -24,6 +24,14 @@ type Origin struct {
 	HostID string `json:"host_id"`
 	HubID  string `json:"hub_id"`
 	Source string `json:"source"`
+	// Route is how the event reached the system (SPEC-TYPES §3.1, SPEC-04
+	// §3.10a): "A" direct (sensor → local daemon over loopback) or "B" proxied
+	// (satellite forward path). It is empty for every non-sensor path, which
+	// is why it is omitempty: a record that never touched the sensor transport
+	// marshals byte-identically to a pre-AC-28 producer (the §7.6
+	// no-schema-change guarantee), and §3.10a's A case is stamped explicitly —
+	// "no relay" is as much a fact as a relay.
+	Route string `json:"route,omitempty"`
 }
 
 // Actor identifies the process that wrote a record.

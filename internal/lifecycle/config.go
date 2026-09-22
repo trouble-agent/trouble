@@ -85,6 +85,18 @@ type Config struct {
 	// so a declaration that cannot be built is a file-key refusal.
 	LLMTable SubsystemTable `toml:"-"`
 
+	// Routes is the `[sentinel.routes]` surface (SPEC-04 §3.10a), registered
+	// leaf by leaf (`sentinel.routes.default`, `sentinel.routes.per_class`,
+	// TRBL-061) so each resolves with the ordinary precedence (flag > env >
+	// file > default), carries provenance and has its own `trouble config
+	// explain` row. PerClass is the sig-prefix → route-mode table consumed by
+	// internal/sentinel's resolver; this package carries it as declared, and
+	// the sentinel's boot validation is the only judge of the values.
+	Routes struct {
+		Default  string            `toml:"default"`
+		PerClass map[string]string `toml:"per_class"`
+	} `toml:"routes"`
+
 	Dashboard DashboardConfig `toml:"dashboard"`
 
 	// Sensors is the SPEC-03 §4 detection-plane surface, resolved here key by
@@ -751,6 +763,81 @@ func asStringSlice(v any) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("expected array, got %T", v)
 	}
+}
+
+// setRouteModeMap is the `sentinel.routes.per_class` setter: the sig-prefix →
+// route table of SPEC-04 §3.10a / SPEC-TYPES §3.15.3. It accepts BOTH the raw
+// file form (map[string]any, what the TOML reader and a flag/env string
+// produce) and the typed form (map[string]string, what an embedder hands over),
+// and it REPLACES the table rather than merging, so a lower-precedence source
+// can never leave a stale prefix behind a resolved one. Values are carried as
+// declared; route-name validation is the sentinel's boot refusal
+// (TROUBLE-SENTINEL-023).
+func setRouteModeMap(cfg *Config, v any) error {
+	out := map[string]string{}
+	switch x := v.(type) {
+	case map[string]string:
+		for k, val := range x {
+			out[k] = val
+		}
+	case map[string]any:
+		for k, val := range x {
+			s, err := asString(val)
+			if err != nil {
+				return fmt.Errorf("per_class[%q]: %v", k, err)
+			}
+			out[k] = s
+		}
+	case string:
+		out, err := parseRouteModeString(x)
+		if err != nil {
+			return err
+		}
+		cfg.Routes.PerClass = out
+		return nil
+	case nil:
+		// keep the empty table
+	default:
+		return fmt.Errorf("expected per_class table, got %T", v)
+	}
+	cfg.Routes.PerClass = out
+	return nil
+}
+
+// parseRouteModeString decodes the scalar spellings of the per_class table:
+// a flag/env value can never carry the file's inline-table syntax structurally,
+// so the string forms are the ordinary comma pair list —
+// `psi:io_pressure=direct,sentinel:sha256v1=proxy` — plus the file's own
+// inline-table text (`{ "psi:io_pressure" = "direct" }`), which the reader
+// hands through verbatim as a bare string. Empty means no entries.
+func parseRouteModeString(s string) (map[string]string, error) {
+	out := map[string]string{}
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return out, nil
+	}
+	if strings.HasPrefix(t, "{") && strings.HasSuffix(t, "}") {
+		t = strings.TrimSpace(t[1 : len(t)-1])
+		if t == "" {
+			return out, nil
+		}
+	}
+	// Quote-aware comma split, then one `key = value` per part. Bare values
+	// are accepted the way the TOML reader accepts bare strings.
+	for _, part := range splitArray(t) {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(part, "=")
+		k = strings.Trim(strings.TrimSpace(k), `"'`)
+		v = strings.Trim(strings.TrimSpace(v), `"'`)
+		if k == "" || v == "" || !ok {
+			return nil, fmt.Errorf("per_class entry %q is not prefix=route", part)
+		}
+		out[k] = v
+	}
+	return out, nil
 }
 
 // asInotifyPathRows is the `sensors.inotify.paths` declaration: the list of
@@ -1437,6 +1524,19 @@ func registry(c *Config) []keyMeta {
 		{"hub.retry_base", "hub", "retry_base", c.Hub.RetryBase, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryBase = d; return err }},
 		{"hub.retry_max", "hub", "retry_max", c.Hub.RetryMax, func(cfg *Config, v any) error { d, err := asDuration(v); cfg.Hub.RetryMax = d; return err }},
 		{"hub.dedup_lru", "hub", "dedup_lru", c.Hub.DedupLRU, func(cfg *Config, v any) error { i, err := asInt(v); cfg.Hub.DedupLRU = i; return err }},
+		// ---- the SPEC-04 §3.10a sensor-transport route surface (SPEC-12
+		// leaf registration, TRBL-061) ----
+		// `routes.default` and `routes.per_class` are ordinary keys, not a
+		// table: each resolves with the ordinary precedence (flag > env >
+		// file > default), carries its own provenance and has its own
+		// `trouble config explain` row (--sentinel-routes-default,
+		// TROUBLE_SENTINEL_ROUTES_PER_CLASS). The value vocabulary
+		// (auto|direct|proxy and the sig-prefix map) is validated by
+		// internal/sentinel at boot (TROUBLE-SENTINEL-023), the same split the
+		// sensors plane uses (this package resolves, the owning package
+		// judges).
+		{"sentinel.routes.default", "sentinel.routes", "default", c.Routes.Default, func(cfg *Config, v any) error { s, err := asString(v); cfg.Routes.Default = s; return err }},
+		{"sentinel.routes.per_class", "sentinel.routes", "per_class", map[string]string{}, setRouteModeMap},
 		// SPEC-13 §2.1/§2.1.1 `[server]` surface. The profile and the two
 		// dependency blocks are registered leaf by leaf, so the profile resolves
 		// with the same precedence, provenance and redaction as every other key

@@ -280,11 +280,20 @@ func (g *groupIndex) digestSet() []string {
 // The sink owns seq/rec_id/ts allocation, so sentinel builds a draft. The
 // package records its own counters and never blocks longer than LedgerWait
 // (§6.13): a sink that reports backpressure turns into a 429 for the request.
+//
+// The AC-28 route decision is stamped HERE, on the draft's Origin, before the
+// record exists: `origin.route` then survives every downstream transport — the
+// in-process ledger, the door → stream → consumer → ledger pipeline of the
+// light-hub profile (hub.localRecord copies draft.Origin; hub.consume's
+// draftFromRecord carries rec.Origin back) and the satellite spool's
+// round-trip — so a reader answers "local or relayed?" without a join
+// (§3.10a). The sig is the class the resolution ran against; records with no
+// sig carry the default's answer.
 func (s *Server) appendRecord(ctx context.Context, kind types.RecordKind, sig, source string, payload map[string]any, redactions int) (types.Record, *Error) {
 	return s.appendRecordDraft(ctx, types.RecordDraft{
 		Kind:       kind,
 		Sig:        sig,
-		Origin:     types.Origin{HostID: s.cfg.HostID, Source: source},
+		Origin:     types.Origin{HostID: s.cfg.HostID, Source: source, Route: string(s.routeTable.resolve(sig))},
 		Actor:      s.cfg.Actor,
 		Redactions: redactions,
 		Payload:    payload,

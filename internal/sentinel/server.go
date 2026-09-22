@@ -207,6 +207,12 @@ type Server struct {
 	norm   *normalizer
 	logger *log.Logger
 
+	// routeTable is the AC-28 routing policy of §3.10a: boot-validated,
+	// prefix order precomputed, hub-upstream fact pinned. All resolution —
+	// including the empty table's default answer — reads it, never the raw
+	// config, so the table is the one auditable decision point (§4.5).
+	routeTable *routeTable
+
 	projects *projectIndex
 	groups   *groupIndex
 	quota    *quotaSet
@@ -269,6 +275,15 @@ func NewServer(cfg Config, w ledgerSink, sc scrubber) (*Server, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	// AC-28 boot validation (§3.10a): the route policy was checked inside
+	// validate() BEFORE the listener binds, so a proxy selector with no hub
+	// endpoint is refused with TROUBLE-SENTINEL-023 at boot, never under
+	// load. The table is built once here — prefix order precomputed and the
+	// hub-upstream fact pinned — and is the one decision point every event
+	// reads (§4.5). Its swap on a `routes.default="auto"` re-resolution
+	// (:856) is a rebuilt server: the swap is one pointer store, so a table
+	// being replaced answers no event mid-swap.
+	table := newRouteTable(cfg.Routes, cfg.hubEndpointConfigured())
 	if w == nil {
 		return nil, fmt.Errorf("sentinel: a ledger sink is required")
 	}
@@ -281,6 +296,7 @@ func NewServer(cfg Config, w ledgerSink, sc scrubber) (*Server, error) {
 		cfg:         cfg,
 		sink:        w,
 		sc:          sc,
+		routeTable:  table,
 		norm:        newNormalizer(),
 		logger:      log.New(os.Stderr, "sentinel: ", log.LstdFlags),
 		projects:    ix,

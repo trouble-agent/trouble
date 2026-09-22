@@ -171,6 +171,13 @@ func probeValue(key string, def any) string {
 		return "1m"
 	case map[string]types.Duration:
 		return "loopback=10m"
+	case map[string]string:
+		// routes.per_class (TRBL-061) is the first argv-addressable map of
+		// strings. Its scalar spelling is the ordinary comma pair list an
+		// operator types (parseRouteModeString), so a bare "probe" — which is
+		// not a prefix=route pair — would misreport an addressable key as
+		// refused by the resolver's own validation.
+		return "psi:io_pressure=direct"
 	}
 	return "probe"
 }

@@ -1,6 +1,7 @@
 package issues
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -105,6 +106,21 @@ func (d *Desk) BodyOf(inc types.Incident, ev Evidence, driver string) string {
 	fmt.Fprintf(&b, "| ladder | %s |\n", ladderPath(inc, ev))
 	fmt.Fprintf(&b, "| redactions applied | %d |\n\n", ev.Redactions)
 
+	// §3.13a (AC-31): with a bundle the body gains one section between the
+	// field table and the evidence bundle; the fence holds json.Marshal of the
+	// persisted bundle, byte-verbatim. Without a bundle: zero other deltas —
+	// the §3.9.3 golden stays byte-identical.
+	if inc.Codeplane != nil {
+		if cpBytes, err := json.Marshal(inc.Codeplane); err == nil {
+			b.WriteString("**Codeplane bundle**\n\n```json\n")
+			b.Write(cpBytes)
+			// The separating blank line belongs to the block, not to the
+			// evidence marker: without a bundle the §3.9.3 golden must stay
+			// byte-identical, so the marker line below is untouched.
+			b.WriteString("\n```\n\n")
+		}
+	}
+
 	b.WriteString("**Evidence bundle (scrubbed)**\n\n```\n")
 	b.WriteString(strings.Join(ev.Lines, "\n"))
 	b.WriteString("\n```\n\n")
@@ -128,10 +144,22 @@ func (d *Desk) BodyOf(inc types.Incident, ev Evidence, driver string) string {
 
 // truncateBody applies the body_max_bytes budget to the evidence section only
 // (§3.9.3). The sig marker, the inc marker and the metadata table are intact.
+// §3.13a adds one truncation step, markers always last: an over-budget body
+// loses the codeplane fence before it loses a marker or evidence bytes.
 func (d *Desk) truncateBody(body string, _ int64) string {
 	max := d.cfg.BodyMaxBytes
 	if max <= 0 || len(body) <= max {
 		return body
+	}
+	if start := strings.Index(body, "**Codeplane bundle**\n"); start >= 0 {
+		rest := body[start:]
+		if end := strings.Index(rest, "\n```\n\n"); end >= 0 {
+			trimmed := body[:start] + body[start+end+len("\n```\n\n"):]
+			if len(trimmed) <= max {
+				return trimmed
+			}
+			body = trimmed
+		}
 	}
 	open := strings.Index(body, "```\n")
 	if open < 0 {

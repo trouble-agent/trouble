@@ -2,6 +2,7 @@ package ladder
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"strings"
 	"time"
@@ -445,6 +446,17 @@ func (l *Ladder) appendIncident(ctx context.Context, st *incState, payload map[s
 	}
 	if _, ok := payload["inKey"]; !ok && st.InKey != "" {
 		payload["inKey"] = st.InKey
+	}
+	if st.Inc.Codeplane != nil && payload["codeplane"] == nil {
+		// §3.13a: the persisted bundle rides every incident record payload so a
+		// boot rebuild re-reads the same bytes (the incident record is the
+		// bundle's copy of record).
+		if b, err := json.Marshal(st.Inc.Codeplane); err == nil {
+			var raw any
+			if json.Unmarshal(b, &raw) == nil {
+				payload["codeplane"] = raw
+			}
+		}
 	}
 	_, err := l.deps.Ledger.Append(ctx, types.KIncident, st.Inc.Sig, st.Inc.ID, payload)
 	return err

@@ -248,6 +248,21 @@ func (a researchPortAdapter) Poll(ctx context.Context, resID string) (types.Rese
 	return a.svc.Poll(ctx, resID)
 }
 
+// codeplaneAdapter narrows the sentinel server to the ladder's §3.13a
+// convergence dependency: the sentinel owns the map (SPEC-04 §3.9a); the
+// ladder only reads through it. A nil server means no convergence hit is
+// possible — the sensor-born admission runs with its own rule context.
+type codeplaneAdapter struct{ srv *sentinel.Server }
+
+var _ ladder.CodeplaneAccessor = codeplaneAdapter{}
+
+func (a codeplaneAdapter) CodeplaneFor(sig types.Sig) (types.CodeplaneContext, bool) {
+	if a.srv == nil {
+		return types.CodeplaneContext{}, false
+	}
+	return a.srv.CodeplaneFor(sig)
+}
+
 // sentinelToLadder is the SPEC-04→SPEC-05 hand-off: one new group opens (or
 // folds into) exactly one incident through the ladder's own admission path.
 // Only op=create is the new-class signal: flush is a counter update for a
@@ -265,13 +280,14 @@ func sentinelToLadder(d *Daemon, rec types.Record) {
 		return
 	}
 	obs := ladder.Observation{
-		EventID:  rec.RecID,
-		TS:       rec.TS,
-		Sig:      sig,
-		Source:   ladder.SourcePath("sentinel"),
-		Subject:  strOf(rec.Payload["group_id"]),
-		Severity: types.SevHigh,
-		Detail:   rec.Payload,
+		EventID:   rec.RecID,
+		TS:        rec.TS,
+		Sig:       sig,
+		Source:    ladder.SourcePath("sentinel"),
+		Subject:   strOf(rec.Payload["group_id"]),
+		Severity:  types.SevHigh,
+		Detail:    rec.Payload,
+		Codeplane: rec.Codeplane, // §3.9a: the bundle assembled at the admission seam
 	}
 	if _, err := d.Ladder.Admit(context.Background(), obs); err != nil {
 		d.log.Warn("sentinel admit refused", "sig", rec.Sig, "err", err)
@@ -580,9 +596,25 @@ type sentinelSink struct {
 func (s sentinelSink) Append(ctx context.Context, draft types.RecordDraft) (types.Record, error) {
 	rec, err := s.L.Append(ctx, draft)
 	if err == nil {
+		if draft.Kind == types.KEvent && rec.RecID != "" && s.d != nil {
+			if dg, _ := draft.Payload["digest"].(string); dg != "" {
+				s.noteSample(dg, rec.RecID)
+			}
+		}
 		sentinelToLadder(s.d, rec)
 	}
 	return rec, err
+}
+
+// noteSample records the representative event's rec_id on the group projection
+// (SPEC-04 §3.9a `Sample`): the first event that opened the group stays the
+// representative until a rebuild re-seeds it. The sentinel's own in-memory
+// index is updated through the server the daemon holds.
+func (s sentinelSink) noteSample(digest, recID string) {
+	if s.d == nil || s.d.Subsystems == nil || s.d.Subsystems.Sentinel == nil {
+		return
+	}
+	s.d.Subsystems.Sentinel.NoteGroupSample(digest, recID)
 }
 
 func (s sentinelSink) LastSeq() uint64 { return s.L.Status().LastSeq }

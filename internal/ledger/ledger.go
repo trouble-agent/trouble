@@ -646,6 +646,7 @@ func (l *Ledger) prepare(ctx context.Context, d types.RecordDraft) (types.Record
 		Actor:         d.Actor,
 		Redactions:    d.Redactions,
 		Payload:       d.Payload,
+		Codeplane:     d.Codeplane,
 	}, nil
 }
 

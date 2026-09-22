@@ -215,12 +215,15 @@ type fakeResearch struct {
 	requests int
 	outcome  types.ResearchOutcome
 	err      error
+	last     *Subject
 }
 
 func (f *fakeResearch) Request(ctx context.Context, inc types.Incident, sub Subject) (types.ResearchOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.requests++
+	cp := sub
+	f.last = &cp
 	if f.err != nil {
 		return types.ResearchOutcome{}, f.err
 	}
@@ -233,6 +236,18 @@ func (f *fakeResearch) Request(ctx context.Context, inc types.Incident, sub Subj
 
 func (f *fakeResearch) Poll(ctx context.Context, resID string) (types.ResearchOutcome, error) {
 	return f.outcome, nil
+}
+
+// lastSubject snapshots the most recent Request call's Subject (the AC-31
+// copy-out join asserts against it). Nil when nothing was captured.
+func (f *fakeResearch) lastSubject() *Subject {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.last == nil {
+		return nil
+	}
+	cp := *f.last
+	return &cp
 }
 
 type fakeOutlets struct {

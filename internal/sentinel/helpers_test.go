@@ -62,6 +62,9 @@ func (m *memSink) Append(ctx context.Context, d types.RecordDraft) (types.Record
 		TS: types.FormatUTC(nowFunc()), Kind: d.Kind, SchemaVersion: 1,
 		Sig: d.Sig, Inc: d.Inc, Origin: d.Origin, Actor: d.Actor,
 		Redactions: d.Redactions, Payload: d.Payload,
+		// The real ledger's prepare carries the in-memory Codeplane ride-along
+		// through to the returned record; the double mirrors that (§3.9a).
+		Codeplane: d.Codeplane,
 	}
 	m.recs = append(m.recs, rec)
 	return rec, nil

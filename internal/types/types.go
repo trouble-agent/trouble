@@ -121,6 +121,12 @@ type Record struct {
 	Actor         Actor          `json:"actor"`
 	Redactions    int            `json:"redactions"`
 	Payload       map[string]any `json:"payload"`
+	// Codeplane is the in-memory cross-plane bundle the sentinel attaches to a
+	// `group` record at its admission seam (SPEC-04 §3.9a): it rides the record
+	// to the ladder bridge, which persists it as Incident.Codeplane (SPEC-05
+	// §3.13a). It is not serialized on the ledger line — the incident record is
+	// the bundle's copy of record.
+	Codeplane *CodeplaneContext `json:"-"`
 }
 
 // RecordDraft is what a producer hands to Ledger.Append (SPEC-TYPES §3.15.1).
@@ -134,6 +140,12 @@ type RecordDraft struct {
 	Actor      Actor          `json:"actor"`
 	Redactions int            `json:"redactions"`
 	Payload    map[string]any `json:"payload"`
+	// Codeplane is an in-memory ride-along for the cross-plane bundle
+	// (SPEC-04 §3.9a → SPEC-05 §3.13a): the sentinel attaches it to a `group`
+	// draft and the composition root's sink hands it to the ladder bridge. It
+	// is never serialized on the ledger line — the incident record carries the
+	// bundle's copy of record.
+	Codeplane *CodeplaneContext `json:"-"`
 }
 
 // Duration is the canonical duration encoding: a Go duration string.
@@ -246,25 +258,56 @@ const (
 
 // Incident is the incident projection stored by the ledger (SPEC-TYPES §3.7).
 type Incident struct {
-	ID          string      `json:"id"`
-	Sig         string      `json:"sig"`
-	GroupID     string      `json:"grp"`
-	State       LadderState `json:"state"`
-	EntryRung   Rung        `json:"entry_rung"`
-	Rung        Rung        `json:"rung"`
-	Severity    Severity    `json:"severity"`
-	OpenedTS    string      `json:"opened_ts"`
-	UpdatedTS   string      `json:"updated_ts"`
-	ResolvedTS  string      `json:"resolved_ts"`
-	ReopenCount int         `json:"reopen_count"`
-	PlayRuns    int         `json:"play_runs"`
-	AgentRuns   int         `json:"agent_runs"`
-	VerifyWin   Duration    `json:"verify_window"`
-	LeaseID     string      `json:"lease_id"`
-	IssueID     string      `json:"issue_id"`
-	TaskID      string      `json:"task_id"`
-	ResearchID  string      `json:"research_id"`
-	Evidence    *Evidence   `json:"evidence,omitempty"`
+	ID          string            `json:"id"`
+	Sig         string            `json:"sig"`
+	GroupID     string            `json:"grp"`
+	State       LadderState       `json:"state"`
+	EntryRung   Rung              `json:"entry_rung"`
+	Rung        Rung              `json:"rung"`
+	Severity    Severity          `json:"severity"`
+	OpenedTS    string            `json:"opened_ts"`
+	UpdatedTS   string            `json:"updated_ts"`
+	ResolvedTS  string            `json:"resolved_ts"`
+	ReopenCount int               `json:"reopen_count"`
+	PlayRuns    int               `json:"play_runs"`
+	AgentRuns   int               `json:"agent_runs"`
+	VerifyWin   Duration          `json:"verify_window"`
+	LeaseID     string            `json:"lease_id"`
+	IssueID     string            `json:"issue_id"`
+	TaskID      string            `json:"task_id"`
+	ResearchID  string            `json:"research_id"`
+	Codeplane   *CodeplaneContext `json:"codeplane,omitempty"` // cross-plane bundle (SPEC-05 §3.13a)
+	Evidence    *Evidence         `json:"evidence,omitempty"`
+}
+
+// CodeplaneContext is the sensor⇄sentinel cross-plane bundle (SPEC-TYPES
+// §3.15.12, SPEC-05 §3.13a). The two planes write disjoint fields, so a bundle
+// is never a merge decision: the sentinel half is assembled on a sentinel
+// Admit (SPEC-04 §3.9a), the sensor half on a sensor-born one. The bundle is
+// context, never evidence — it changes no rung, no gate and no verification
+// input — and it is copied out verbatim to the research request (SPEC-07
+// §3.10a, `context.codeplane`) and the issue body (SPEC-09 §3.13a).
+type CodeplaneContext struct { // SPEC-05 §3.13a — the sensor⇄sentinel cross-plane bundle (§3.15.12)
+	Side      string            `json:"side"`                // "sentinel" | "sensor" — which plane produced it
+	Sig       string            `json:"sig,omitempty"`       // sentinel: the group signature
+	GroupID   string            `json:"grp,omitempty"`       // sentinel: the group id (SPEC-04)
+	Project   string            `json:"project,omitempty"`   // sentinel: project id
+	Release   string            `json:"release,omitempty"`   // sentinel: the running release of the errored code
+	Regressed bool              `json:"regressed,omitempty"` // sentinel: release regression currently open
+	Recent    []SigCount        `json:"recent,omitempty"`    // sentinel: top-5 recent signatures, count-descending
+	Sample    string            `json:"sample,omitempty"`    // sentinel: rec_id of the representative event
+	RuleID    string            `json:"rule_id,omitempty"`   // sensor: the rule that fired
+	Readings  map[string]string `json:"readings,omitempty"`  // sensor: rule id / metric → stabilized reading ("io.full.avg10":"3.11")
+	TS        string            `json:"ts"`                  // bundle assembly time (RFC3339 ms UTC)
+}
+
+// SigCount is one recent-signature counter of the codeplane bundle's `Recent`
+// slice (SPEC-TYPES §3.15.12).
+type SigCount struct {
+	Sig   string `json:"sig"`
+	Count int64  `json:"count"`
+	First string `json:"first_ts"`
+	Last  string `json:"last_ts"`
 }
 
 // Evidence is the verification evidence tuple (never a boolean).

@@ -563,7 +563,7 @@ func TestLoadIngestThroughput(t *testing.T) {
 		p99.Round(time.Microsecond), p999.Round(time.Microsecond), loadReferenceReqS)
 	t.Logf("load: wave = %d workers x %d in flight for %s (load_avg_1m at start %.2f; LOAD_PIPELINE/LOAD_DURATION_S unset -> auto-bounded by loadPipelineForLoad/loadWindowForLoad)",
 		loadWorkers, pipeline, dur, loadAtStart)
-	t.Logf("load: 5xx=%d non-200=%d; RSS %d -> %d bytes (growth %d, bound %d)", 
+	t.Logf("load: 5xx=%d non-200=%d; RSS %d -> %d bytes (growth %d, bound %d)",
 		bad, fails, rssBefore, rssPeak, rssPeak-rssBefore, loadRSSGrowthBound)
 	t.Logf("load: suite-wait %.3f over the run window (TRBL-057 term; max allowance x2)", suiteWaitFrac)
 

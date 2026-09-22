@@ -290,6 +290,14 @@ const (
 // summed over every thread) from schedstat. best-effort by contract: a kernel
 // without schedstat (or a read race with thread exit) returns 0 and the term
 // degrades to 1 — a model that cannot measure must not tighten a budget.
+// The sum is over threads: a caller comparing two samples over a window with
+// T concurrent threads must divide the delta by T (the mean of the window's
+// start and end task counts) before dividing by wall time, or a concurrent
+// window mints T thread-seconds of wait per wall second and the fraction
+// leaves its [0,1] domain (QA-TROUBLE-9 measured 1.33 this way: a sentinel
+// load window ran 88 goroutine-backed threads, and the raw sum exceeded wall
+// time by the worker count while the 1m loadavg sat at 2.22). SuiteTaskCount
+// is the normalizer; SuiteWaitFraction applies it.
 func SuiteWaitSamples() uint64 {
 	entries, err := os.ReadDir(SuiteSchedStatPath)
 	if err != nil {
@@ -338,6 +346,13 @@ func SuiteContention(waitFraction float64) (factor float64, active bool) {
 	if waitFraction <= 0 || math.IsNaN(waitFraction) || waitFraction > 1 {
 		return 1, false
 	}
+	// QA-TROUBLE-9, defence in depth: a fraction above the cap is clamped
+	// here (already true below), but a caller that hands the factor to a
+	// budget composed with other multiplicative widens would otherwise read
+	// a term above the documented 2x ceiling. Clamp the INPUT to the cap
+	// before the reciprocal: 1/(1-f) for f in (0, cap] is in (1, 2], and
+	// f <= 0 or junk stays at factor 1, so the output domain is [1, 2] for
+	// every input in (-inf, inf).
 	if waitFraction > SuiteWaitCap {
 		waitFraction = SuiteWaitCap
 	}
@@ -345,21 +360,36 @@ func SuiteContention(waitFraction float64) (factor float64, active bool) {
 }
 
 // SuiteWaitFraction is the whole measurement: sample, run f, sample again, and
-// report the fraction of wall time this process spent descheduled. An earlier
-// caller-wide GOMAXPROCS-less measurement window (runtime.NumCPU threads on a
-// 16-core box) is exactly the regime the full suite creates, so a quiet host
-// measures ~0 here even under fleet load — the fleet's own threads do not
-// enter this process's schedstat.
+// report the fraction of wall time this process spent descheduled. The wait
+// delta is a SUM over the process's task threads, so a window running T
+// concurrent threads can accumulate up to T seconds of wait per wall second;
+// the raw quotient then leaves the [0,1] domain and — read as a fraction —
+// double-counts the contention (QA-TROUBLE-9's measured 1.33 at load_avg 2.22
+// came from exactly this: a sentinel-style concurrent window whose worker
+// threads each accumulated real runqueue wait). The delta is therefore
+// normalised by the mean thread count over the window, which makes the
+// reading the per-thread deschedule fraction the term is defined on and pins
+// the quotient to [0,1] by construction. An earlier caller-wide
+// GOMAXPROCS-less measurement window (runtime.NumCPU threads on a 16-core
+// box) is exactly the regime the full suite creates, so a quiet host measures
+// ~0 here even under fleet load — the fleet's own threads do not enter this
+// process's schedstat.
 func SuiteWaitFraction(f func()) float64 {
 	before := SuiteWaitSamples()
+	tasksBefore := SuiteTaskCount()
 	start := time.Now()
 	f()
 	elapsed := time.Since(start)
 	after := SuiteWaitSamples()
+	tasksAfter := SuiteTaskCount()
 	if elapsed <= 0 || after < before {
 		return 0
 	}
-	return float64(after-before) / float64(elapsed)
+	threads := float64(tasksBefore+tasksAfter) / 2.0
+	if threads < 1 {
+		threads = 1 // unreadable schedstat: degrade to 0, never tighten
+	}
+	return float64(after-before) / (float64(elapsed) * threads)
 }
 
 // SuiteWaitMeasure is SuiteWaitFraction for a measurement that must KEEP its

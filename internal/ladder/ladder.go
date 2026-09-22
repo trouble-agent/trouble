@@ -132,6 +132,12 @@ type Deps struct {
 	// refuses with TROUBLE-LADDER-021 instead of inventing a completion.
 	Agent AgentPort
 
+	// Codeplanes is the sentinel's convergence accessor (SPEC-04 §3.9a): it
+	// fills the sentinel half of a sensor-born admission's cross-plane bundle
+	// (SPEC-05 §3.13a / AC-31). A nil accessor means no convergence hit is
+	// possible and every sensor-born admission runs with its own rule context.
+	Codeplanes CodeplaneAccessor
+
 	// Skills is the local SKILL.md library (SPEC-05 §2b). Nil means no library is
 	// read and no skill step runs.
 	Skills SkillLibrary
@@ -151,6 +157,12 @@ type Observation struct {
 	Severity      types.Severity
 	Stabilization StabilizationState
 	Detail        map[string]any
+	// Codeplane is the cross-plane bundle of AC-31 (SPEC-04 §3.9a): non-nil on
+	// a sentinel-born admission (the sentinel assembled it), nil on a
+	// sensor-born one (the ladder fills it from the convergence accessor
+	// before entering the agent rung — SPEC-05 §3.13a). Context, never
+	// evidence: it changes no rung and no gate.
+	Codeplane *types.CodeplaneContext
 }
 
 // AdmitResult reports what admission did (SPEC-05 §2).
@@ -368,6 +380,13 @@ func (l *Ladder) Admit(ctx context.Context, obs Observation) (AdmitResult, error
 		return AdmitResult{}, newErr(types.CodeLadder001, "", "admission without a sig")
 	}
 	sig := obs.Sig.String()
+	// AC-31 (§3.13a): a sensor-born admission with no bundle is filled from the
+	// sentinel's convergence accessor before any incident state is touched;
+	// a sentinel-born admission already carries the bundle. The bundle is
+	// context, never evidence — a miss leaves the observation unchanged.
+	if obs.Codeplane == nil && l.deps.Codeplanes != nil && string(obs.Source) != "sentinel" {
+		obs.Codeplane = CodeplaneForSensor(l.deps.Codeplanes, obs)
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -546,6 +565,7 @@ func (l *Ladder) newIncidentLocked(ctx context.Context, obs Observation, sig, in
 		Stabilization:    obs.Stabilization,
 		EffectiveMaxRuns: l.maxRunsFor(obs.Rule),
 	}
+	st.Inc.Codeplane = obs.Codeplane // §3.13a: persisted on the incident record
 	l.incs[id] = st
 	l.openBySig[sig] = id
 	if inKey != "" {

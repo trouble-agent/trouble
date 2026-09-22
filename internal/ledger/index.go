@@ -1124,8 +1124,20 @@ func (ix *index) applyIncidentLocked(rec *types.Record, ts time.Time) {
 	if v, ok := rec.Payload["task_id"].(string); ok {
 		inc.TaskID = v
 	}
-	if v, ok := rec.Payload["research_id"].(string); ok {
+	if v, ok := rec.Payload["research_id"].(string); ok && v != "" {
 		inc.ResearchID = v
+	}
+	if raw, ok := rec.Payload["codeplane"]; ok && raw != nil {
+		// §3.13a: the bundle rides the incident record and survives a boot
+		// rebuild byte-for-byte through this decode.
+		if raw != nil {
+			if b, err := json.Marshal(raw); err == nil {
+				var cp types.CodeplaneContext
+				if len(b) > 0 && json.Unmarshal(b, &cp) == nil {
+					inc.Codeplane = &cp
+				}
+			}
+		}
 	}
 	if v, ok := rec.Payload["verify_window"].(string); ok {
 		inc.VerifyWin = types.Duration(v)

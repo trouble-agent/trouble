@@ -30,6 +30,7 @@ type groupState struct {
 	lastRelease    string
 	created        bool
 	sampleRate     float64
+	sample         string // rec_id of the representative event (§3.9a Sample)
 	dirty          bool
 }
 
@@ -118,6 +119,7 @@ type groupStateCopy struct {
 	grp            types.Group
 	eventsUpperSeq uint64
 	sampleRate     float64
+	sample         string
 	dirty          bool
 }
 
@@ -140,6 +142,7 @@ func (st *groupState) copyLocked() groupStateCopy {
 		grp:            cp,
 		eventsUpperSeq: st.eventsUpperSeq,
 		sampleRate:     st.sampleRate,
+		sample:         st.sample,
 		dirty:          st.dirty,
 	}
 }
@@ -278,19 +281,34 @@ func (g *groupIndex) digestSet() []string {
 // package records its own counters and never blocks longer than LedgerWait
 // (§6.13): a sink that reports backpressure turns into a 429 for the request.
 func (s *Server) appendRecord(ctx context.Context, kind types.RecordKind, sig, source string, payload map[string]any, redactions int) (types.Record, *Error) {
-	if source == "" {
-		source = "sentinel"
-	}
-	if payload == nil {
-		payload = map[string]any{}
-	}
-	draft := types.RecordDraft{
+	return s.appendRecordDraft(ctx, types.RecordDraft{
 		Kind:       kind,
 		Sig:        sig,
 		Origin:     types.Origin{HostID: s.cfg.HostID, Source: source},
 		Actor:      s.cfg.Actor,
 		Redactions: redactions,
 		Payload:    payload,
+	})
+}
+
+// appendRecordDraft is appendRecord for a pre-built draft: the draft's
+// in-memory Codeplane ride-along (§3.9a) survives to the returned record, so
+// the sink that bridges into the ladder can hand the bundle over with the
+// group record.
+func (s *Server) appendRecordDraft(ctx context.Context, draft types.RecordDraft) (types.Record, *Error) {
+	source := draft.Origin.Source
+	if source == "" {
+		source = "sentinel"
+	}
+	draft.Origin.Source = source
+	if draft.Payload == nil {
+		draft.Payload = map[string]any{}
+	}
+	if draft.Origin.HostID == "" {
+		draft.Origin.HostID = s.cfg.HostID
+	}
+	if draft.Actor.Kind == "" {
+		draft.Actor = s.cfg.Actor
 	}
 	type res struct {
 		rec types.Record

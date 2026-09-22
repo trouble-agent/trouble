@@ -230,6 +230,16 @@ type Server struct {
 	dups        map[string]time.Time
 	dupOrder    []string
 
+	// conv is the §3.9a convergence map: sig → open group whose subject a
+	// sensor rule can also observe. Derived from the group store, never from
+	// config; rebuilt at boot from the last 15 minutes of `group` records.
+	conv *convergenceMap
+
+	// mismatchMemo dedupes codeplane_release_mismatch gaps: one record per
+	// (sig, bundle_release) pair inside the convergence window (§3.9a step 2).
+	// Guarded by gmu.
+	mismatchMemo map[string]time.Time
+
 	// rejectWindows is the per-project reject-rate accounting behind
 	// `ingest_reject_storm` (§5).
 	rejectMu      sync.Mutex
@@ -275,6 +285,7 @@ func NewServer(cfg Config, w ledgerSink, sc scrubber) (*Server, error) {
 		logger:      log.New(os.Stderr, "sentinel: ", log.LstdFlags),
 		projects:    ix,
 		groups:      newGroupIndex(),
+		conv:        newConvergenceMap(),
 		quota:       newQuotaSet(now),
 		releases:    newReleaseState(),
 		counters:    newCounters(),
@@ -400,6 +411,7 @@ func (s *Server) flushLoop() {
 			return
 		case <-t.C:
 			_ = s.flushGroups(s.ctx, "interval")
+			s.pruneConvergence(s.now())
 			s.replaySpool(s.now())
 		}
 	}
@@ -532,6 +544,9 @@ func (s *Server) rebuild(rd ledgerReader) error {
 			lastRelease = b.grp.ReleaseRange[1]
 		}
 		s.groups.restore(b.grp, b.upper, lastRelease)
+		// §3.9a: the convergence map is rebuilt from the last 15 minutes of
+		// `group` records (the map is a correlation aid, not a store).
+		s.rebuildConvergence(b.grp, s.now())
 	}
 	for _, e := range events {
 		s.groups.replayEvent(e.digest, e.seq, e.ts, e.release, e.redactions)
@@ -617,6 +632,7 @@ func (s *Server) ObserveRecord(rec types.Record) error {
 			last = grp.ReleaseRange[1]
 		}
 		s.groups.restore(grp, upper, last)
+		s.rebuildConvergence(grp, s.now())
 	case types.KEvent:
 		digest, _ := rec.Payload["digest"].(string)
 		if digest == "" {
@@ -1075,7 +1091,9 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 				s.noteRegression(sigStr, verdict)
 				op = "release"
 			}
-			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload(op, st, extraG), 0); gerr != nil {
+			gdraft := types.RecordDraft{Kind: types.KGroup, Sig: sigStr, Payload: groupRecordPayload(op, st, extraG)}
+			s.attachCodeplane(&gdraft, digest, entry.proj.ID, st)
+			if _, gerr := s.appendRecordDraft(ctx, gdraft); gerr != nil {
 				s.logger.Printf("sentinel: group create record failed: %v", gerr)
 			}
 		case res.release != "":
@@ -1084,7 +1102,9 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 				extraG["regression"] = verdict
 				s.noteRegression(sigStr, verdict)
 			}
-			if _, gerr := s.appendRecord(ctx, types.KGroup, sigStr, "sentinel", groupRecordPayload("release", st, extraG), 0); gerr != nil {
+			gdraft := types.RecordDraft{Kind: types.KGroup, Sig: sigStr, Payload: groupRecordPayload("release", st, extraG)}
+			s.attachCodeplane(&gdraft, digest, entry.proj.ID, st)
+			if _, gerr := s.appendRecordDraft(ctx, gdraft); gerr != nil {
 				s.logger.Printf("sentinel: group release record failed: %v", gerr)
 			}
 		}

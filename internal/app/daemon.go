@@ -475,6 +475,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		PIDAlive: pidAlive,
 		Agent:    agentPort,
 		Skills:   ladderSkillPort(d.Subsystems),
+		Codeplanes: codeplaneAdapter{srv: d.Subsystems.Sentinel},
 	})
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)

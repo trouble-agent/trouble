@@ -95,7 +95,7 @@ var legal = []edge{
 			return nil
 		},
 		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
-			out, err := l.deps.Research.Request(context.Background(), st.Inc, Subject{Slug: st.Rule, Context: map[string]any{"sig": st.Inc.Sig}})
+			out, err := l.deps.Research.Request(context.Background(), st.Inc, researchSubject(st))
 			if err != nil {
 				st.ResearchID = ""
 				return wrapErr(types.CodeLadder009, reasonCeiling, err)
@@ -255,7 +255,7 @@ var legal = []edge{
 			return nil
 		},
 		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
-			out, err := l.deps.Research.Request(context.Background(), st.Inc, Subject{Slug: st.Rule, Context: map[string]any{"sig": st.Inc.Sig}})
+			out, err := l.deps.Research.Request(context.Background(), st.Inc, researchSubject(st))
 			if err != nil {
 				return wrapErr(types.CodeLadder009, reasonCeiling, err)
 			}

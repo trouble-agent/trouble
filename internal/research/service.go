@@ -1305,6 +1305,16 @@ func (s *Service) submitContext(r *rung) map[string]any {
 			m[k] = v
 		}
 	}
+	// §3.10a (AC-31): the persisted bundle is embedded at context.codeplane
+	// verbatim — never re-derived, never merged with the evidence bundle. When
+	// inc.Codeplane is non-nil it replaces any caller-supplied copy (single
+	// source); when it is nil the key is absent, so the lab can tell a
+	// system-only incident from a code-plane one with no code-plane facts.
+	if inc := r.inc; inc.Codeplane != nil {
+		m["codeplane"] = inc.Codeplane
+	} else if caller, ok := r.extra["codeplane"]; ok && caller != nil {
+		m["codeplane"] = caller
+	}
 	m["origin"] = map[string]any{"host_id": s.cfg.HostID, "hub_id": "", "source": r.sig.String()}
 	m["incident_id"] = r.inc.ID
 	m["daemon_version"] = s.cfg.DaemonVersion

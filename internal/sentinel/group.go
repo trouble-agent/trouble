@@ -316,6 +316,16 @@ func (s *Server) appendRecordDraft(ctx context.Context, draft types.RecordDraft)
 	if draft.Origin.HostID == "" {
 		draft.Origin.HostID = s.cfg.HostID
 	}
+	// AC-28 (TRBL-061): the route stamp belongs to the record, not to the
+	// wrapper that happened to build it. appendRecord sets it explicitly, but
+	// a pre-built draft (§3.9a) arrives with a zero Origin, and the group
+	// records written on auto-resolution/regression paths are built that way —
+	// so the stamp is filled here, at the single choke point every record
+	// passes through. Without it those records carry origin.route="" and a
+	// reader can no longer answer "local or relayed?" without a join (§3.10a).
+	if draft.Origin.Route == "" {
+		draft.Origin.Route = string(s.routeTable.resolve(draft.Sig))
+	}
 	if draft.Actor.Kind == "" {
 		draft.Actor = s.cfg.Actor
 	}

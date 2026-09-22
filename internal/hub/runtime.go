@@ -69,7 +69,9 @@ type RuntimeConfig struct {
 	LedgerIndex LedgerIndex
 	// AckCursor stamps the envelope's ack cursor (the ledger's last seq).
 	AckCursor func() uint64
-	// Streams overrides the Redis command surface (tests). Nil dials the URL.
+	// The Streams command surface (redis.go streams.go). A nil surface in the
+	// production shape means "dial cfg.URL"; tests and the `trouble hub` CLI
+	// verbs pass an implementation explicitly (OpenWith).
 	Streams Streams
 
 	Log func(format string, args ...any)
@@ -616,8 +618,8 @@ func (r *Runtime) WaitDrained(ctx context.Context, timeout time.Duration) bool {
 //   - ModeDegradedBoot → the standalone in-process path (§5, code 003's
 //     behaviour), counted so the fallback is visible.
 //   - ModeUnavailable / ModeRefusing → a transient refusal (TROUBLE-HUB-004);
-//     the sender gets 429 (+Retry-After) or, under require_redis, a hard
-//     refusal. Never a 200.
+//     the sender gets 429 + Retry-After when require_redis=false, or a hard
+//     503 + Retry-After refusal when require_redis=true (§4.3). Never a 200.
 func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Record, error) {
 	if r == nil {
 		return types.Record{}, errf(types.CodeHub003, ReasonRedisDial, "no hub runtime")
@@ -663,6 +665,16 @@ func (r *Runtime) Ingest(ctx context.Context, draft types.RecordDraft) (types.Re
 		return types.Record{}, errf(types.CodeHub001, ReasonProfile, "hub runtime is not enabled")
 	default:
 		r.countRefused.Add(1)
+		// §4.3's two runtime-loss rows, distinguished HERE so the sentinel can
+		// answer the status the profile promises: require_redis=false keeps the
+		// queue's ordinary overload 429 (senders discard; local spools hold),
+		// require_redis=true is the hard unavailability refusal — a caller that
+		// trusts a 200 can trust durability, so the answer is 503, never a
+		// rate-limit shape (RuntimeRefusalHTTPStatus is the one mapping).
+		if r.redis.RequireRedis {
+			r.cfg.Log("hub: refusing ingest (require_redis=true, %s)", r.degradedReason())
+			return types.Record{}, RefusalError(ReasonRefusingCode, "redis is unavailable and require_redis=true: the event was refused, not accepted")
+		}
 		return types.Record{}, errf(types.CodeHub004, ReasonXAdd,
 			"the redis ingestion queue is unavailable (%s): the event was refused, not accepted",
 			r.degradedReason())

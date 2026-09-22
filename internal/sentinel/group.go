@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/hub"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -343,6 +344,19 @@ func (s *Server) appendRecordDraft(ctx context.Context, draft types.RecordDraft)
 	select {
 	case r := <-ch:
 		if r.err != nil {
+			// A hub queue failure is answered by §4.3's matrix, not as a
+			// generic ledger failure: require_redis=true's runtime refusal is
+			// 503 + Retry-After (hard unavailability), everything else stays
+			// the overload 429 the SDK contract already pins.
+			if hubCode := hub.CodeOf(r.err); hubCode != "" {
+				return types.Record{}, &Error{
+					Code:        types.CodeSentinel010,
+					Status:      statusForHub(r.err),
+					Causes:      []string{causeOverloaded},
+					Msg:         "ingestion unavailable: " + string(hubCode),
+					RetryAfterS: 1,
+				}
+			}
 			return types.Record{}, errf(types.CodeSentinel010, "ledger append failed", causeOverloaded)
 		}
 		return r.rec, nil

@@ -42,6 +42,10 @@ usage:
   trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
   trouble dashboard token revoke --label LABEL
   trouble dashboard token list [--json]
+  trouble hub status [--json]
+  trouble hub archive [--dry-run] [--file FILE] [--force]
+  trouble hub dedup --key KEY [--json]
+  trouble hub drain [--timeout DURATION]
   trouble --version
 
 Config precedence is flag > env > file > default (SPEC-12 §3.1); every key has a
@@ -88,6 +92,8 @@ func run(args []string) int {
 		return cmdEscalate(args[1:])
 	case "dashboard":
 		return cmdDashboard(args[1:])
+	case "hub":
+		return cmdHub(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

@@ -125,6 +125,12 @@ func (r *Runtime) redisOffsets(ctx context.Context) types.RedisStreamOffsets {
 	}
 	acked, _ := client.Watermarks()
 	out.LastAckedID = acked
+	// §2.1.1 rule 5: the recovery posture the status verb asks for. Computed
+	// once here, from the offsets just read, so the runtime's stanza and the
+	// CLI's read-only status answer "cold?" identically (ColdStreamState).
+	if ColdStreamState(out) {
+		out.State = "cold"
+	}
 	return out
 }
 
@@ -145,6 +151,24 @@ func DegradedReasonFor(code types.ErrorCode, requireRedis bool) string {
 	default:
 		return DegradedNone
 	}
+}
+
+// ColdStreamState reports the SPEC-13 §2.1.1 rule-5 recovery posture: the
+// queue is COLD while the stream holds nothing, nothing is pending in the
+// group, and no delivery has been made — exactly the state of a Redis that was
+// flushed or failed over (or whose group has not been created yet, which the
+// next wire repairs with MKSTREAM $). `trouble hub status` reports
+// `redis.state = "cold"` in this state until the first acknowledged entry;
+// a degraded stanza never says "cold" (its reason already says why it cannot
+// see the queue), and a queue with any delivered id is simply warm.
+//
+// It is a package-level function of the offsets alone so the CLI's read-only
+// status path and the runtime's health stanza answer the question identically.
+func ColdStreamState(st types.RedisStreamOffsets) bool {
+	if st.Degraded {
+		return false
+	}
+	return st.StreamLen == 0 && st.Pending == 0 && st.LastDeliveredID == ""
 }
 
 // archiveQueueDepth, archiveLastTS, archivedFiles and markerPending read the

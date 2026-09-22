@@ -62,6 +62,15 @@ const (
 	CodeHub014 ErrorCode = "TROUBLE-HUB-014" // permanent: retention tried to drop an unverified generation
 	CodeHub015 ErrorCode = "TROUBLE-HUB-015" // permanent: Redis deployment topology refused at preflight
 	CodeHub016 ErrorCode = "TROUBLE-HUB-016" // permanent: appendonly=no with require_persistence=true
+
+	// CodeRedisRefusing is SPEC-13 §4.3's require_redis=true RUNTIME-loss
+	// answer (503, not the overload 429). It is not a new TROUBLE-HUB-0xx
+	// number: the spec pins the distinction on the sender-facing STATUS (the
+	// §4.3 matrix has two "Redis lost at runtime" rows, 429 under
+	// require_redis=false and 503 under true) while the failure class and the
+	// remedy stay 004/004's. The token keeps the TROUBLE- prefix and the error
+	// catalog's shape so it can ride the same ErrorCode plumbing.
+	CodeRedisRefusing ErrorCode = "TROUBLE-REDIS-REFUSING"
 )
 
 // HubCodeClass is the SPEC-13 §5 class column.
@@ -120,6 +129,13 @@ type RedisStreamOffsets struct {
 	Degraded       bool   `json:"degraded"`
 	DegradedReason string `json:"degraded_reason"`
 	Since          string `json:"since"`
+	// State is the §2.1.1 rule-5 recovery-posture token: "cold" while the
+	// queue is empty and nothing is pending (a flushed/failed-over Redis, or a
+	// group that is missing and will be re-created with MKSTREAM $) — the
+	// state `trouble hub status` reports until the first acknowledged entry.
+	// Empty means the ordinary attached state; omitempty keeps the zero value
+	// off the wire for every stanza written before this field existed.
+	State string `json:"state,omitempty"`
 }
 
 // HubStatus is the server profile's stanza in the one health surface

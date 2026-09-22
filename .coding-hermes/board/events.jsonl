@@ -205,3 +205,5 @@
 {"id":205,"timestamp":"2026-09-22T19:41:12","event_type":"task_updated","task_id":"TRBL-065","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":206,"timestamp":"2026-09-22T19:41:23","event_type":"task_updated","task_id":"QA-TROUBLE-9","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":207,"timestamp":"2026-09-22T19:41:52","event_type":"task_updated","task_id":"QA-TROUBLE-9","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":208,"timestamp":"2026-09-22T21:30:01","event_type":"task_completed","task_id":"QA-TROUBLE-9","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":209,"timestamp":"2026-09-22T21:30:35","event_type":"audit","task_id":"QA-TROUBLE-9","actor":"foreman","detail":"tick trouble-2026-09-22-19-21-56-r2: worker 208b90e merged 72aaeed; gitreins tier2 verdict COMPLETE res 0.02; tier1 failures are the documented load-flake + secrets-timeout baseline; row closed","tick_number":null}

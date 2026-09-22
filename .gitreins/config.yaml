@@ -113,9 +113,14 @@ guards:
 # nesting is fixed, so they take effect for the first time.
 evaluator:
   model: deepseek-v4-flash
-  max_iterations: 200
+  # Iteration 200->250 + input 1.5M->3M (tick -r2, 2026-09-22): TRBL-065 monolithic criterion died
+  # "Iteration cap (200) reached (200.6 used)", tier2 INCOMPLETE, verdict 00e29f06; same run's context
+  # counter hit 1.38M/1.5M with 3 compactions (~6.9K/iter measured -> quadratic projection crosses
+  # 1.5M at 250 iters). One-chore raise per the gitreins-tier2-iteration-cap-exceeded answer; probe
+  # pending a normal-burn settle (a passing run's total is a floor, not a rate).
+  max_iterations: 250
   max_time: "30m"
-  max_input_tokens: "1.5M"
+  max_input_tokens: "3M"
   max_output_tokens: "384k"
   static_analysis_diagnostics: false
 

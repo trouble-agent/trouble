@@ -38,5 +38,5 @@
     "TRBL-066"
   ],
   "status": "done",
-  "recovery_note": "re-fire r2 2026-09-22: QA-TROUBLE-9 merged+judged+row closed; TRBL-066 merged d01cd02; TRBL-065 worker still live at r2 start (harvest pending)"
+  "recovery_note": "re-fire r2 2026-09-22 COMPLETE: QA-TROUBLE-9 merged 72aaeed + verdict 5d67ad73 + row closed; TRBL-066 merged d01cd02 + verdict 50349559 + row closed; TRBL-065 worker committed 64a1611, merged 84fb1b9, row closed, async judge job-3ffcdaf3 dispatched. All 3 wave worktrees reaped."
 }

@@ -1,0 +1,37 @@
+{
+  "tick_id": "trouble-2026-09-22-19-21-56",
+  "project": "trouble",
+  "created_at": "2026-09-22T19:32:00Z",
+  "wave_budget": 5,
+  "workers": [
+    {
+      "task_id": "QA-TROUBLE-9",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-9",
+      "branch": "wt/QA-TROUBLE-9",
+      "base_sha": "0cd472b",
+      "brief": "/tmp/trouble-t321-brief-QA-TROUBLE-9.txt",
+      "scope": "internal/loadfence + SPEC-01 s7/s7a calibration + perf-floor family",
+      "gitreins": "in_progress"
+    },
+    {
+      "task_id": "TRBL-065",
+      "worktree": "~/worktrees/trouble-TRBL-065",
+      "branch": "wt/TRBL-065",
+      "base_sha": "0cd472b",
+      "brief": "/tmp/trouble-t321-brief-TRBL-065.txt",
+      "scope": "cmd/trouble hub verbs + internal/hub mounting + SPEC-13 2.2",
+      "gitreins": "in_progress"
+    },
+    {
+      "task_id": "TRBL-066",
+      "worktree": "~/worktrees/trouble-TRBL-066",
+      "branch": "wt/TRBL-066",
+      "base_sha": "0cd472b",
+      "brief": "/tmp/trouble-t321-brief-TRBL-066.txt",
+      "scope": "deploy/README.md + Makefile stamp help",
+      "gitreins": "in_progress"
+    }
+  ],
+  "merge_order": ["QA-TROUBLE-9", "TRBL-065", "TRBL-066"],
+  "status": "dispatched"
+}

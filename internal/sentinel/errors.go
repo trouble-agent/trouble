@@ -17,9 +17,11 @@ package sentinel
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
+	"github.com/trouble-agent/trouble/internal/hub"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -146,7 +148,25 @@ func isCode(err error, code types.ErrorCode) bool {
 	if errors.As(err, &se) {
 		return se.Code == code
 	}
-	return false
+	if he, ok := err.(*hub.Error); ok {
+		return he.Code == code
+	}
+	return hub.CodeOf(err) == code
+}
+
+// statusForHub maps a hub queue failure to the §4.3 status the daemon's own
+// ingestion surface answers with: the require_redis=true runtime refusal
+// (TROUBLE-REDIS-REFUSING) is the hard unavailability answer (503), while
+// every other queue failure keeps the overload 429. The hub side's
+// RuntimeRefusalHTTPStatus is the same mapping (§4.3's two runtime-loss rows).
+func statusForHub(err error) int {
+	var he *hub.Error
+	if errors.As(err, &he) {
+		if he.Code == types.CodeRedisRefusing {
+			return http.StatusServiceUnavailable
+		}
+	}
+	return http.StatusTooManyRequests
 }
 
 // causeOf returns the first cause of err, or "".

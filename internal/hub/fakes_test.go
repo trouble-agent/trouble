@@ -400,6 +400,25 @@ func (f *fakeStreams) Get(ctx context.Context, key string) (string, bool, error)
 	return e.value, true, nil
 }
 
+// TTL is the §2.2 dedup probe's TTL fact over the fake: the remaining window
+// for a live claim, 0 when the key is absent or released.
+func (f *fakeStreams) TTL(ctx context.Context, key string) (time.Duration, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failGet != nil {
+		return 0, f.failGet
+	}
+	e, ok := f.kv[key]
+	if !ok {
+		return 0, nil
+	}
+	rest := time.Until(e.expiresAt)
+	if rest <= 0 {
+		return 0, nil
+	}
+	return rest, nil
+}
+
 func (f *fakeStreams) Del(ctx context.Context, keys ...string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

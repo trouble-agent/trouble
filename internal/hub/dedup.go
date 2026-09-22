@@ -455,6 +455,29 @@ func (g *DedupGate) LoadState(stateRoot string) (dedupStateFile, error) {
 // LRUSize is the current number of remembered keys.
 func (g *DedupGate) LRUSize() int { return g.fallback.len() }
 
+// RemainingTTL is the §2.2 dedup probe's one extra fact: how long the claim
+// still has before the window releases the key. Zero means absent (or already
+// released); -1 means the window is not TTL-bounded (the degraded LRU path or
+// a backend that cannot answer). It reads; it never writes, never extends.
+//
+// This is a package-level function over the Streams seam (not a gate method)
+// because the `trouble hub dedup` CLI asks it WITHOUT a live gate — presence
+// plus TTL is all the probe reveals, which is exactly the §2.2 contract.
+func RemainingTTL(ctx context.Context, s Streams, key string) time.Duration {
+	if s == nil {
+		return -1
+	}
+	v, ok, err := s.Get(ctx, key)
+	if err != nil || !ok {
+		return 0
+	}
+	_ = v
+	if t, err := s.TTL(ctx, key); err == nil && t >= 0 {
+		return t
+	}
+	return -1
+}
+
 func (g *DedupGate) markHealthy() {
 	g.mu.Lock()
 	g.degraded = false

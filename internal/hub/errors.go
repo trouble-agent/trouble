@@ -29,7 +29,22 @@ const (
 	ReasonDrop         = "drop_gate"      // 014: retention tried to drop an unverified generation
 	ReasonProfileSwap  = "profile_switch" // 013: a live profile switch was requested
 	ReasonPlain        = "error"
+
+	// ReasonRefusingCode is the error code of require_redis=true's runtime
+	// refusal. SPEC-13 §4.3 gives the runtime-loss row a DIFFERENT sender
+	// answer when the profile refuses instead of degrades — a hard 503 rather
+	// than the overload 429 — and the queue's error values have to carry that
+	// distinction so the sentinel can answer it without re-deriving the
+	// profile from configuration on every request.
+	ReasonRefusingCode = types.CodeRedisRefusing
 )
+
+// RedisRefusing is the §4.3 runtime-refusal code: Redis was lost at RUNTIME
+// while require_redis=true, and the ingestion surface answers a hard 503
+// (unavailable), never the overload 429. It is deliberately not a new
+// TROUBLE-HUB-0xx number: the failure class is 004's, and the spec pins the
+// distinction on the STATUS, not on a second error code.
+const RedisRefusing = types.CodeRedisRefusing
 
 // Error is a hub failure carrying a TROUBLE-HUB code and a stable reason.
 //
@@ -98,6 +113,33 @@ func ReasonOf(err error) string {
 // ErrorCodeString is the plain string form used in payloads (SPEC-INDEX §5.3:
 // every failure code is mirrored into the ledger record that describes it).
 func ErrorCodeString(err error) string { return string(CodeOf(err)) }
+
+// RefusalError builds the require_redis=true runtime-refusal error: the same
+// transient failure class as 004 (the remedy is the same: restore Redis), a
+// distinct code so the sentinel's answer can be 503 rather than the overload
+// 429 (SPEC-13 §4.3's runtime-loss rows; RuntimeRefusalHTTPStatus is the one
+// mapping back).
+func RefusalError(code types.ErrorCode, msg string) error {
+	return errf(code, ReasonXAdd, "%s", msg)
+}
+
+// RuntimeRefusalHTTPStatus maps a hub queue failure to the HTTP status the
+// SPEC-13 §4.3 matrix promises the sender. It is THE mapping (§4.3's two
+// runtime-loss rows): every other queue code keeps the sentinel's own overload
+// answer (429 + Retry-After), while the require_redis=true runtime refusal —
+// carried by TROUBLE-REDIS-REFUSING — is the hard unavailability answer, 503 +
+// Retry-After: a caller that trusts a 200 can trust durability, so the
+// unavailability is named by the status, not disguised as rate limiting.
+//
+// The CLI does not answer HTTP; this exists so the daemon's one ingestion
+// surface and any embedder answer §4.3 identically without each re-deriving
+// the profile from configuration.
+func RuntimeRefusalHTTPStatus(err error) int {
+	if CodeOf(err) == types.CodeRedisRefusing {
+		return 503
+	}
+	return 429
+}
 
 // IsRequestEnd reports whether err is the CALLER's request ending — its context
 // cancelled, or its deadline passing — rather than a failure of the queue behind

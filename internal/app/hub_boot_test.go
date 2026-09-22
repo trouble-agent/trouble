@@ -187,6 +187,17 @@ func (m *memStreams) Get(ctx context.Context, key string) (string, bool, error) 
 	return v, ok, nil
 }
 
+// TTL answers 0 when the key is absent, -1 when it exists without an expiry
+// (the mem fake never expires keys): the §2.2 probe's two non-positive facts.
+func (m *memStreams) TTL(ctx context.Context, key string) (time.Duration, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.kv[key]; !ok {
+		return 0, nil
+	}
+	return -1, nil
+}
+
 func (m *memStreams) Del(ctx context.Context, keys ...string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

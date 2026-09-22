@@ -40,6 +40,10 @@ type Streams interface {
 	SetXX(ctx context.Context, key, value string, ttl time.Duration) (bool, error)
 	// Get returns the value and whether the key exists.
 	Get(ctx context.Context, key string) (string, bool, error)
+	// TTL returns the remaining time-to-live of a key: >0 while it exists
+	// with an expiry, 0 when it does not exist, -1 when it exists without an
+	// expiry. The `trouble hub dedup` probe reports it; it is a read.
+	TTL(ctx context.Context, key string) (time.Duration, error)
 	Del(ctx context.Context, keys ...string) (int64, error)
 	Close() error
 }
@@ -370,6 +374,21 @@ func (g *goRedisStreams) Get(ctx context.Context, key string) (string, bool, err
 		return "", false, err
 	}
 	return v, true, nil
+}
+
+// TTL maps Redis's PTTL: -1 (no expiry) and -2 (no key) become -1 and 0.
+func (g *goRedisStreams) TTL(ctx context.Context, key string) (time.Duration, error) {
+	d, err := g.c.PTTL(ctx, key).Result()
+	if err != nil {
+		return 0, err
+	}
+	if d < 0 {
+		if d == -1*time.Nanosecond {
+			return -1, nil
+		}
+		return 0, nil
+	}
+	return d, nil
 }
 
 func (g *goRedisStreams) Del(ctx context.Context, keys ...string) (int64, error) {

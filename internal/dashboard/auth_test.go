@@ -616,7 +616,7 @@ func TestValidateConfigMatrix(t *testing.T) {
 		{"non-loopback without mandate", func() Config { c := DefaultConfig(); c.Bind = "0.0.0.0"; return c }(), string(types.CodeDashboard006), "mandate_required"},
 		{"non-loopback lan with mandate", func() Config {
 			c := DefaultConfig()
-			c.Bind = "192.0.2.5"
+			c.Bind = "192.168.1.5"
 			c.Mandate = "tailnet"
 			c.PublicOrigin = "https://trouble.example"
 			return c

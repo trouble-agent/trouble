@@ -63,8 +63,10 @@ Notes that save time:
 - Commit author is the project identity only. Do not add co-author trailers or
   personal names/addresses to this repository.
 - No secrets, tokens, private hostnames, home-directory paths or personal data
-  in commits, tests, fixtures or docs. Tests use documentation-range values
-  (`192.0.2.0/24`, `example.com`, `opuser`). The repo runs a secret scan; a hit
+  in commits, tests, fixtures or docs. Tests and fixtures use documentation-range
+  values (`192.0.2.0/24`, `example.com`) and one generic private range
+  (`192.168.1.0/24`) where a fixture must exercise private-address behaviour; the
+  operator usernames are neutral (`opuser`). The repo runs a secret scan; a hit
   fails the commit.
 - PRs: say which AC the change satisfies, what you ran, and what you measured.
   Paste the real command output for the gate you are claiming — a green claim

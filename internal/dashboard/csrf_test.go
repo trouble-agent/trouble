@@ -255,7 +255,7 @@ func TestCSRFCookieAttributes(t *testing.T) {
 	// On a non-loopback bind every cookie is Secure.
 	env2 := newEnv(t, envOptions{noRefresh: true, cfg: func(c *Config) {
 		unlimitedRates(c)
-		c.Bind = "192.0.2.5"
+		c.Bind = "192.168.1.5"
 		c.Mandate = "tailnet"
 		c.PublicOrigin = "https://trouble.example"
 	}})

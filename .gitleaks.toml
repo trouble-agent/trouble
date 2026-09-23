@@ -114,3 +114,13 @@ paths = [
 ]
 regexTarget = "line"
 regexes = ['''0123456789abcdef0123456789abcdef''']
+
+[[allowlists]]
+description = "the second documented dev placeholder: the container quickstart's project secret (deploy/container/config.toml) and the tests that pin the same literal. The value is a sequential-hex dummy (fedcba...) and the config says so in-line (\"documented DEV placeholder: rotate both keys before anything real reports here\"), but the shape is fixed BY CONTRACT — SPEC-12 §3.1a requires a project secret to be exactly 32 lowercase hex, so a placeholder here cannot be made non-secret-shaped without failing the boot the file exists to demonstrate. Scoped to the exact literal on the line, so a real key pasted into any of these paths is still caught."
+paths = [
+  '''(^|/)deploy/container/config\.toml$''',
+  '''(^|/)internal/app/container_posture_test\.go$''',
+  '''(^|/)internal/lifecycle/projects_test\.go$''',
+]
+regexTarget = "line"
+regexes = ['''fedcba9876543210fedcba9876543210''']

@@ -1,0 +1,51 @@
+name: Feature request
+description: Propose a capability, a spec amendment or a new module
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This project is spec-first: a feature is a spec amendment plus code that
+        lands against an acceptance criterion (AC). Requests that name the AC
+        they would create are much easier to accept.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of request is this
+      options:
+        - new capability in an existing subsystem
+        - a new registry module
+        - a new driver (issue desk, flow, research)
+        - a spec amendment / clarification
+        - documentation
+        - tooling or build
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do that the project does not let you do today. Concrete beats aspirational.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: Config keys, CLI verbs, record fields, or the spec section you would amend (letter-suffix rule — existing sections are never renumbered).
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: How it would be verified
+      description: The acceptance criterion you would add, and how it can be measured rather than asserted.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Including "do nothing" — say what breaks if this is not built.
+    validations:
+      required: false

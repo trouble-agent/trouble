@@ -1,0 +1,68 @@
+name: Bug report
+description: Something is wrong with the daemon, the CLI, the ledger, the scrub gate or the dashboard
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this looks like a **security** problem, stop and
+        read `SECURITY.md` instead — do not file it as a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version triple
+      description: Output of `trouble --version` (release, git SHA, build time). `0.0.0-dev` means an unstamped build from a tagless tree — say so, it is useful.
+      placeholder: "0.0.0-dev <sha> <time>"
+    validations:
+      required: true
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      options:
+        - daemon / boot / lifecycle
+        - ledger (durability, rotation, query)
+        - scrub gate (a leak or an over-redaction)
+        - sentinel ingestion (envelope, /store/, on-ramp, collectors)
+        - sensors
+        - registry (plays, modules, dry-run, audit)
+        - ladder / llm / research / skills
+        - flow or issue desk
+        - hub / Redis profile
+        - dashboard / auth
+        - CLI
+        - build, packaging or docs
+        - not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Observed behaviour, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Config (with secrets removed), exact command or request, and the smallest sequence that shows it.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Log lines, ledger records or `--json` output. Remove tokens, hostnames and personal paths.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: host
+    attributes:
+      label: Environment
+      description: OS/kernel, Go version, and whether this is a container, a systemd install or a source build.
+      placeholder: "Ubuntu 24.04, kernel 6.8, go 1.26.5, systemd --user install"
+    validations:
+      required: true

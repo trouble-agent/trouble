@@ -30,3 +30,4 @@ deploy/container/secrets/
 # DuckBrain write staging (nested repo with its own .git) and GitReins run logs.
 namespaces/
 .gitreins/logs/
+.gitreins/tasks.yaml.lock

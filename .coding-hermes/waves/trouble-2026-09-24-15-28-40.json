@@ -1,0 +1,52 @@
+{
+  "tick_id": "trouble-2026-09-24-15-28-40",
+  "project": "trouble",
+  "created_at": "2026-09-24T15:40:00Z",
+  "wave_budget": 4,
+  "workers": [
+    {
+      "task_id": "TRBL-072",
+      "worktree": "~/worktrees/trouble-TRBL-072",
+      "branch": "wt/TRBL-072",
+      "base_sha": "68164e6",
+      "brief": "/tmp/trouble-t324-brief-TRBL-072.txt",
+      "scope": ".github/workflows/ci.yml (new) — build/vet/short-test/selfcheck",
+      "gitreins": "in_progress"
+    },
+    {
+      "task_id": "TRBL-068",
+      "worktree": "~/worktrees/trouble-TRBL-068",
+      "branch": "wt/TRBL-068",
+      "base_sha": "68164e6",
+      "brief": "/tmp/trouble-t324-brief-TRBL-068.txt",
+      "scope": "specs/tools/*.py + docs/build_specs_review.py + guard python client typing; mypy/ruff wired into QA battery",
+      "gitreins": "in_progress"
+    },
+    {
+      "task_id": "TRBL-067",
+      "worktree": "~/worktrees/trouble-TRBL-067",
+      "branch": "wt/TRBL-067",
+      "base_sha": "68164e6",
+      "brief": "/tmp/trouble-t324-brief-TRBL-067.txt",
+      "scope": "go.mod/go.sum bumps: cpuid/v2 2.4.0, testify 1.12.1, atomic 1.12.0",
+      "gitreins": "in_progress"
+    },
+    {
+      "task_id": "TRBL-071",
+      "worktree": "~/worktrees/trouble-TRBL-071",
+      "branch": "wt/TRBL-071",
+      "base_sha": "68164e6",
+      "brief": "/tmp/trouble-t324-brief-TRBL-071.txt",
+      "scope": "docs/operations.md sequential H2 renumbering + cross-refs",
+      "gitreins": "in_progress"
+    }
+  ],
+  "merge_order": ["TRBL-067", "TRBL-068", "TRBL-072", "TRBL-071"],
+  "held_rows": {
+    "TRBL-070": "complexity 1 README fix — foreman-direct in main tree after wave merge (conflict-free with wave scopes)",
+    "TRBL-069": "shares specs/tools/selfcheck.py with TRBL-068 — serial follow-up tick, not waveable",
+    "TRBL-049": "fleet-level AGENTS.md decision — Bane doctrine (trouble-ops), not wave work"
+  },
+  "push_status": "BLOCKED per project law 2 — local main is ahead of origin/main with co-author-trailer commits; publish/push awaits Bane's history-rewrite decision",
+  "status": "dispatched"
+}

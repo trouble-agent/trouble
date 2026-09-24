@@ -38,7 +38,7 @@ services:
       # root:root 0755 and therefore also unwritable by 65532 — but /data/state
       # ships in the image as 0700 + 65532, so that is where the secrets go.
       # A compose `secrets:` entry is the third trap: it mounts 0444 root-owned.
-      # Seed once, as documented in docs/operations.md §14.
+      # Seed once, as documented in docs/operations.md §19.
     healthcheck:
       test: ["CMD", "/usr/local/bin/trouble", "check-stall", "--health-url", "http://127.0.0.1:7644/health.json", "--json", "--config", "/etc/trouble/config.toml"]
       interval: 30s

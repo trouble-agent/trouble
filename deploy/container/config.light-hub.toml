@@ -16,7 +16,7 @@
 # so this file RESOLVES and the light-hub profile passes the boot gate when
 # server.redis.url and server.duckbrain.namespace are both declared. Before that
 # registration this file was refused with TROUBLE-LIFECYCLE-001 (unknown file
-# key) — see TRBL-027 and docs/operations.md §14.
+# key) — see TRBL-027 and docs/operations.md §19.
 #
 # The profile's RUNTIME — the Redis stream and consumer group, the dedup gate,
 # the degradation state machine and the DuckBrain archival tier (SPEC-13 §2.3) —

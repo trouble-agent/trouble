@@ -94,7 +94,7 @@ bin/trouble --version   # → 0.0.0-dev <sha> <build-time> [stamped]
 describe — but the stamped/unstamped verdict keys on the sha alone, so an
 explicit `GIT_SHA` reports `[stamped]` and installs without `--force`. The
 `nogit00` worktree placeholder and the degraded-by-design rationale are
-covered in `docs/operations.md` §14.
+covered in `docs/operations.md` §19.
 
 In a second terminal, verify both listener contracts and send the first event.
 Replace `PUBLIC_KEY` with the 32-character lowercase hexadecimal `public_key`
@@ -125,7 +125,7 @@ listeners, and exits.
 
 The same two binaries also ship as a distroless image with a compose stack
 (trouble + redis). This is the copy-edit path for a container host; the measured
-refusals each step avoids are documented in `docs/operations.md` §14.
+refusals each step avoids are documented in `docs/operations.md` §19.
 
 Prerequisites: Docker with the compose plugin. No ports are touched besides
 7643/7644 published on `127.0.0.1` only.
@@ -181,7 +181,7 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
    distroless (no shell, no editor), and every way of writing the env file from
    outside lands the wrong uid or mode — the mint writes the 0600 file itself,
    as the container's own uid, inside the volume (measured: trap 4 in
-   `docs/operations.md` §14).
+   `docs/operations.md` §19).
 
    `-e TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token` is equally
    load-bearing, and for the same class of reason: the container configs declare
@@ -227,7 +227,7 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
 Builds from a git **worktree** stamp `nogit00` unless `GIT_SHA` is passed as in
 step 2 — the worktree's `.git` is a pointer file the build context cannot
 resolve. `nogit00` is a placeholder, not the unstamped sentinel (`unknown`);
-§14 explains the difference.
+§19 explains the difference.
 
 ## systemd units
 

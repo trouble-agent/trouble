@@ -4,7 +4,7 @@ The ingestion surface of `internal/sentinel` (SPEC-04), what it accepts, and
 every place where it deliberately differs from upstream Sentry or from the SPEC-04
 text. The document is **hand-maintained**: this repository ships no build layer, so
 there is no `make compat-matrix` target to regenerate it (divergence 15 in §5,
-recorded for operators in `docs/operations.md` §9). It is enforced by the drift
+recorded for operators in `docs/operations.md` §13). It is enforced by the drift
 checks `TestCompatMatrixRoutes`, `TestCompatMatrixItemTypes`,
 `TestCompatMatrixEncodings`, `TestCompatMatrixAuthForms` and
 `TestCompatMatrixDivergences` (`compat_test.go`), each of which renders its table
@@ -176,7 +176,7 @@ literally, with the reason. Every one of them is asserted by a test.
     `make conformance` / `make schema` and SPEC-12's `Makefile` `build` target), so
     the drift checks listed in the header enforce the document instead of a
     generator. Pinned by `TestCompatDocProvenance`, which also fails if a root
-    `Makefile` appears while `docs/operations.md` §9 still says there is none.
+    `Makefile` appears while `docs/operations.md` §13 still says there is none.
 
 ## 6. Ledger payload schema
 

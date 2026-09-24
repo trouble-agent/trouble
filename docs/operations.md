@@ -396,7 +396,7 @@ than rendered with a fabricated zero. (3) A malformed write body has no code of 
 composition root and a mock ladder, and the composition root's own e2e is the Hermes lane's.
 
 
-## 9. Sentinel (SPEC-04)
+## 13. Sentinel (SPEC-04)
 
 The listener, what it accepts, and where it deliberately differs from upstream
 Sentry is `docs/sentinel-compat.md`; this section is the operating half.
@@ -700,7 +700,7 @@ because the pgx-free `TestAckImpliesDurable` forks a second `go test` binary and
 whole-file image; new fixture code that needs to hash or scan files uses
 `hashFileBytes`/`decodeLedgerFile`.
 
-## 12. The research rung (SPEC-07)
+## 14. The research rung (SPEC-07)
 
 The research rung asks Off-by-One for a pre-solved answer before an agent is
 spent. It is **best effort by contract**: the lab being unreachable, slow,
@@ -754,7 +754,7 @@ active table stays in place and SPEC-12 reports it. A fallback slug
 submit unless `allow_unknown_class_submit=true` — submitting under `unknown`
 pollutes a cache shared with every other trouble host.
 
-## 13. The flow subsystem (SPEC-08)
+## 15. The flow subsystem (SPEC-08)
 
 `internal/flow` turns a finding into work: one board row per `(sig, board)`
 through the `board-jsonl` or `task-router` driver, and — for a confirmed code bug
@@ -819,7 +819,7 @@ in every autonomy mode including `full`; `auto-after-verify` additionally requir
 `AutonomyGates.AllowPromote`, so an assisted host cannot auto-merge by
 configuration alone.
 
-## 12. The issue desk (SPEC-09)
+## 16. The issue desk (SPEC-09)
 
 **The desk ships OFF.** `enabled = false` is the compiled default (SPEC-09 §3.4a): the desk is built and
 idle — no driver is constructed, no credential is read, no outbound call is made — because no deployment
@@ -864,7 +864,7 @@ env var), refused on argv, and it is never logged, never in a ledger payload, ne
 `DriverHealth.Detail`, and never printed by `trouble config explain` (which shows the file path with
 `Redacted=true` and, for the KV backend, the header **name** only).
 
-## 13. The skill loop (SPEC-11)
+## 17. The skill loop (SPEC-11)
 
 **The loop ships OFF.** `enabled = false` is the compiled default (SPEC-11 §2a): the daemon pulls nothing
 and no skill is ever applied, because no distribution channel is compiled in. The `[skills]` table is a live
@@ -913,7 +913,7 @@ parks a pulled version in `pending/` until `trouble skills approve <name>@<v>`; 
 refuses everything pulled; `approve=auto` installs, and installation is still not authority — in
 `shadow` an `auto` host runs mutating skill plays as `check_mode` downstream.
 
-## 13. Lifecycle, config and the watchdog chain (SPEC-12)
+## 18. Lifecycle, config and the watchdog chain (SPEC-12)
 
 `internal/lifecycle` owns whether the daemon is allowed to run and replaceable
 without losing work.
@@ -951,7 +951,7 @@ overflow drops the oldest whole segment and writes an exact `gap` record, leavin
 the 2 MiB gap reserve untouched.
 
 
-## 14. Deployment (binaries and containers)
+## 19. Deployment (binaries and containers)
 
 Two ways to run the same two binaries: from the release matrix on a host, or from
 the container image with the compose stack. Both stamp the build the same way, so
@@ -1236,7 +1236,7 @@ A tagless tree is the normal state between releases, so a red result here is a r
 upgrade recipe, never "no tags available". The release act itself belongs to the owner: do not tag a
 commit to make a test pass.
 
-## 15. The GitReins guard: its scan surface and its test window (TRBL-014)
+## 20. The GitReins guard: its scan surface and its test window (TRBL-014)
 
 The Tier 1 guard is only a signal if a clean tree is green. Two independent defects made every judge
 run report `tier1 FAIL` regardless of the diff, which meant the guard detected nothing:

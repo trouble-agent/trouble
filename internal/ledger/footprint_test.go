@@ -136,7 +136,7 @@ func TestLedgerFootprintIsDocumented(t *testing.T) {
 		t.Fatalf("read docs/operations.md: %v", err)
 	}
 	doc := normalizeWS(body)
-	section := docBetween(doc, "### The ledger test suite's footprint and its cap", "## 13. The research rung")
+	section := docBetween(doc, "### The ledger test suite's footprint and its cap", "## 14. The research rung (SPEC-07)")
 	if section == "" {
 		t.Fatalf("docs/operations.md is missing the ledger-footprint section")
 	}

@@ -37,7 +37,7 @@ guards:
   #   earlier draft of this command   9m55s   EXIT=1  internal/ledger red:
   #                                           TestAckImpliesDurable cut off at
   #                                           322/500 acks (child timeout)
-  #   this command (final list)       see docs/operations.md §15  EXIT=0
+  #   this command (final list)       see docs/operations.md §20  EXIT=0
   #
   # The full suite cannot be made green by a bigger window: its reds are
   # host-measured budgets, not logic (ledger group-commit and per-line
@@ -78,7 +78,7 @@ guards:
     'TestAmortizedThroughput|TestPerLineRegression|TestFsyncWindowBound|TestIngestHarnessThroughput|TestAC19AcceleratorOff|TestDaemonBootsServesHealthAndDrains|TestDaemonRefusesWriteActionsWithAReadToken|TestDaemonRendersAFiredIncidentWithinTwoSeconds|TestShippedExampleConfigBootsToServe|TestShippedExampleConfiguredValidlyBootsOk|TestStandaloneBootHasNoHubRuntimeOrStanza|TestStockBootHealthNeverReadsOKWithARefusedSubsystem|TestStockDefaultsBuildBothOptionalSubsystems|TestLightHubBootQueuesIngestionThroughRedis|TestLightHubDegradedBootServesTheStandalonePath|TestLightHubHealthStanza|TestIncompleteLightHubProfileRefusesTheBoot|TestMissingRulesDirBootsToHealthOK|TestConfigFileInvalidOptInIsRefusedAtBoot|TestConfigFileOptInBuildsTheConfiguredSubsystems|TestMalformedProjectDeclarationRefusesTheBoot|TestAckImpliesDurable|TestE2E'
 
   # Measured wall time of test_command (final skip list): 5m46s at load_avg
-  # 35, EXIT=0 (2026-09-19). docs/operations.md §15 carries the full table
+  # 35, EXIT=0 (2026-09-19). docs/operations.md §20 carries the full table
   # behind this window (full suite red on host budgets at 10m; the lane
   # before the TestAckImpliesDurable / TestE2E exclusions was red at 9m55s).
   # The margin is not round-number comfort: the same suite measured 3x slower
@@ -105,7 +105,7 @@ guards:
     # environmental reason this row exists to remove. Go tests are NOT
     # untested by this: they are gated on every judge run by `test_command`
     # above, and the host-measured harnesses it excludes are owned by QA/E2E
-    # (`go test ./... -count=1` on a quiet host). See docs/operations.md §15.
+    # (`go test ./... -count=1` on a quiet host). See docs/operations.md §20.
     tests: false
 
 # Unwrapped with `guards` above — these were inert under the old shape too.

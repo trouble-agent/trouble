@@ -216,7 +216,7 @@ it. Both are configuration-only clients: no lab layout, board path, repo list or
 model pin is compiled in.
 
 Operational detail (what to look at when one of them misbehaves, and the runbook
-facts that surprise people) lives in `docs/operations.md` §12 and §13.
+facts that surprise people) lives in `docs/operations.md` §12–§18.
 
 ## Run it
 
@@ -283,7 +283,7 @@ assertions). The full 60s load test saturates the host for its duration, so run
 the tree with `-p 1` when it is in the same run — otherwise it can push
 `internal/ledger`'s fsync-window and `internal/scrub`'s µs/KiB assertions over
 their host-measured bounds. Measured numbers, and the reason the §7 latency budget
-is asserted at a host factor, are in `docs/operations.md` §9.
+is asserted at a host factor, are in `docs/operations.md` §13.
 
 ### Smoke checks
 

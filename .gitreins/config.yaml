@@ -119,7 +119,11 @@ evaluator:
   # 1.5M at 250 iters). One-chore raise per the gitreins-tier2-iteration-cap-exceeded answer; probe
   # pending a normal-burn settle (a passing run's total is a floor, not a rate).
   max_iterations: 250
-  max_time: "30m"
+  # Time cap 30m->45m (tick 2026-09-24-15-28-40): tier2 INCOMPLETE "Cap exceeded: Time cap (30m)
+  # exceeded" on TRBL-072 (CI workflow) after a clean criterion; raised one rung per the
+  # gitreins-tier2-time-cap-exceeded pre-solve answer (evaluator.max_time is the only max_time in
+  # this config; no pipeline.stages[tier2] override exists, so this is the effective cap).
+  max_time: "45m"
   max_input_tokens: "3M"
   max_output_tokens: "384k"
   static_analysis_diagnostics: false

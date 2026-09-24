@@ -128,4 +128,4 @@ carried), so `dedup_hits` stays 0 for that dialect.
 
 SPEC-13 §2.2's four operator verbs (`trouble hub status|archive|dedup|drain`) are NOT mounted — the
 CLI answers `unknown command "hub"` (TRBL-065), so a pre-migration drain has no supported path.
-`docs/operations.md` §14 still describes the hub runtime as unbuilt (TRBL-064).
+`docs/operations.md` §19 still describes the hub runtime as unbuilt (TRBL-064).

@@ -183,7 +183,7 @@ func TestCompatMatrixDivergences(t *testing.T) {
 	}
 }
 
-// readOperationsDoc returns docs/operations.md, whose §9 carries the sentinel
+// readOperationsDoc returns docs/operations.md, whose §13 carries the sentinel
 // operating records (the load-test table, the steady-resident-set record and the
 // compat document's provenance).
 func readOperationsDoc(t *testing.T) string {
@@ -199,7 +199,7 @@ func readOperationsDoc(t *testing.T) string {
 // document is "regenerated from the same tables by `make compat-matrix`"; this
 // repository ships no build layer, so as shipped that sentence named a target that
 // cannot run and nothing said so. The document is hand-maintained and enforced by
-// the drift checks instead, and both its own header and docs/operations.md §9 have
+// the drift checks instead, and both its own header and docs/operations.md §13 have
 // to say that: the five check names and the absent target are asserted in both
 // places, and the "no build layer" claim is checked against the filesystem rather
 // than trusted — a root Makefile appearing while the prose still says there is
@@ -215,7 +215,7 @@ func TestCompatDocProvenance(t *testing.T) {
 	}
 	for _, want := range []string{"hand-maintained", "no `Makefile`"} {
 		if !strings.Contains(ops, want) {
-			t.Errorf("docs/operations.md §9 does not record the compat document's provenance: missing %q", want)
+			t.Errorf("docs/operations.md §13 does not record the compat document's provenance: missing %q", want)
 		}
 	}
 	checks := []string{
@@ -230,7 +230,7 @@ func TestCompatDocProvenance(t *testing.T) {
 			t.Errorf("docs/sentinel-compat.md does not name the drift check %s it is enforced by", name)
 		}
 		if !strings.Contains(ops, name) {
-			t.Errorf("docs/operations.md §9 does not name the drift check %s", name)
+			t.Errorf("docs/operations.md §13 does not name the drift check %s", name)
 		}
 	}
 	// The claim is falsifiable, not asserted on trust: §7's generator would be a

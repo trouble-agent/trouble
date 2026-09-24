@@ -372,7 +372,7 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 			canary.LastEventAgeS, interval.Seconds())
 	}
 	// The reading is recorded where the rest of the sentinel operating notes
-	// live, and the record names this test the way the other §9 rows name theirs,
+	// live, and the record names this test the way the other §13 rows name theirs,
 	// so the documented antecedent cannot drift away from the pinned one.
 	doc := readOperationsDoc(t)
 	for _, want := range []string{
@@ -381,7 +381,7 @@ func TestCanarySeenInTheLedgerSourceIndex(t *testing.T) {
 		"`Evidence.CanarySeen`",
 	} {
 		if !strings.Contains(doc, want) {
-			t.Errorf("docs/operations.md §9 does not record the canary antecedent: missing %q", want)
+			t.Errorf("docs/operations.md §13 does not record the canary antecedent: missing %q", want)
 		}
 	}
 }

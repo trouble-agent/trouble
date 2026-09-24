@@ -27,7 +27,7 @@ config_path = "/etc/trouble/config.toml"
 # The mint writes the line itself — seed with
 #   trouble dashboard token create --label compose --scopes read \
 #     --output-env /data/state/trouble.env
-# (docs/operations.md §14 walks the whole sequence; --output-env replaces the
+# (docs/operations.md §19 walks the whole sequence; --output-env replaces the
 # TROUBLE_DASHBOARD_TOKEN line and preserves every other line).
 environment_file = "/data/state/trouble.env"
 

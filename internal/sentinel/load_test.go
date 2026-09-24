@@ -68,7 +68,7 @@ const (
 
 // §7's Memory paragraph: "steady RSS <= 80MB after 1,000,000 events" on the
 // trivial path. steadyRSSEvents is that scale and steadyRSSBound that budget;
-// both are tied to the §9 table in docs/operations.md by
+// both are tied to the §13 table in docs/operations.md by
 // TestMemoryBoundsMatchOperationsDoc.
 const (
 	steadyRSSEvents = 1_000_000
@@ -874,7 +874,7 @@ var loadClient = &http.Client{
 // bound. §7's sentence names a `TestMain` for this; it ships as this named test
 // instead, because a `TestMain` would pay the measurement on every invocation of
 // the package, including the -race and -short builds where a resident-set number
-// says nothing (docs/operations.md §9).
+// says nothing (docs/operations.md §13).
 func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	if raceEnabled {
 		t.Skip("RSS growth is meaningless under -race instrumentation")
@@ -942,7 +942,7 @@ func TestSteadyRSSAfterManyEvents(t *testing.T) {
 	}
 }
 
-// operationsDocPath is the shipped operations guide (§9 "Load test").
+// operationsDocPath is the shipped operations guide (§13 "Load test").
 const operationsDocPath = "../../docs/operations.md"
 
 // docTableRow returns the two cells after the label of a `| label | a | b |`
@@ -963,11 +963,11 @@ func docTableRow(tb testing.TB, path, label string) (string, string) {
 	return "", ""
 }
 
-// docMB renders a byte bound the way §9's tables state it (the constants' binary
+// docMB renders a byte bound the way §13's tables state it (the constants' binary
 // megabyte: `1MB = 1<<20` bytes).
 func docMB(n int64) string { return fmt.Sprintf("%dMB", n>>20) }
 
-// docCount renders an event count with thousands separators, the shape §9's
+// docCount renders an event count with thousands separators, the shape §13's
 // steady-resident-set table uses.
 func docCount(n int) string {
 	s := strconv.Itoa(n)
@@ -981,7 +981,7 @@ func docCount(n int) string {
 	return b.String()
 }
 
-// TestLoadBoundsMatchOperationsDoc ties §9's load-test table to the bounds
+// TestLoadBoundsMatchOperationsDoc ties §13's load-test table to the bounds
 // load_test.go actually asserts, the way TestDecompressedCapBoundary ties the
 // compat cap row to the enforced cap. The paragraph this table replaced said
 // the test "asserts a p99 <= 250ms" while loadP99HostBudget was already 1s — a
@@ -1004,10 +1004,10 @@ func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
 	for _, tc := range cases {
 		gotAsserted, gotPinned := docTableRow(t, operationsDocPath, tc.label)
 		if gotAsserted != tc.asserted {
-			t.Errorf("§9 row %q asserts %q, but load_test.go asserts %q", tc.label, gotAsserted, tc.asserted)
+			t.Errorf("§13 row %q asserts %q, but load_test.go asserts %q", tc.label, gotAsserted, tc.asserted)
 		}
 		if gotPinned != tc.pinned {
-			t.Errorf("§9 row %q states §7's threshold as %q, but the constant renders %q", tc.label, gotPinned, tc.pinned)
+			t.Errorf("§13 row %q states §7's threshold as %q, but the constant renders %q", tc.label, gotPinned, tc.pinned)
 		}
 	}
 	// The §7 sentence the table replaced must not come back: the doc has to name
@@ -1017,11 +1017,11 @@ func TestLoadBoundsMatchOperationsDoc(t *testing.T) {
 		t.Fatalf("read %s: %v", operationsDocPath, err)
 	}
 	if strings.Contains(string(doc), "p99 ≤ 250ms") {
-		t.Error("§9 still states a 250ms p99 the test does not assert")
+		t.Error("§13 still states a 250ms p99 the test does not assert")
 	}
 }
 
-// TestMemoryBoundsMatchOperationsDoc ties §9's steady-resident-set table to the
+// TestMemoryBoundsMatchOperationsDoc ties §13's steady-resident-set table to the
 // constants and to §7's Memory paragraph, the way
 // TestLoadBoundsMatchOperationsDoc ties the load table. §7's sentence names a
 // `TestMain` after 1,000,000 events; the record has to state the shipped shape (a
@@ -1041,10 +1041,10 @@ func TestMemoryBoundsMatchOperationsDoc(t *testing.T) {
 	for _, tc := range cases {
 		gotShipped, gotSentence := docTableRow(t, operationsDocPath, tc.label)
 		if gotShipped != tc.shipped {
-			t.Errorf("§9 row %q asserts %q, but load_test.go asserts %q", tc.label, gotShipped, tc.shipped)
+			t.Errorf("§13 row %q asserts %q, but load_test.go asserts %q", tc.label, gotShipped, tc.shipped)
 		}
 		if gotSentence != tc.sentence {
-			t.Errorf("§9 row %q states §7's Memory paragraph as %q, but the constant renders %q", tc.label, gotSentence, tc.sentence)
+			t.Errorf("§13 row %q states §7's Memory paragraph as %q, but the constant renders %q", tc.label, gotSentence, tc.sentence)
 		}
 	}
 }

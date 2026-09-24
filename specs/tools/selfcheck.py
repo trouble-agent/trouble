@@ -72,17 +72,31 @@ def read(name: str) -> str:
         return fh.read()
 
 
+def meta_line(doc: str, field: str, sid: str) -> str:
+    """Value of a spec's top-level `field:` metadata line, or a clean failure.
+
+    re.search() returns None when the marker line is absent. Before this helper
+    the gate dereferenced that None and crashed with AttributeError — a spec
+    file missing `Consumed types:` took the whole gate down instead of failing
+    the suite. A missing marker is a CLEAN failure naming the file (via sid)
+    and the marker; the empty return lets the remaining checks keep running.
+    """
+    m = re.search(rf"^{re.escape(field)}:\s*(.*)$", doc, re.M)
+    if m is None:
+        fail(f"{sid}: metadata line missing: {field}:")
+        return ""
+    return m.group(1)
+
+
 def main() -> int:
     names = sorted(n for n in os.listdir(SPECS) if n.endswith(".md"))
-    expected = {"SPEC-INDEX.md", "SPEC-TYPES.md"} | {f"{s}-{t}.md" for s, t in
-                [(f"SPEC-{i:02d}", "") for i in range(1, 14)]}
     docs = {n: read(n) for n in names}
     types_doc = docs["SPEC-TYPES.md"]
     index_doc = docs["SPEC-INDEX.md"]
 
     # ---------- inventories -------------------------------------------------
     types = set(re.findall(r"^type\s+([A-Za-z_]\w*)\s", types_doc, re.M))
-    type_defs = defaultdict(list)
+    type_defs: defaultdict[str, list[str]] = defaultdict(list)
     for m in re.finditer(r"^type\s+([A-Za-z_]\w*)\s+(\w+)", types_doc, re.M):
         type_defs[m.group(1)].append(m.group(2))
     for t, kinds in type_defs.items():
@@ -105,7 +119,7 @@ def main() -> int:
     ac_rows: dict[str, str] = {}
     for m in re.finditer(r"^\|\s*(AC-\d+)\s*\|(.*?)\|\s*(SPEC[-0-9,\s]+|SPEC-[^|]*?)\s*\|\s*([BPD])\s*\|", index_doc, re.M):
         ac_rows[m.group(1)] = m.group(4)
-    ac_matrix_specs = defaultdict(set)
+    ac_matrix_specs: defaultdict[str, set[str]] = defaultdict(set)
     for m in re.finditer(r"^\|\s*(AC-\d+)\s*\|.*?\|\s*([^|]*)\|\s*[BPD]\s*\|", index_doc, re.M):
         for s in re.findall(r"SPEC-\d+", m.group(2)):
             ac_matrix_specs[m.group(1)].add(s)
@@ -123,14 +137,14 @@ def main() -> int:
         for field in META:
             if not re.search(rf"^{field}:", doc, re.M):
                 fail(f"{sid}: metadata field missing: {field}")
-        m = re.search(r"^Spec:\s*(\S+)", doc, re.M)
-        if not m or m.group(1) != sid:
+        spec_m = re.search(r"^Spec:\s*(\S+)", doc, re.M)
+        if not spec_m or spec_m.group(1) != sid:
             fail(f"{sid}: metadata Spec: mismatch")
-        area = re.search(r"^Area prefix:\s*TROUBLE-([A-Z]+)", doc, re.M)
-        if not area:
+        area_m = re.search(r"^Area prefix:\s*TROUBLE-([A-Z]+)", doc, re.M)
+        if area_m is None:
             fail(f"{sid}: Area prefix missing")
             continue
-        area = area.group(1)
+        area = area_m.group(1)
 
         # sections 1..8 in order
         heads = re.findall(r"^## (\d+)\.\s*(.+)$", doc, re.M)
@@ -140,12 +154,15 @@ def main() -> int:
             if want.lower() not in title.lower():
                 fail(f"{sid}: section {num} is '{title}', expected '{want}'")
 
-        # step 1 — consumed types resolve
-        cons = [x.strip() for x in re.search(r"^Consumed types:\s*(.*)$", doc, re.M).group(1).split(",") if x.strip() and x.strip() != "—"]
+        # step 1 — consumed types resolve. The metadata lines go through
+        # meta_line(), so a spec missing the marker fails cleanly instead of
+        # dereferencing the None that re.search() returns for an absent line.
+        cons = [x.strip() for x in meta_line(doc, "Consumed types", sid).split(",")
+                if x.strip() and x.strip() != "—"]
         miss = [c for c in cons if c not in types]
         if miss:
             fail(f"{sid}: consumed types not in SPEC-TYPES: {miss}")
-        local = [x.strip() for x in re.search(r"^Local types:\s*(.*)$", doc, re.M).group(1).split(",") if x.strip()]
+        local = [x.strip() for x in meta_line(doc, "Local types", sid).split(",") if x.strip()]
         clash = [c for c in local if c in types]
         if clash:
             warn(f"{sid}: local type name also a shared type name: {clash}")
@@ -156,7 +173,10 @@ def main() -> int:
             if code not in catalog:
                 fail(f"{sid}: uses {code} which is not in the SPEC-TYPES catalog")
                 continue
-            a, num = re.match(r"TROUBLE-([A-Z]+)-(\d{3})", code).groups()
+            code_m = re.match(r"TROUBLE-([A-Z]+)-(\d{3})", code)
+            if code_m is None:  # codes come from the same regex shape above; guard keeps the deref honest
+                continue
+            a, num = code_m.groups()
             if a in ranges and not (ranges[a][0] <= int(num) <= ranges[a][1]):
                 fail(f"{sid}: {code} outside the {a} range {ranges[a]}")
         own = {c for c in used if c.startswith(f"TROUBLE-{area}-")}
@@ -191,7 +211,7 @@ def main() -> int:
             warn(f"{sid}: deferred term '{m.group(0)}' without a hand-off marker: {lines[ln].strip()[:120]}")
 
         # ACs in metadata must exist in the matrix and name this spec
-        acs = re.findall(r"AC-\d+", re.search(r"^ACs:\s*(.*)$", doc, re.M).group(1))
+        acs = re.findall(r"AC-\d+", meta_line(doc, "ACs", sid))
         coverage[sid] = acs
         for ac in acs:
             if ac not in ac_matrix_specs:
@@ -232,12 +252,12 @@ def main() -> int:
     print("=" * 78)
     print(f"{'file':<28}{'bytes':>9}{'lines':>8}{'## N.':>7}  ACs")
     total = 0
-    for n in names:
-        b = len(docs[n].encode())
+    for name in names:
+        b = len(docs[name].encode())
         total += b
-        secs = len(re.findall(r"^## \d+\.", docs[n], re.M))
-        sid = n.split("-")[0] + "-" + n.split("-")[1] if n.startswith("SPEC-") else ""
-        print(f"{n:<28}{b:>9}{len(docs[n].splitlines()):>8}{secs:>7}  {', '.join(coverage.get(sid, []))[:60]}")
+        secs = len(re.findall(r"^## \d+\.", docs[name], re.M))
+        sid = name.split("-")[0] + "-" + name.split("-")[1] if name.startswith("SPEC-") else ""
+        print(f"{name:<28}{b:>9}{len(docs[name].splitlines()):>8}{secs:>7}  {', '.join(coverage.get(sid, []))[:60]}")
     print("-" * 78)
     print(f"files: {len(names)}   bytes: {total}   shared types: {len(types)}   error codes: {len(catalog)}   areas: {len(ranges)}")
     print()

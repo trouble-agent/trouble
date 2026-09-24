@@ -4,7 +4,7 @@
 an embedded Sentry-compatible sentinel, a dedup core, an append-only audit ledger, a ladder that
 plays and researches fixes, an issue desk, a flow lane, a dashboard and a skill loop.
 
-This repository is built spec-first: `SPECS-BRIEF.md` and `specs/SPEC-01..12 + SPEC-TYPES +
+This repository is built spec-first: `SPECS-BRIEF.md` and `specs/SPEC-01..13 + SPEC-TYPES +
 SPEC-INDEX` are the authority, and code lands against them.
 
 ## What exists today
@@ -56,6 +56,16 @@ fragments with their stale-render guard, server-rendered pages for incidents, gr
 breakers, and the §2.9 budget discipline — no handler opens a ledger file, fragments fit an 8 KB cap,
 and compression concurrency is bounded. Import rule: stdlib + `internal/types`, with every subsystem
 arriving through `Deps`.
+
+`internal/hub` — the light-hub runtime (SPEC-13): the second server profile next to the
+zero-dependency standalone default. Redis streams buffer ingestion into the SAME group-commit
+ledger writer (the ledger file stays the only durable record; ack-after-fsync), a
+phase-aware dedup gate keys on the idempotency key, and closed ledger generations archive
+to DuckBrain (content-derived markers, drop only after verified export). The runtime
+supervises itself: a lost or failover-Redis is detected and rewired without loss — senders
+see 429 + `Retry-After` while the daemon keeps serving, and a fresh server on the same
+address is adopted in seconds. Profile and Redis options are validated at boot; standalone
+builds carry no Redis dependency in their hot path.
 
 ## The scrubbing contract
 
@@ -228,6 +238,7 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
 * `specs/SPEC-03-sensors.md` — the detection plane, in full.
 * `specs/SPEC-09-issues.md` — the issue desk, in full.
 * `specs/SPEC-11-skills.md` — the skill loop, in full.
+* `specs/SPEC-13-server-profiles.md` — server profiles: standalone | light-hub.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
 ## Getting the source

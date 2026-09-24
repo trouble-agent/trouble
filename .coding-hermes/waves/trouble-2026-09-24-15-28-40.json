@@ -11,7 +11,7 @@
       "base_sha": "68164e6",
       "brief": "/tmp/trouble-t324-brief-TRBL-072.txt",
       "scope": ".github/workflows/ci.yml (new) — build/vet/short-test/selfcheck",
-      "gitreins": "tier2 judge job-d68f0ffb INCOMPLETE on 30m time cap -> cap raised 45m (1654ac7) -> re-judge job-94a55511"
+      "gitreins": "tier2 judge job-94a55511 COMPLETE - criterion verified (ci.yml yaml-valid, push+PR triggers, 6 local checks pass)"
     },
     {
       "task_id": "TRBL-068",
@@ -41,7 +41,12 @@
       "gitreins": "tier2 judge job-a3373c59 COMPLETE criterion verified"
     }
   ],
-  "merge_order": ["TRBL-067", "TRBL-068", "TRBL-072", "TRBL-071"],
+  "merge_order": [
+    "TRBL-067",
+    "TRBL-068",
+    "TRBL-072",
+    "TRBL-071"
+  ],
   "held_rows": {
     "TRBL-070": "complexity 1 README fix — foreman-direct in main tree after wave merge (conflict-free with wave scopes)",
     "TRBL-069": "shares specs/tools/selfcheck.py with TRBL-068 — serial follow-up tick, not waveable",

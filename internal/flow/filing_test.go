@@ -217,7 +217,7 @@ func TestDedupRowsScaling(t *testing.T) {
 		want int
 	}{
 		{1, 0, 1000},   // no /proc/loadavg (load 0) on reference I/O → the spec shape
-		{1, 3.9, 804},   // int(1000/1.24375): mild contention decays continuously
+		{1, 3.9, 804},  // int(1000/1.24375): mild contention decays continuously
 		{1, 16, 500},   // 1000/2: load alone, continuous with the spec shape
 		{0.5, 0, 1000}, // a FASTER-than-reference host is clamped to the reference — never tightened
 		{2, 0, 500},    // 1000/2: a 2× slower disk halves the fixture at zero load

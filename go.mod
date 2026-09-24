@@ -11,5 +11,6 @@ require (
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	go.uber.org/atomic v1.11.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
+	go.uber.org/atomic v1.12.0 // indirect
 )

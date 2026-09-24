@@ -1,0 +1,33 @@
+# Tool configuration only — nothing in this repository is a Python package, so
+# there is no [build-system] and no package metadata. The Go tooling owns the
+# build (see Makefile); this file exists so the small Python tool surface is
+# type-checked and linted the same way everywhere (see tests/e2e/spec_suite_battery.sh).
+#
+# The Python surface is exactly three files: the spec gate (selfcheck.py), the
+# AC evidence scanner (ac_matrix.py) and the specs-review page builder. They are
+# scoped here by explicit path so a stray .py elsewhere can neither opt itself
+# in nor fail the gate.
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+    "specs/tools/selfcheck.py",
+    "specs/tools/ac_matrix.py",
+    "docs/build_specs_review.py",
+]
+strict = true
+
+# build_specs_review.py imports the third-party `markdown` package, which ships
+# no type stubs. Everything else stays strict; only this import is treated as Any.
+[[tool.mypy.overrides]]
+module = "markdown"
+ignore_missing_imports = true
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Ruff's default rule set (E4/E7/E9 + F) plus import ordering (I) and missing
+# type annotations (ANN). E501 is deliberately not enforced: the tools carry
+# long regex literals and build_specs_review.py embeds a CSS block as data.
+select = ["E4", "E7", "E9", "F", "I", "ANN"]

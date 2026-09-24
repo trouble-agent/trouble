@@ -10,8 +10,11 @@
 #            row per matrix row and reaches the matrix's highest AC — a hardcoded range fails)
 #   check 3  specs/tools/ac_matrix.py exits 0, lists AC-31, finds no spec-declares-AC mismatch
 #   check 4  matrix -> metadata drift (selfcheck step 2b) reports no failure and no UNMAPPED row
+#   check 5  the Python tool surface stays type-clean: mypy (strict, configured in
+#            pyproject.toml) and ruff pass on the repo's Python files. Skips cleanly
+#            when mypy/ruff are not on PATH (CI containers may not carry them).
 #
-# Exit 0 = all four checks passed; non-zero at the first failure.
+# Exit 0 = all checks passed (check 5 may SKIP); non-zero at the first failure.
 
 set -euo pipefail
 
@@ -103,4 +106,35 @@ if grep -qE '^  x ' "$OUT"; then
 fi
 pass "$CURRENT"
 
-printf '\nRESULT: PASS — %s/4 checks green\n' "$PASSED"
+# ---------------------------------------------------------------- check 5
+# Type/lint enforcement on the repo's Python surface, driven by pyproject.toml
+# ([tool.mypy] scopes the files and strictness; ruff's select is configured there
+# too). Kept in the battery — the same script the QA lane already runs — so a
+# regression cannot land silently. SKIP (not PASS/FAIL) when the tools are not
+# installed: the battery's other checks must stay runnable in a bare container.
+CURRENT="the Python tool surface is type-clean (mypy) and lint-clean (ruff)"
+CURRENT_TOOL="mypy --cache-dir \"\$TMP/mypy\" && ruff check <python files>"
+MYPY_BIN="$(command -v mypy || true)"
+RUFF_BIN="$(command -v ruff || true)"
+if [ -z "$MYPY_BIN" ] && [ -z "$RUFF_BIN" ]; then
+    printf '  SKIP  %s (mypy and ruff not found on PATH)\n' "$CURRENT"
+else
+    PY_FILES="specs/tools/selfcheck.py specs/tools/ac_matrix.py docs/build_specs_review.py"
+    if [ -n "$MYPY_BIN" ]; then
+        set +e
+        "$MYPY_BIN" --cache-dir "$TMP/mypy" >"$TMP/mypy.txt" 2>&1
+        rc=$?
+        set -e
+        [ "$rc" -eq 0 ] || { cat "$TMP/mypy.txt" >&2; fail "$CURRENT: mypy exited $rc (expected 0)"; }
+    fi
+    if [ -n "$RUFF_BIN" ]; then
+        set +e
+        "$RUFF_BIN" check $PY_FILES >"$TMP/ruff.txt" 2>&1
+        rc=$?
+        set -e
+        [ "$rc" -eq 0 ] || { cat "$TMP/ruff.txt" >&2; fail "$CURRENT: ruff exited $rc (expected 0)"; }
+    fi
+    pass "$CURRENT"
+fi
+
+printf '\nRESULT: PASS — %s/5 checks green\n' "$PASSED"

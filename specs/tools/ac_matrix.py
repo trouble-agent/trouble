@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+from typing import TypedDict
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 INDEX = os.path.join(REPO, "specs", "SPEC-INDEX.md")
@@ -43,9 +44,40 @@ SPEC_FILE_RE = re.compile(r"^SPEC-(\d+|TYPES|INDEX)-")
 SKIP_DIRS = {".git", "node_modules", ".worktrees", "bin", "vendor", ".zz-tmp"}
 
 
-def parse_matrix() -> dict[str, dict]:
+class MatrixRow(TypedDict):
+    text: str
+    specs: list[str]
+    status: str
+
+
+class SpecHit(TypedDict):
+    file: str
+    line: int
+    text: str
+    kind: str
+    test: str
+
+
+class ReportRow(TypedDict):
+    ac: str
+    status: str
+    specs: list[str]
+    refs: int
+    files: list[str]
+    tests: list[str]
+    owners_without_ref: list[str]
+    in_scope_evidence: bool
+
+
+class Report(TypedDict):
+    rows: list[ReportRow]
+    spec_headers: dict[str, list[str]]
+    mismatches: list[str]
+
+
+def parse_matrix() -> dict[str, MatrixRow]:
     """Return {AC-nn: {text, specs, status}} from SPEC-INDEX §3.2."""
-    out: dict[str, dict] = {}
+    out: dict[str, MatrixRow] = {}
     with open(INDEX, encoding="utf-8") as fh:
         for line in fh:
             m = MATRIX_ROW_RE.match(line.rstrip("\n"))
@@ -74,9 +106,9 @@ def parse_spec_ac_headers() -> dict[str, list[str]]:
     return out
 
 
-def scan_tree() -> dict[str, list[dict]]:
+def scan_tree() -> dict[str, list[SpecHit]]:
     """Return {AC-nn: [{file, line, text, kind}]} for every reference in the tree."""
-    hits: dict[str, list[dict]] = {}
+    hits: dict[str, list[SpecHit]] = {}
     for root, dirs, files in os.walk(REPO):
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for name in files:
@@ -100,7 +132,7 @@ def scan_tree() -> dict[str, list[dict]]:
                             recent_test = None
                         for ac in set(AC_RE.findall(line)):
                             key = f"AC-{ac}"
-                            attrib = "" 
+                            attrib = ""
                             kind = "ref"
                             if is_test_file and recent_test is not None:
                                 kind = "test"
@@ -113,12 +145,12 @@ def scan_tree() -> dict[str, list[dict]]:
     return hits
 
 
-def build_report() -> dict:
+def build_report() -> Report:
     matrix = parse_matrix()
     headers = parse_spec_ac_headers()
     hits = scan_tree()
 
-    rows = []
+    rows: list[ReportRow] = []
     for ac in sorted(matrix, key=lambda a: int(a.split("-")[1])):
         owners = matrix[ac]["specs"]
         refs = hits.get(ac, [])
@@ -139,7 +171,7 @@ def build_report() -> dict:
         )
 
     # Specs that declare ACs but whose ACs the matrix assigns elsewhere.
-    mismatches = []
+    mismatches: list[str] = []
     for stem, acs in headers.items():
         if stem.startswith("SPEC-INDEX") or stem.startswith("SPEC-TYPES"):
             continue  # the index owns the matrix and the types file the substrate

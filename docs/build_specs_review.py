@@ -8,7 +8,13 @@ Run from anywhere; the repository root is derived from this file's location, so 
 script carries no host path of its own and no checkout location is written into the
 generated HTML.
 """
-import glob, html as H, markdown, os, re, subprocess
+import glob
+import html as H
+import os
+import re
+import subprocess
+
+import markdown
 
 DOCS = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(DOCS)
@@ -20,7 +26,7 @@ ORDER = [os.path.join(SPECS, 'SPEC-INDEX.md')] + \
         sorted(glob.glob(os.path.join(SPECS, 'SPEC-1*.md')))
 
 
-def repo_state():
+def repo_state() -> str:
     """How the renderer's own checkout looked when this page was generated.
 
     Deliberately NOT "the HEAD revision": a generated page cannot name the
@@ -42,19 +48,23 @@ def repo_state():
 md = markdown.Markdown(extensions=['tables', 'fenced_code', 'toc', 'codehilite'],
                        extension_configs={'codehilite': {'guess_lang': False}})
 
-def slug(p):
+
+def slug(p: str) -> str:
     return os.path.basename(p).replace('.md', '').lower().replace('_', '-')
 
+
 # pre-scan: first heading of each file for the TOC
-toc_entries = []
+toc_entries: list[tuple[str, str, str]] = []
 for p in ORDER:
-    txt = open(p).read()
+    with open(p, encoding='utf-8') as fh:
+        txt = fh.read()
     m = re.search(r'^#\s+(.+)$', txt, re.M)
     toc_entries.append((slug(p), os.path.basename(p), m.group(1) if m else os.path.basename(p)))
 
-sections = []
+sections: list[str] = []
 for p in ORDER:
-    txt = open(p).read()
+    with open(p, encoding='utf-8') as fh:
+        txt = fh.read()
     md.reset()
     body = md.convert(txt)
     # resolve relative links to other spec files -> anchors within this page
@@ -116,5 +126,6 @@ Review order suggestion: SPEC-INDEX (scope + cut line) → any SPEC-n (each is s
 </div></body></html>"""
 
 out = os.path.join(DOCS, 'specs-review.html')
-open(out, 'w').write(page)
+with open(out, 'w', encoding='utf-8') as fh:
+    fh.write(page)
 print(f"wrote {out} ({os.path.getsize(out)//1024} KB, {len(ORDER)} specs)")

@@ -54,5 +54,15 @@
   },
   "push_status": "BLOCKED per project law 2 — local main is ahead of origin/main with co-author-trailer commits; publish/push awaits Bane's history-rewrite decision",
   "status": "done",
-  "recovery_note": "tick 2026-09-24-15-28-40 COMPLETE: all 4 workers merged (067->315ef9e, 068->7baea22, 072->1c9754f, 071->94431d3); rows closed 83b0b85; TRBL-070 foreman-direct 7d03e29 + follow-up dc21571 (README/gitreins section refs); merged-tree gates green (build/vet/selfcheck PASS/battery 5/5, 21/21 pkgs with the fsync gate green on quiet retry 7.4s, app+scrub green on sequential re-run); wave worktrees reaped; wt/* branches left in place as evidence (branch -d tripped an approval gate on the api_server surface)."
+  "recovery_note": "tick 2026-09-24-15-28-40 COMPLETE: all 4 workers merged (067->315ef9e, 068->7baea22, 072->1c9754f, 071->94431d3); rows closed 83b0b85; TRBL-070 foreman-direct 7d03e29 + follow-up dc21571 (README/gitreins section refs); merged-tree gates green (build/vet/selfcheck PASS/battery 5/5, 21/21 pkgs with the fsync gate green on quiet retry 7.4s, app+scrub green on sequential re-run); wave worktrees reaped; wt/* branches left in place as evidence (branch -d tripped an approval gate on the api_server surface).",
+  "finished_at": "2026-09-25T12:05:22Z",
+  "outcomes": {
+    "TRBL-067": "merged 315ef9e; tier2 judge job-4b624370 COMPLETE",
+    "TRBL-068": "merged 7baea22; tier2 judge job-071d1117 COMPLETE",
+    "TRBL-072": "merged 1c9754f; tier2 judge job-94a55511 COMPLETE",
+    "TRBL-071": "merged 94431d3; tier2 judge job-a3373c59 COMPLETE",
+    "board": "rows closed 83b0b85; TRBL-070 foreman-direct 7d03e29",
+    "gates": "merged-tree gates green per recovery_note",
+    "worktrees": "4 wave worktrees reaped; wt/* branches kept as evidence"
+  }
 }

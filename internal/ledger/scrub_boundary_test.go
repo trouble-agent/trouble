@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -68,6 +69,7 @@ func filesContain(t *testing.T, root, needle string) bool {
 
 // TestScanBudget: ≤50 µs per 4 KiB payload (SPEC-01 §4.2).
 func TestScanBudget(t *testing.T) {
+	loadfence.SkipUnderCIIfLoadCalibrated(t, "MandatoryScan ≤50 µs per 4 KiB payload (SPEC-01 §4.2)")
 	payload := make([]byte, 4096)
 	for i := range payload {
 		payload[i] = byte('a' + i%26)

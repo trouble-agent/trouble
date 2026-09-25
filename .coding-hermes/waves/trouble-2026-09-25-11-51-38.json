@@ -32,8 +32,9 @@
   },
   "recovery_of": "trouble-2026-09-24-15-28-40 (closed: finished_at set, commit 170f6a0 - all four prior workers already merged/judged/closed before this tick)",
   "outcomes": {
-    "INT-CI-001": "LANDED: worker e881759, merged 03f6941, merged-tree gates green, row closed 7245c8c, pushed; tier2 judge re-dispatched on 60m cap (job-c3cab592)"
+    "INT-CI-001": "LANDED: worker e881759, merged 03f6941, merged-tree gates green, row closed 7245c8c",
+    "TRBL-074": "LANDED: worker 2cff73e, merged b67c860, merged-tree gates green (build/vet/gofmt/sentinel 120s ok/lifecycle key tests ok/selfcheck PASS) at load 26.9, row closed 068f7f7"
   },
-  "recovery_note": "Recovery of THIS wave at tick end 2026-09-25T13:42:54Z: only TRBL-074 outstanding - worker still in flight (config+sentinel dedup implemented incl. registry key + SPEC-04 edit + tests; verify loop slowed by host load 26-32; one red TestLightHubBootQueuesIngestionThroughRedis at load 32 suspected load artifact). INT-CI-001 is merged+closed - verify only TRBL-074 on the next recovery pass. Branch wt/TRBL-074 worktree ~/worktrees/trouble-TRBL-074.",
-  "finished_at": ""
+  "recovery_note": "Wave COMPLETE 2026-09-25T13:51:51Z: both workers merged serially (INT-CI-001 first), gates re-run on each merged tree, rows closed with their own worker hashes, board+manifest committed and pushed. Tier2 judges run async post-merge (INT-CI-001 job-c3cab592 after 45m->60m cap raise; TRBL-074 dispatched at close).",
+  "finished_at": "2026-09-25T13:51:51Z"
 }

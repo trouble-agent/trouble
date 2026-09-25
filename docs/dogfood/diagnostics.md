@@ -282,3 +282,53 @@ here as a number.
   twice (`deadline_exceeded`), recorded as TRBL-011. The repo also has no git
   remote, so even a successful spawn could not have cloned it — a fresh install
   starts from an archive today.
+
+---
+
+# 2026-09-25 — compose container quickstart (append)
+
+## What was driven, and how it works
+
+The compose stack (trouble distroless + redis) is the "container host" profile of the
+same daemon: one config file bind-mounted read-only, state in a named volume the
+distroless uid 65532 owns, a dashboard token minted from a one-shot container INTO the
+volume (because every outside write path fails the 0600/uid rules by design). The
+ingest zone is decided by the socket peer, not the bind: through the published port
+every request is "lan", so only the X-Sentry-Auth header form is admitted — the
+query-form refusal is the bind matrix working, not a bug.
+
+## Why the traps exist (learned this run)
+
+- **`degraded` on a healthy container is structural.** The distroless image has no
+  systemd, so the timers sensor can never be non-degraded. The health contract reports
+  honestly; what is missing is one operator-facing sentence (TRBL-077).
+- **Sensor noise in a fresh ledger is the standalone rule set meeting a host with no
+  substrate.** Sensors probe and watch; a container gives them an overlay root and no
+  journal, so they fire "observation" events that suppression marks noise. The
+  substrate self-detection the PSI boot probe already has would kill the noise class
+  (TRBL-078).
+- **No event-level dedup on the on-ramp** (TRBL-074, still open): the group record is
+  the only fold, keyed on first-seen; a retrying reporter multiplies event records.
+  The hub profile's idempotency-key gate is the fix direction.
+
+## What held (the value case)
+
+- The redis outage drill: stop redis → health answers, 6 events accepted 200 across
+  the window, restart → all events in the ledger, zero loss, groups/incidents formed.
+  The SPEC-13 contract the compose file header promises is real.
+- Auth is fail-closed on every probed surface (no/bad dashboard token → 401; bad
+  ingest secret → 401 + X-Sentry-Error code).
+- Dashboard serves the ingested truth in ~1-4ms per page.
+- Ingest latency is the durability window: 288ms warm / 545ms cold per event
+  (ack-after-fsync, fsync_window_ms=200) — the number that buys the durability
+  promise.
+
+## Harness lessons for the next runner
+
+- Kill leftover native `troubled` before compose (ports 7643/7644 collide; the 09-24
+  run's daemon lived 19h past its "clean stop" — TRBL-079).
+- Bunker docker = rootless on a bunker-specific socket; DOCKER_HOST must point at
+  /run/bunker/<agent>/docker.sock and `systemctl --user start docker` cannot work
+  (TRBL-080 has the full recipe + numbers: clone→build 120s→up 7s→healthy→proof).
+- A board append's row-count assert must ignore pre-existing blank lines: 97 physical
+  lines were 96 real rows here; count JSON rows, not lines.

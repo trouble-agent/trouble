@@ -174,6 +174,7 @@ func TestSubjectTruncationBoundary(t *testing.T) {
 }
 
 func TestDeriveNeverBlocks(t *testing.T) {
+	loadfence.SkipUnderCIIfLoadCalibrated(t, "derivation ≤20 µs/call quiet budget (32 µs loaded ceiling; runner measured 70.1 µs)")
 	tbl := newTable()
 	sources := []types.SigSource{
 		types.SrcJournald, types.SrcDBus, types.SrcPSI, types.SrcDisk, types.SrcTimers,

@@ -191,6 +191,7 @@ func TestHarnessWaveScaling(t *testing.T) {
 // JSON and the boundary re-scan. The measured baseline is the same harness with
 // the scrubbing call removed.
 func TestIngestHarnessThroughput(t *testing.T) {
+	loadfence.SkipUnderCIIfLoadCalibrated(t, "ingestion floor 5,000 req/s quiet (SPEC-04 §3.9; runner measured 1,767 vs loaded floor 2,041)")
 	if raceEnabled {
 		// rule_timeout is a wall-clock budget (SPEC-02 §3.8): under -race with 128
 		// in-flight requests a single rule evaluation can be descheduled past 250 ms

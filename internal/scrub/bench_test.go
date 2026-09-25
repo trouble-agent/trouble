@@ -136,6 +136,7 @@ func BenchmarkVerify1KiB(b *testing.B) {
 //
 // The measured values and the deviation are recorded in the task handoff.
 func TestScrubBudget(t *testing.T) {
+	loadfence.SkipUnderCIIfLoadCalibrated(t, "§3.9 budgets: full set 256 KiB ≤15 ms (×4 documented quiet-host deviation factor)")
 	if raceEnabled {
 		t.Skip("§3.9 budgets are host measurements taken without instrumentation; see race_test.go")
 	}

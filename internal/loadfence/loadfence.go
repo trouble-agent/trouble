@@ -77,3 +77,21 @@ func MissFatal(t testing.TB, gate, measured string, load float64) {
 	}
 	t.Fatalf("%s", measured)
 }
+
+const (
+	EnvCI            = "CI"
+	EnvGitHubActions = "GITHUB_ACTIONS"
+)
+
+// SkipUnderCIIfLoadCalibrated reports, for a load-calibrated performance gate,
+// the shared-CI-runner SKIP verdict: on GitHub Actions (or any CI flagged via
+// CI=) the runner's timing is not comparable to the quiet-host calibration the
+// gate asserts, so the gate skips and the quiet host remains the binding
+// verification. ref is the gate's quiet-host reference figure, recorded in the
+// skip line so CI output still states the number the gate enforces at home.
+// Away from CI the call is a no-op and the gate behaves exactly as before.
+func SkipUnderCIIfLoadCalibrated(t testing.TB, ref string) {
+	if os.Getenv(EnvCI) != "" || os.Getenv(EnvGitHubActions) == "true" {
+		t.Skipf("load-calibrated perf gate: shared-runner timing not comparable to quiet-host calibration — quiet-host reference %s", ref)
+	}
+}

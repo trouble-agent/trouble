@@ -97,6 +97,17 @@ type Config struct {
 		PerClass map[string]string `toml:"per_class"`
 	} `toml:"routes"`
 
+	// Sentinel is the `[sentinel]` tuning surface beyond the routes table
+	// (SPEC-04 §3.4a, TRBL-074): the generic-JSON fold window, registered leaf
+	// by leaf like the routes keys so it resolves with the ordinary precedence
+	// and gets its own `trouble config explain` row. The default below is
+	// internal/sentinel's own compiled default, pinned on both sides
+	// ("2m") so a drift is caught; validation stays the sentinel's — the
+	// resolved value is what the daemon projects into sentinel.Config.
+	Sentinel struct {
+		DedupWindow types.Duration `toml:"dedup_window"`
+	} `toml:"sentinel"`
+
 	Dashboard DashboardConfig `toml:"dashboard"`
 
 	// Sensors is the SPEC-03 §4 detection-plane surface, resolved here key by
@@ -537,6 +548,12 @@ func defaults() *Config {
 	// than the ladder can act on them. This default MUST match internal/sensors'
 	// own compiled default — both sides pin it ("5m") so a drift is caught.
 	c.Sensors.SampleFoldWindow = "5m"
+	// SPEC-04 §3.4a (TRBL-074): the generic-JSON dedup window is ON by default
+	// at 2m — long enough to absorb a reporter's timeout-retry storm, short
+	// enough that a genuinely recurring error still opens fresh evidence.
+	// `0` is the documented OFF. This default MUST match internal/sentinel's
+	// own compiled default — both sides pin it so a drift is caught.
+	c.Sentinel.DedupWindow = "2m"
 	// SPEC-03 §4/§3.1e: the rest of the detection plane's defaults, copied from
 	// internal/sensors' own compiled defaults (its defaultConfig()). The two
 	// sides are pinned by tests in both packages, so a host that declares no
@@ -1537,6 +1554,17 @@ func registry(c *Config) []keyMeta {
 		// judges).
 		{"sentinel.routes.default", "sentinel.routes", "default", c.Routes.Default, func(cfg *Config, v any) error { s, err := asString(v); cfg.Routes.Default = s; return err }},
 		{"sentinel.routes.per_class", "sentinel.routes", "per_class", map[string]string{}, setRouteModeMap},
+		// SPEC-04 §3.4a (TRBL-074): the generic-JSON dedup window resolves
+		// like every other leaf (flag > env > file > default) and is judged by
+		// internal/sentinel at boot: a negative window is refused there
+		// (TROUBLE-SENTINEL-009) exactly as the sensors plane refuses a
+		// negative fold window. `0` survives resolution verbatim and is the
+		// documented OFF.
+		{"sentinel.dedup_window", "sentinel", "dedup_window", c.Sentinel.DedupWindow, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Sentinel.DedupWindow = d
+			return err
+		}},
 		// SPEC-13 §2.1/§2.1.1 `[server]` surface. The profile and the two
 		// dependency blocks are registered leaf by leaf, so the profile resolves
 		// with the same precedence, provenance and redaction as every other key

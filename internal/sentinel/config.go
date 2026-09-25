@@ -39,6 +39,7 @@ const (
 	defaultSpoolBudget     = 268435456
 	defaultDiskBudget      = 2147483648
 	defaultLedgerWait      = "2s"
+	defaultGenericDedupWin = "2m"
 	defaultReadHeaderTO    = "5s"
 	defaultReadTO          = "10s"
 	defaultWriteTO         = "10s"
@@ -82,6 +83,9 @@ type Config struct {
 	Projects                 []types.Project
 	Collectors               CollectorConfig
 
+	// GenericDedupWindow is the §3.4a generic-JSON fold window. The default is
+	// the shipped posture; the fold semantics live in dedup.go.
+	GenericDedupWindow types.Duration // default "2m"; 0 = off
 	// Routes is the [SPEC-12-resolved] [sentinel.routes] surface (SPEC-04
 	// §3.10a): `sentinel.routes.default` + `sentinel.routes.per_class`, the
 	// transport-route policy resolved by lifecycle's registry (TRBL-061). The
@@ -178,6 +182,9 @@ func (c *Config) applyDefaults() {
 	if c.LedgerWait == "" {
 		c.LedgerWait = defaultLedgerWait
 	}
+	if c.GenericDedupWindow == "" {
+		c.GenericDedupWindow = defaultGenericDedupWin
+	}
 	if c.ProxyTrust == "" {
 		c.ProxyTrust = proxyTrustLoopback
 	}
@@ -253,6 +260,12 @@ func (c *Config) validate() *Error {
 	}
 	if _, _, err := parsePerIPRate(c.PerIPRate); err != nil {
 		return errf(types.CodeSentinel009, "per_ip_rate is not \"<n>/min, burst <n>\"", causeAdvertisedHost)
+	}
+	// §3.4a (TRBL-074): the fold window's vocabulary is 0 (off) or a positive
+	// duration. A negative window is a boot refusal, not a silent default:
+	// the sensors plane refuses a negative fold window the same way.
+	if c.GenericDedupWindow.Std() < 0 {
+		return errf(types.CodeSentinel009, "dedup_window is negative: 0 disables the generic-JSON fold, a positive value is the window", causeAdvertisedHost)
 	}
 	// AC-28: the [sentinel.routes] policy of §3.10a is part of boot
 	// validation; the listener never binds on a route policy that cannot be

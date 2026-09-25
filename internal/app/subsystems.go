@@ -592,6 +592,11 @@ func buildSentinel(d *Daemon, hostID string, projects []types.Project) (*sentine
 		// documented loopback form and made every project need a secret key.
 		RequireSecret: !d.Cfg.Ingest.Auth.LoopbackDSN,
 		LedgerWait:    types.Duration("2s"),
+		// SPEC-04 §3.4a (TRBL-074): the resolved generic-JSON fold window is
+		// projected here once, so the sentinel judges exactly what the
+		// operator declared — a refused window is this subsystem's refusal
+		// record, and the fold stays the compiled default until then.
+		GenericDedupWindow: d.Cfg.Sentinel.DedupWindow,
 	}
 	// The sink is the profile's only plumbing decision (SPEC-13 §4.2): with a
 	// light-hub runtime mounted, ingestion goes scrub → sig → dedup gate → XADD →

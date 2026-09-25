@@ -332,3 +332,40 @@ query-form refusal is the bind matrix working, not a bug.
   (TRBL-080 has the full recipe + numbers: clone→build 120s→up 7s→healthy→proof).
 - A board append's row-count assert must ignore pre-existing blank lines: 97 physical
   lines were 96 real rows here; count JSON rows, not lines.
+
+## 2026-09-25 run 2 — operator CLI, token lifecycle, dashboard (tick 16-12-39)
+
+**Why this run exists:** the angle rule. Prior runs swept the ingest plane and the
+compose path; nobody had used `trouble` (the operator CLI) or the token lifecycle
+as an operator does. See `2026-09-25-operator-cli-integration.md` for the full
+transcript; here are the lessons that generalize.
+
+- **A CLI/daemon pair sharing a store path is an API contract nobody tests.**
+  docs/cmd.md advertises `--dashboard-token_file` as an argv-addressable store;
+  the token CLI has no counterpart flag and always mints into the compiled
+  default. Two contracts that each pass their own tests diverge silently, and
+  the user sees only 401s (TRBL-081). The check that would catch it: mint a
+  token with the daemon on a non-default store and assert a 200 — one
+  integration test, zero unit-test coverage anywhere in the pair.
+- **rc=8 from `check-stall` is a verdict, not a crash.** The watchdog probe
+  reports TROUBLE-LIFECYCLE-008 heartbeat_stale with the honest seq_age and
+  exits nonzero. Scripting against this CLI means treating any nonzero rc that
+  carries a named TROUBLE-* code as a report, not a failure to retry.
+- **Revoked tokens stay in `token list` with `revoked:true`** — tombstones for
+  audit. Before assuming a listing bug, check the flag; the hash-only 0600
+  store plus tombstones is the designed shape.
+- **Bare-Debian harness lessons (bunker leg, agent 5c261866):** an agent-local
+  `/tmp` write inside a piped script can fail (curl error 23) where the same
+  write to `$HOME` succeeds — download throwaway artifacts into `$HOME`;
+  and re-confirm the `setsid`-in-own-statement launch pattern: `nohup … &`
+  inside ssh one-liners backgrounds the whole chain and yields an empty log.
+- **What held:** the scratch-instance promise (flags-only boot, zero config
+  edits), named-error-code discipline on every refusal (004 forbidden root,
+  001 unknown flag/table-key, 016 install gate — all self-explanatory), live
+  token rotation/revocation, hash-only token store, 7.5ms dashboard pages,
+  and the checkout-free `go install` path end-to-end from the public module.
+- **Checkout-free `go install` smoke that actually proves something:**
+  `--version` prints the UNSTAMPED degraded posture (expected — no git
+  history), unknown-flag refusal returns rc=13, `config explain --key
+  ingest.bind --json` emits provenance, `topology` renders. Four commands, no
+  daemon, all from the public module path.

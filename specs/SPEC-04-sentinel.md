@@ -349,6 +349,29 @@ from this index via SPEC-01 §3.4's query API.
 | `fixed_in` (release diff) | requires `last_seen_release == from`, no sighting inside the `to` window, AND proven coverage: a canary landed inside the window (`ReleaseCoverage`). Coverage without a canary is UNKNOWN, not fixed |
 | release-diff view inputs for AC-19 | `new_in` = groups with `first_seen_release == to`; `fixed_in` = the rule above; `still_open` = groups seen in both; `regressed` = `regression=confirmed` whose release is in `to`. SPEC-10 composes the view from `Group.ReleaseRange`, `Group.FirstSeenTS/LastSeenTS` and `ReleaseCoverage` — sentinel exposes the inputs, the dashboard renders them |
 
+### 3.4a The generic-JSON on-ramp dedup window (TRBL-074)
+
+The §3.6 on-ramp accepts a body with no `event_id`, and a reporter that retries on a timeout sends
+byte-identical bodies: the §6.6 id-dedup never sees the retry, because every retry mints a fresh id
+and lands as a new occurrence — three identical POSTs became three `event` records and one group
+whose `count` claimed three bugs where one happened. The on-ramp therefore folds identical-sig events
+inside a bounded dedup window, the standalone counterpart of the hub's phase-aware dedup gate
+(SPEC-13 §2.3): duplicates keyed on the fold key inside the window are accepted-and-ignored, and
+exactly one `event` record per distinct occurrence reaches the ledger.
+
+| Property | Pin |
+|---|---|
+| Key | `generic:{project_id}:{sig_digest}` — the §3.3 sig digest itself, so the fold cannot disagree with the group it folds into. The event id is deliberately NOT part of the key: an id-less retry must match the occurrence it retries |
+| Window | `sentinel.dedup_window`, default `2m` (registered leaf: flag `--sentinel-dedup_window` > env `TROUBLE_SENTINEL_DEDUP_WINDOW` > file `[sentinel] dedup_window` > default; wiring in §4.4a). `0` = off; a negative value is a boot refusal (TROUBLE-SENTINEL-009) |
+| Fold | the first POST of a window is the occurrence and follows the ordinary §3.3 path; every identical POST inside the window is answered 200 with the FIRST occurrence's event id (the idempotent-retry answer) and folded: the group's `counters.suppressed` += 1 with `count` unchanged, and one `group` record with payload `op=update` carries the new counters snapshot |
+| Scope | only the generic on-ramp, and only bodies without an explicit `event_id` (§3.6 makes that field the reporter's occurrence identity and §6.6 dedups on it); never a spool replay (`reason="spool_replay"` — a replayed event already landed once and must land exactly once) |
+| Bound | the key table is bounded at 65536 keys, oldest evicted first, the same discipline as the §6.6 id map; the window is process-local, so a restart opens a cold window and a crash that loses a fold costs one duplicate `event` record, never a lost one |
+| Counters | `generic_folds_total` counts folded retries; `duplicate_events_total` stays the §6.6 id-dedup counter; a folded retry consumes no quota and writes no `event` record |
+
+A folded retry is never a dropped event: it moves its own counter (`counters.suppressed`), the group
+record says both numbers, and the fold's `op=update` record clears the group's dirty flag, so the
+periodic flush has nothing to repeat for the folds.
+
 ### 3.5 Collector parsers (v0.1: `go-panic`, `py-traceback`, `node-reject`)
 
 Sources: the collector journald child (sentinel-owned, one supervised `journalctl -f -o json
@@ -737,6 +760,18 @@ sentry-go produce the same digest and therefore one `Group` (a group keyed by di
 Merging with sensor and issue paths is the dedup core's job (SPEC-01 §3.3, SPEC-05 §3.2): sentinel
 never mints an incident, issue or board row.
 
+### 4.4a The dedup window wiring (TRBL-074)
+
+`sentinel.dedup_window` is a registered SPEC-12 leaf (the same leaf-by-leaf pattern as the TRBL-061
+routes keys): lifecycle resolves it with the ordinary precedence and the daemon projects the resolved
+value into `sentinel.Config` at construction; internal/sentinel is the only judge of the value (a
+negative window is refused at boot, TROUBLE-SENTINEL-009), and its compiled default (`2m`) is pinned
+on both sides by tests, so a drift is caught on whichever side moved. The fold runs inside
+`admitEvent` — the single funnel of §2.2 — after scrub and sig, before quota, so a folded retry
+consumes no quota and writes no `event` record. The hub profile's door keeps its own gate
+(SPEC-13 §2.3); the two dedup layers never see each other's keys, and a sender's retry is absorbed by
+whichever layer sits at its own on-ramp.
+
 ### 4.5 Sensor transport wiring and the route decision point (AC-28)
 
 ```
@@ -875,6 +910,7 @@ because context loss never degrades an incident.
 | `internal/sentinel/limits_test.go` | gzip bomb, ratio guard, no-Content-Length, abort mid-body, concurrency cap, per-IP, XFF trusted/untrusted, bind-matrix refusals | memory peak ≤ cap + 64KB per request; refusals use the pinned codes |
 | `internal/sentinel/collector_*_test.go` | per-parser start/continuation/flush vectors in `testdata/logs/{go-panic,py-traceback,node-reject}/`; timeout flush; supersede; interleave; rotation; truncation; non-UTF-8; 64KB line | every fixture yields the expected event count, level, culprit and sig; no cross-parser merge |
 | `internal/sentinel/genericjson_test.go` | required/optional fields, limits, `extra.fingerprint` ignored, auth via `?sentry_key=`, sha256 of a bash-reported body equals the SDK-reported body for the same class | same `sig` as vector B when the stack matches |
+| `internal/sentinel/dedup_test.go` + `dedup_boot_test.go` | the §3.4a fold: N byte-identical generic POSTs inside the window → exactly 1 `event` record, 1 group, `counters.suppressed = N-1` on `op=update` group records; different sigs never fold; window expiry admits a fresh occurrence; the clock is injected (no sleeps); window `0` reproduces the one-record-per-POST posture; an explicit `event_id` still retries through §6.6; envelope events never fold; a negative window is a boot refusal (009) | exactly one `event` record per distinct occurrence id; `generic_folds_total = N-1`; the key registry resolves the window with full precedence |
 | `internal/sentinel/canary_test.go` | canary lands through the real HTTP path; miss → `gap`/`canary_missing`; canary survives quota exhaustion; canary never opens an incident | canary observation inside `canary_interval`; `Evidence.CanarySeen` true |
 | `internal/sentinel/spool_test.go` | spool write/read, torn entry, drop-oldest, replay under quota, budget accounting | 0 undetected torn entries; `spool_bytes ≤ budget` |
 | `internal/sentinel/e2e_test.go` | `httptest` server: envelope + store + generic JSON + collector line → one group → one `event`/`group` record set; two projects on two listeners with different zones (AC-18 lab shape) | one digest per bug class across all three paths (AC-22) |

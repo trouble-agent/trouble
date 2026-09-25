@@ -119,6 +119,7 @@ type counters struct {
 	rejectStorm     atomicCounter
 	events          atomicCounter
 	groupsCreated   atomicCounter
+	genericFolds    atomicCounter
 
 	byReason   map[string]uint64
 	byItemType map[string]uint64
@@ -192,6 +193,7 @@ func (c *counters) snapshot() map[string]any {
 		"ingest_reject_storm":        c.rejectStorm.Get(),
 		"events_total":               c.events.Get(),
 		"groups_created_total":       c.groupsCreated.Get(),
+		"generic_folds_total":        c.genericFolds.Get(),
 	}
 }
 
@@ -245,6 +247,13 @@ type Server struct {
 	// (sig, bundle_release) pair inside the convergence window (§3.9a step 2).
 	// Guarded by gmu.
 	mismatchMemo map[string]time.Time
+
+	// genFold is the §3.4a generic-JSON fold (TRBL-074): the bounded window
+	// that turns a retrying reporter's byte-identical id-less POSTs into
+	// suppressed retries instead of duplicate evidence. Built from the config
+	// at construction; nil never happens (the disabled posture is a fold with
+	// window 0), so admission needs no nil check.
+	genFold *genericFold
 
 	// rejectWindows is the per-project reject-rate accounting behind
 	// `ingest_reject_storm` (§5).
@@ -307,6 +316,7 @@ func NewServer(cfg Config, w ledgerSink, sc scrubber) (*Server, error) {
 		counters:    newCounters(),
 		regressions: map[string]string{},
 		dups:        map[string]time.Time{},
+		genFold:     newGenericFoldFromConfig(cfg),
 		now:         nowFunc,
 		zoner:       cfg.Zone,
 	}
@@ -919,6 +929,10 @@ func targetsForSource(sourceKind string) []types.ScrubTarget {
 func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEvent, itemType, reason string) (types.Record, *Error) {
 	now := s.now()
 	ev.Project = entry.proj.ID
+	// §3.4a: whether the reporter named its own occurrence identity, captured
+	// before the mint below replaces an absent id with a generated one — the
+	// fold folds only generated-id retries.
+	explicitID := validEventID(ev.ID)
 	if !validEventID(ev.ID) {
 		ev.ID = newEventID()
 	}
@@ -963,6 +977,21 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 	}
 	digest := sig.DigestHex()
 	sigStr := sig.String()
+
+	// §3.4a (TRBL-074): the generic-JSON fold. A byte-identical id-less retry
+	// inside the window is absorbed here — answered 200 with the FIRST
+	// occurrence's id (the idempotent-retry answer), folded into the group as
+	// counters.suppressed += 1 on an op=update record — and the ordinary §3.3
+	// path below runs only for the occurrence that opened the window. The sig
+	// is already computed (scrub first, per §3.3), so the fold key is the
+	// group's own identity and cannot disagree with it.
+	if genericFoldApplies(ev, reason, explicitID) {
+		if folded, firstID := s.foldGenericRetry(entry, ev, sig, now); folded {
+			s.counters.genericFolds.Add(1)
+			s.foldGenericGroup(ctx, entry, digest)
+			return types.Record{RecID: "", Payload: map[string]any{"folded": true, "native_id": firstID}}, nil
+		}
+	}
 
 	// Quota and disk budget. A breach never destroys the accounting: the drop
 	// itself is a ledger record (§3.9).

@@ -176,6 +176,21 @@ func (g *groupIndex) markDropped(digest string, dropped uint64, sampleRate float
 	st.dirty = true
 }
 
+// markSuppressed folds one suppressed retry into a group's counters (§3.4a):
+// `count` is the occurrences the ledger holds and `counters.suppressed` is the
+// retries the fold absorbed — a suppressed retry is never a dropped event, so
+// it moves its own counter and the group record says both numbers.
+func (g *groupIndex) markSuppressed(digest string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	st := g.byDigest[digest]
+	if st == nil {
+		return
+	}
+	st.grp.Counters.Suppressed++
+	st.dirty = true
+}
+
 // snapshot returns a copy of every group in creation order.
 func (g *groupIndex) snapshot() []types.Group {
 	g.mu.Lock()

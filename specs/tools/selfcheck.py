@@ -67,6 +67,60 @@ def warn(msg: str) -> None:
     warns.append(msg)
 
 
+def cited_implementation_artifacts(index_doc: str) -> list[tuple[str, int]]:
+    """Return repository paths cited as implementation evidence in §6.1.
+
+    The reconciliation table is the authority for concrete artifact claims.  A
+    qualified path establishes the directory for neighbouring bare filenames
+    in the same table row (for example ``replay.go`` after
+    ``internal/flow/spool.go``).  Restricting extraction to inline code keeps
+    ordinary prose and imported package names out of the evidence set.
+    """
+    lines = index_doc.splitlines()
+    start = next((i for i, line in enumerate(lines) if line == "### 6.1 Cut-line vs AC reconciliation (the honest table)"), None)
+    end = next((i for i, line in enumerate(lines[start + 1:], start + 1) if line.startswith("### ")), len(lines)) if start is not None else None
+    if start is None or end is None:
+        fail("SPEC-INDEX §6.1: evidence table section is missing")
+        return []
+
+    qualified_re = re.compile(r"(?<![A-Za-z0-9_./-])((?:internal|cmd|tests|docs)/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*)")
+    bare_re = re.compile(r"(?<![A-Za-z0-9_./-])([A-Za-z0-9_.-]+\.(?:go|py|sh|md|html|toml|yaml|yml|json))(?![A-Za-z0-9_./-])")
+    artifacts: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for line_no, line in enumerate(lines[start:end], start + 1):
+        spans = re.findall(r"`([^`]+)`", line)
+        if not spans:
+            continue
+        qualified = [m.group(1).rstrip(".,;:)") for span in spans for m in qualified_re.finditer(span)]
+        row_dirs = [os.path.dirname(path) for path in qualified if "/" in path]
+        for path in qualified:
+            if path not in seen:
+                seen.add(path)
+                artifacts.append((path, line_no))
+        if not row_dirs:
+            continue
+        for span in spans:
+            for match in bare_re.finditer(span):
+                name = match.group(1).rstrip(".,;:)")
+                if "/" in name or name in qualified:
+                    continue
+                path = os.path.join(row_dirs[0], name)
+                if path not in seen:
+                    seen.add(path)
+                    artifacts.append((path, line_no))
+    if not artifacts:
+        fail("SPEC-INDEX §6.1: no implementation artifacts were extracted")
+    return artifacts
+
+
+def check_cited_implementation_artifacts(index_doc: str) -> None:
+    artifacts = cited_implementation_artifacts(index_doc)
+    for path, line_no in artifacts:
+        candidate = os.path.join(os.path.dirname(SPECS), path)
+        if not os.path.exists(candidate):
+            fail(f"SPEC-INDEX §6.1 line {line_no}: cited implementation artifact missing: {path}")
+
+
 def read(name: str) -> str:
     with open(os.path.join(SPECS, name), encoding="utf-8") as fh:
         return fh.read()
@@ -93,6 +147,7 @@ def main() -> int:
     docs = {n: read(n) for n in names}
     types_doc = docs["SPEC-TYPES.md"]
     index_doc = docs["SPEC-INDEX.md"]
+    check_cited_implementation_artifacts(index_doc)
 
     # ---------- inventories -------------------------------------------------
     types = set(re.findall(r"^type\s+([A-Za-z_]\w*)\s", types_doc, re.M))

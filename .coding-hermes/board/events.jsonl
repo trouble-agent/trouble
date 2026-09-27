@@ -251,3 +251,7 @@
 {"id": 251, "timestamp": "2026-09-27T05:37:36", "event_type": "task_created", "task_id": "RELEASE-004", "actor": "foreman", "detail": "{\"id\":\"RELEASE-004\",\"status\":\"pending\"}"}
 {"id": 252, "timestamp": "2026-09-27T16:15:46", "event_type": "task_created", "task_id": "TRBL-082", "actor": "foreman", "detail": "{\"id\":\"TRBL-082\",\"status\":\"pending\"}"}
 {"id": 253, "timestamp": "2026-09-27T16:52:27", "event_type": "task_completed", "task_id": "README-1", "actor": "foreman", "detail": "{\"status\":\"complete\"}"}
+{"id": 254, "timestamp": "2026-09-27T21:39:32", "event_type": "task_created", "task_id": "TRBL-084", "actor": "foreman", "detail": "{\"id\":\"TRBL-084\",\"status\":\"pending\"}"}
+{"id": 255, "timestamp": "2026-09-27T21:39:38", "event_type": "task_created", "task_id": "TRBL-085", "actor": "foreman", "detail": "{\"id\":\"TRBL-085\",\"status\":\"pending\"}"}
+{"id": 256, "timestamp": "2026-09-27T22:40:55", "event_type": "task_created", "task_id": "README-3", "actor": "review-reconcile", "detail": "{\"id\":\"README-3\",\"status\":\"pending\"}"}
+{"id": 257, "timestamp": "2026-09-27T22:40:55", "event_type": "task_updated", "task_id": "TRBL-083", "actor": "review-reconcile", "detail": "{\"id\":\"TRBL-083\",\"status\":\"pending\",\"from\":\"open\",\"reason\":\"parked spelling normalised to the foreman's dispatchable status\"}"}

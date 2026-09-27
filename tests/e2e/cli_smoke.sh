@@ -113,13 +113,18 @@ sed -i 's|^channels = .*|channels = [["/bin/true"]]|' "$CFG"
 say "dashboard token create prints the plaintext exactly once, list never does"
 TOK=$("$TROUBLE" dashboard token create --config "$CFG" --label dash-read@cli --scopes read 2>"$BASE/tok.err")
 if [[ "$TOK" == tdt_* && ${#TOK} -eq 47 ]]; then ok "minted a tdt_ token (47 chars)"; else bad "token shape wrong: ${TOK:0:12}…"; fi
-"$TROUBLE" dashboard token list --config "$CFG" --json > "$BASE/tokens.json" 2>&1
+"$TROUBLE" dashboard token list --config "$CFG" --json > "$BASE/tokens.json" 2> "$BASE/tokens.err"
+# stdout is the JSON document; stderr only carries the "dashboard token store:"
+# notice, so the streams are captured separately and BOTH are swept for the
+# plaintext below.
 grep -q 'dash-read@cli' "$BASE/tokens.json" && ok "list shows the label" || bad "list missing the label"
-grep -q "$TOK" "$BASE/tokens.json" && bad "list leaked the plaintext" || ok "list carries no plaintext"
+if grep -q "$TOK" "$BASE/tokens.json" || grep -q "$TOK" "$BASE/tokens.err"; then bad "list leaked the plaintext"; else ok "list carries no plaintext"; fi
 python3 - "$BASE/tokens.json" <<'PY' && ok "token file stores 32 bytes of sha256 hex, no plaintext" || bad "token hash shape wrong"
 import json,sys
 t=json.load(open(sys.argv[1]))[0]
-assert len(t["hash"])==64, t["hash"]
+h=t["hash"]
+assert len(h)==64, h
+assert all(c in "0123456789abcdef" for c in h), h
 assert "tdt_" not in json.dumps(t)
 PY
 

@@ -115,3 +115,32 @@ runner does not repeat them.
 2026-09-25 | dogfood (target trouble-dogfood → repo ~/trouble, tick 2026-09-25-08-46-05) | 🟢 SHIPPABLE (with open P1 TRBL-074) | compose container quickstart driven END-TO-END as a first-time user (surface never swept by prior runs): build 72s, up 7s→healthy ~40s, documented mint OK, first event 200 (cold 545ms) + ledger event+group proof on one sig, redis outage drill = daemon kept serving, 6 events during outage, zero loss, auth fail-closed, dashboard 1-4ms | 4 (TRBL-077 P2 container health always degraded w/o docs, TRBL-078 P2 8 sensor noise events per fresh boot, TRBL-079 P3 residue: 09-24 daemon ran 19h, TRBL-080 P3 bunker compose env facts) | install leg RAN on las-bunker-03 agent e3002a3c (destroyed): clone from public origin → compose build 120s → up 7s → healthy → first event 200 + ledger proof — smoke PASSED | HEAD c978da4; perf: ingest 288ms warm/545ms cold = ack-after-fsync window by design, NO perf row (nothing user-noticeable slow); artifacts docs/dogfood/2026-09-25-compose-integration.md + skills/trouble-compose-usage/SKILL.md + diagnostics append; board rows verified 4/4 on disk (git diff --numstat 4/0) before commit
 
 2026-09-25 (b) | dogfood (target trouble-dogfood → repo ~/trouble, tick 2026-09-25-16-12-39) | 🟢 SHIPPABLE | operator-CLI + token-lifecycle + dashboard surface (angle rule: prior runs swept ingest + compose): flags-only scratch boot held (docs/cmd.md promise), token create→rotate→revoke all live (old token 401 same second, tombstones by design), auth fail-closed everywhere (URL-token 400, install --dry-run rc=13 fail-closed), dashboard pages 1-3ms, checkout-free `go install` proven on bare Debian | 1 (TRBL-081 P2: token CLI cannot address a non-default dashboard-token_file — daemon+CLI silently diverge, minted tokens 401 forever; the exact pattern docs/cmd.md showcases) | install leg RAN (las-bunker-03 agent 5c261866, destroyed): bare Debian → Go 1.26.5 tarball ~33s → go install troubled+trouble from public module 46s each → smoke (version UNSTAMPED posture, unknown-flag rc=13, config explain --json, topology) PASSED; new friction noted: agent /tmp write fails in piped script vs $HOME | HEAD 92061f1; perf: dashboard 7.5ms warm, config explain 7.1ms, check-stall 20ms — NO perf row (nothing user-noticeable); artifacts docs/dogfood/2026-09-25-operator-cli-integration.md + skills/trouble-operator-cli-usage/SKILL.md + diagnostics append; row verified on disk (numstat 1/0) before commit; live credentials revoked, scratch daemon stopped, no repo visibility/permission touched
+
+## 2026-09-28 11:50 trouble-dogfood tick (skill-driven, executor=agent)
+
+Verdict: CONDITIONAL-PASS (local daemon surface exercised; install-bunker leg SKIPPED)
+
+### What was exercised
+- Built `troubled` + `trouble` from source at HEAD 461649c on the dev box (not a fresh-machine install).
+- Booted the daemon against a scratch config at ~/.config/trouble-dogfood-0928/config.toml with state_root at ~/.local/state/trouble-dogfood-0928.
+- Probed /health.json on the dashboard port (HTTP 200, 0.66ms cold).
+- Minted a dashboard token via `trouble dashboard token create` against the configured token_file (worked; TRBL-081 class is fixed in the running binary).
+- Authenticated /health.json via the minted Bearer token (HTTP 200, 0.45ms warm).
+- Sent a well-formed ingest POST (HTTP 200, 670ms — the TRBL-084 class, already filed).
+- Verified ledger rows advanced (seq 50 -> 92 over the run, 92 lines in 2026-09-28.jsonl).
+- Stopped the daemon with SIGINT; ports freed, processes gone.
+
+### Findings filed this tick
+- TRBL-086 (P2): config parser does not expand ~ (tilde) in string values; state_root="~/..." resolves as literal "./~/..." relative to cwd, not $HOME/....
+- TRBL-087 (P2): state_root enforces mode 0700 but the error message does not tell the user how to fix it (no "chmod 0700" hint, no auto-fix flag).
+- TRBL-088 (P3): ingest JSON schema 400 error is self-contradictory (cause name "message_not_string" when the message WAS a string) and gives no pointer to the accepted shape.
+- TRBL-089 (P3, process): SKIPPED install-bunker leg — the ephemeral-bunker install path was not exercised this tick.
+
+### What was NOT exercised
+- The documented install path on a fresh machine (bunker-qa.sh ephemeral leg). See TRBL-089.
+- The operator CLI surface beyond `dashboard token create` (install/upgrade/config/topology/check-stall/escalate/hub verbs).
+- The light-hub deployment path.
+- The container/compose quickstart path (already covered by TRBL-080 from the 09-25 tick).
+
+### Scratch state
+- /tmp/dogfood-trouble-0928, ~/.config/trouble-dogfood-0928, ~/.local/state/trouble-dogfood-0928 removed at end of tick.

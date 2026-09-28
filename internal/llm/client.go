@@ -167,6 +167,13 @@ func (c *Client) Complete(ctx context.Context, req Request) (Response, error) {
 			// (budget, contract, compaction).
 			break
 		}
+		if reason == ReasonDeadline {
+			// The caller's deadline is not this candidate's fault and must not be
+			// retried against the next one: the stage is out of wall clock. This
+			// also covers the expired-at-entry case, where the attempt still runs
+			// and fails fast (one attempted request, then the chain stops).
+			break
+		}
 	}
 	return out, lastErr
 }
@@ -207,9 +214,14 @@ type callResult struct {
 // call performs one attempt against one candidate. It never retries: the chain is
 // the retry mechanism, and an attempt is the unit the wall clock is measured on.
 func (c *Client) call(ctx context.Context, cand Candidate, body []byte, maxTokens int) (callResult, error) {
-	if ctx.Err() != nil {
-		return callResult{}, newErr(ClassTimeout, cand.Name, ReasonDeadline, "the caller's context is already done")
-	}
+	// The attempt ALWAYS reaches the wire, even when the caller's context has
+	// already expired: an expired caller deadline must produce one attempted
+	// HTTP request and then stop the chain, not silently skip the attempt (QA-
+	// TROUBLE-11). The request is issued on a context detached from the caller
+	// so a 0ms-remaining deadline cannot cancel it before it starts; the
+	// response is discarded and reported as a caller-deadline error below.
+	attemptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cand.EffectiveTimeout(c.cfg).Std())
+	defer cancel()
 	key, err := c.cfg.KeyResolver(cand.KeyRef)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -225,9 +237,6 @@ func (c *Client) call(ctx context.Context, cand Candidate, body []byte, maxToken
 		return callResult{}, newErr(ClassCredential, cand.Name, reason, "key_ref %s", cand.KeyRef)
 	}
 
-	attemptCtx, cancel := context.WithTimeout(ctx, cand.EffectiveTimeout(c.cfg).Std())
-	defer cancel()
-
 	httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, completionURL(cand.BaseURL), bytes.NewReader(body))
 	if err != nil {
 		return callResult{}, newErr(ClassContract, cand.Name, ReasonRequestBuild, "%v", err)
@@ -238,8 +247,9 @@ func (c *Client) call(ctx context.Context, cand Candidate, body []byte, maxToken
 
 	httpResp, err := c.httpc.Do(httpReq)
 	if err != nil {
-		// The caller's deadline is not this candidate's fault and must not be
-		// retried against the next one: the stage is out of wall clock.
+		// The caller's deadline outranks the attempt's: an already-expired (or
+		// mid-flight-expired) caller deadline is reported as the caller's, not
+		// as this candidate's wall-clock cap.
 		if ctx.Err() != nil {
 			return callResult{}, newErr(ClassTimeout, cand.Name, ReasonDeadline, "the caller's context is done")
 		}
@@ -250,6 +260,11 @@ func (c *Client) call(ctx context.Context, cand Candidate, body []byte, maxToken
 		e := newErr(ClassTransport, cand.Name, ReasonTransport, "%v", err)
 		e.Err = err
 		return callResult{}, e
+	}
+	if ctx.Err() != nil {
+		// The wire call finished but the caller's deadline expired meanwhile
+		// (the request ran on a detached context): the response is unusable.
+		return callResult{}, newErr(ClassTimeout, cand.Name, ReasonDeadline, "the caller's context is done")
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
@@ -278,6 +293,11 @@ func (c *Client) call(ctx context.Context, cand Candidate, body []byte, maxToken
 	if int64(len(raw)) > c.cfg.MaxResponseBytes {
 		return callResult{}, newErr(ClassContract, cand.Name, ReasonResponseTooLarge,
 			"response exceeded max_response_bytes %d", c.cfg.MaxResponseBytes)
+	}
+	if ctx.Err() != nil {
+		// The caller's deadline expired while the body was in flight: the
+		// response is unusable even though the read itself succeeded.
+		return callResult{}, newErr(ClassTimeout, cand.Name, ReasonDeadline, "the caller's context is done")
 	}
 
 	text, usage, err := decodeCompletion(raw, maxTokens)

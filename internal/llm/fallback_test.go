@@ -306,33 +306,72 @@ func TestBudget_WallClockCapFailsOverToTheNextCandidate(t *testing.T) {
 }
 
 func TestBudget_CallerDeadlineIsNotRetriedAcrossTheChain(t *testing.T) {
-	rec := &recorder{}
-	urls := servers(t, rec,
-		scripted{status: 200, ctype: "application/json", body: completion("late", 1, 1), delay: 300 * time.Millisecond},
-		scripted{status: 200, ctype: "application/json", body: completion("fast", 1, 1)},
-	)
-	cfg := testConfig(urls...)
-	cfg.Timeout = types.Duration("5s")
-	client := mustClient(t, cfg)
+	t.Run("expired before the attempt", func(t *testing.T) {
+		// Deterministic reproduction of the cold-machine condition: the caller's
+		// context is ALREADY expired when the attempt loop starts (on a slow box
+		// the 50ms deadline of the original script expired during first-request
+		// setup cost, before the wire). The chain must still attempt exactly one
+		// HTTP request and then stop, not skip attempt 1.
+		rec := &recorder{}
+		urls := servers(t, rec,
+			scripted{status: 200, ctype: "application/json", body: completion("late", 1, 1), delay: 300 * time.Millisecond},
+			scripted{status: 200, ctype: "application/json", body: completion("fast", 1, 1)},
+		)
+		cfg := testConfig(urls...)
+		cfg.Timeout = types.Duration("5s")
+		client := mustClient(t, cfg)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	resp, err := client.Complete(ctx, Request{Prompt: "x"})
-	if err == nil {
-		t.Fatal("Complete answered after the caller's deadline")
-	}
-	if got := ClassOf(err); got != ClassTimeout {
-		t.Errorf("class = %q, want %q", got, ClassTimeout)
-	}
-	if got := ReasonOf(err); got != ReasonDeadline {
-		t.Errorf("reason = %q, want %q (the caller's deadline, not the attempt's)", got, ReasonDeadline)
-	}
-	if resp.Candidate != "" {
-		t.Errorf("serving candidate = %q, want empty", resp.Candidate)
-	}
-	if rec.count() != 1 {
-		t.Errorf("HTTP requests = %d, want 1: an expired caller deadline must not spend the rest of the chain", rec.count())
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // already expired: deterministic, no machine-speed race
+		resp, err := client.Complete(ctx, Request{Prompt: "x"})
+		if err == nil {
+			t.Fatal("Complete answered after the caller's deadline")
+		}
+		if got := ClassOf(err); got != ClassTimeout {
+			t.Errorf("class = %q, want %q", got, ClassTimeout)
+		}
+		if got := ReasonOf(err); got != ReasonDeadline {
+			t.Errorf("reason = %q, want %q (the caller's deadline, not the attempt's)", got, ReasonDeadline)
+		}
+		if resp.Candidate != "" {
+			t.Errorf("serving candidate = %q, want empty", resp.Candidate)
+		}
+		if rec.count() != 1 {
+			t.Errorf("HTTP requests = %d, want 1: an expired caller deadline must not spend the rest of the chain", rec.count())
+		}
+	})
+
+	t.Run("expires mid-flight", func(t *testing.T) {
+		// The deadline expires while attempt 1 is in flight: one request, then
+		// the chain stops with the caller's deadline.
+		rec := &recorder{}
+		urls := servers(t, rec,
+			scripted{status: 200, ctype: "application/json", body: completion("late", 1, 1), delay: 300 * time.Millisecond},
+			scripted{status: 200, ctype: "application/json", body: completion("fast", 1, 1)},
+		)
+		cfg := testConfig(urls...)
+		cfg.Timeout = types.Duration("5s")
+		client := mustClient(t, cfg)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		resp, err := client.Complete(ctx, Request{Prompt: "x"})
+		if err == nil {
+			t.Fatal("Complete answered after the caller's deadline")
+		}
+		if got := ClassOf(err); got != ClassTimeout {
+			t.Errorf("class = %q, want %q", got, ClassTimeout)
+		}
+		if got := ReasonOf(err); got != ReasonDeadline {
+			t.Errorf("reason = %q, want %q (the caller's deadline, not the attempt's)", got, ReasonDeadline)
+		}
+		if resp.Candidate != "" {
+			t.Errorf("serving candidate = %q, want empty", resp.Candidate)
+		}
+		if got := rec.count(); got != 1 {
+			t.Errorf("HTTP requests = %d, want 1: an expired caller deadline must not spend the rest of the chain", got)
+		}
+	})
 }
 
 func TestBudget_CompactCapIsBoundedByTheStageCap(t *testing.T) {

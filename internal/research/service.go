@@ -1030,8 +1030,12 @@ func (s *Service) pollLoop(ctx context.Context, r *rung) {
 		}
 		now := s.deps.Now()
 		if ps.exhausted(now) {
-			s.settle(r, types.ResDegraded, types.ResReasonPollTimeout, types.CodeResearch006, 0, "")
+			// The gap record is appended BEFORE settle: settle seals the rung
+			// (close(r.done)), which releases any awaited Run. Emitting after
+			// that seal races the caller's first ledger read — the gap can be
+			// observed missing (INT-CI-002). Order is the fix, not timing.
 			s.emitGap(ctx, "research_poll_timeout", r, map[string]any{"poll_count": ps.Requests})
+			s.settle(r, types.ResDegraded, types.ResReasonPollTimeout, types.CodeResearch006, 0, "")
 			s.release(r)
 			return
 		}
@@ -1140,8 +1144,10 @@ func (s *Service) duplicateLoop(ctx context.Context, r *rung) {
 		r.mu.Unlock()
 		now := s.deps.Now()
 		if ps == nil || ps.exhausted(now) {
-			s.settle(r, types.ResDegraded, types.ResReasonPollTimeout, types.CodeResearch006, 0, "")
+			// Same order as pollLoop: gap before settle, so the record is on
+			// the ledger before the sealed rung releases the caller.
 			s.emitGap(ctx, "research_poll_timeout", r, nil)
+			s.settle(r, types.ResDegraded, types.ResReasonPollTimeout, types.CodeResearch006, 0, "")
 			s.release(r)
 			return
 		}

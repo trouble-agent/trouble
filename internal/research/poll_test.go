@@ -83,6 +83,32 @@ func TestPollBudgetEndsTheLoop(t *testing.T) {
 	}
 }
 
+// TestPollTimeoutGapVisibleWhenRunReturns pins the publication order: the gap
+// record must be appended BEFORE the rung seals. With settle-then-emit, Run can
+// return while the gap Append is still in flight, and a caller that reads the
+// ledger the moment Run returns sees zero gaps (the CI flake in INT-CI-002).
+// The delay in the Append path is the measurement, not the fix: the ordering
+// itself is what guarantees the record is there.
+func TestPollTimeoutGapVisibleWhenRunReturns(t *testing.T) {
+	lab := newLabStub(t)
+	lab.queueStates = []string{"solving"}
+	s, deps := newTestService(t, lab, map[string]any{
+		"poll_interval": "1ms", "poll_timeout": "60ms", "poll_max_requests": 48,
+	})
+	deps.gapDelay = 50 * time.Millisecond
+	out, err := s.Run(context.Background(), testIncident(), testSig(), bundleFor(map[string]any{"await": true}))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if out.State != types.ResDegraded || out.DegradedReason != types.ResReasonPollTimeout {
+		t.Fatalf("outcome = %+v, want degraded/poll_timeout", out)
+	}
+	gaps := deps.payloads(types.KGap)
+	if len(gaps) != 1 || gaps[0]["cause"] != "research_poll_timeout" {
+		t.Fatalf("gaps = %v, want one research_poll_timeout already published when Run returns", gaps)
+	}
+}
+
 func TestPollMaxRequestsEndsTheLoop(t *testing.T) {
 	lab := newLabStub(t)
 	lab.queueStates = []string{"solving"}

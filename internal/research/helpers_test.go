@@ -28,7 +28,11 @@ type fakeDeps struct {
 	scrubs  int
 	scrubFn func(types.ScrubTarget, []byte) []byte
 	nowFn   func() time.Time
-	start   time.Time
+	// gapDelay, when non-zero, is slept before a gap record's Append lands.
+	// It turns the settle-vs-gap publication order into an observable: a gap
+	// appended AFTER the rung seals is not yet visible when Run returns.
+	gapDelay time.Duration
+	start    time.Time
 }
 
 func newFakeDeps() *fakeDeps {
@@ -36,6 +40,11 @@ func newFakeDeps() *fakeDeps {
 }
 
 func (f *fakeDeps) Append(_ context.Context, d types.RecordDraft) (types.Record, error) {
+	// gapDelay is applied BEFORE the lock: a reader must be able to observe
+	// that the gap has not landed yet, which is the whole point of the seam.
+	if f.gapDelay > 0 && d.Kind == types.KGap {
+		time.Sleep(f.gapDelay)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.drafts = append(f.drafts, d)

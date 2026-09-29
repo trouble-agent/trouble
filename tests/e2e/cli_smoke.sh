@@ -267,6 +267,90 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $DEFTOK"
 kill -TERM "$DPID2" 2>/dev/null
 wait "$DPID2" 2>/dev/null
 
+say "a daemon booted with --dashboard-token_file accepts a token the CLI minted with --token-file (TRBL-081)"
+# The row's repro, in both directions. docs/cmd.md §3 advertises the daemon's
+# argv store for a scratch instance; before TRBL-081 the token CLI had no
+# counterpart flag, so the mint wrote the compiled default, printed the
+# plaintext once, and every request with that plaintext 401'd with nothing on
+# either side naming the divergence.
+#
+# HOME is isolated here (the compiled default lives under $HOME), so the
+# without-flag control below writes a throwaway store instead of the operator's
+# real one.
+ARGVPORT=$(python3 - <<'PY'
+import socket
+s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
+PY
+)
+ARGVINGEST=$((ARGVPORT+1))
+ARGVCFG="$BASE/config-argv.toml"
+ARGVHOME="$BASE/home-argv"
+ARGVSTORE="$BASE/argv-tokens.json"
+ARGVDEF="$ARGVHOME/.config/trouble/dashboard-tokens.json"
+mkdir -p "$ARGVHOME" "$BASE/state-argv"
+chmod 700 "$BASE/state-argv"
+
+cat > "$ARGVCFG" <<TOML
+state_root = "$BASE/state-argv"
+[lifecycle]
+heartbeat_path = "$BASE/state-argv/heartbeat.json"
+heartbeat_interval = "2s"
+heartbeat_stale_after = "10s"
+drain_timeout = "10s"
+[stall]
+max_seq_age = "300s"
+[checker]
+interval = "2s"
+confirm_runs = 2
+state_file = "$BASE/state-argv/checker.state.json"
+alarm_file = "$BASE/state-argv/checker.alarm"
+[ingest]
+bind = "127.0.0.1:$ARGVINGEST"
+[dashboard]
+bind = "127.0.0.1:$ARGVPORT"
+[escalate]
+channels = [["/bin/true"]]
+TOML
+chmod 600 "$ARGVCFG"
+grep -q 'token_file' "$ARGVCFG" && bad "the argv-store fixture must not declare dashboard.token_file" || ok "the argv-store config declares no dashboard.token_file"
+
+# Control: the mint WITHOUT the flag writes the compiled default — the store
+# this daemon does not read.
+CTLTOK=$(HOME="$ARGVHOME" XDG_CONFIG_HOME="$ARGVHOME/.config" "$TROUBLE" dashboard token create \
+  --config "$ARGVCFG" --label dash-read@argv-ctl --scopes read 2>"$BASE/tok-argv-ctl.err")
+if [[ "$CTLTOK" == tdt_* && ${#CTLTOK} -eq 47 ]]; then ok "the no-flag mint printed a token (the divergence the row reports)"; else bad "no-flag mint failed: $(cat "$BASE/tok-argv-ctl.err")"; fi
+if [[ -f "$ARGVDEF" ]]; then ok "the no-flag mint wrote the compiled default store, not the daemon's"; else bad "the no-flag mint did not write the default store"; fi
+grep -q "dashboard token store: $ARGVSTORE" "$BASE/tok-argv-ctl.err" && bad "the no-flag mint claimed to address the argv store" || ok "the no-flag mint named the default store, not the argv store"
+
+# The flag: the mint lands in the file the daemon is booted to read.
+ARGVTOK=$(HOME="$ARGVHOME" XDG_CONFIG_HOME="$ARGVHOME/.config" "$TROUBLE" dashboard token create \
+  --config "$ARGVCFG" --token-file "$ARGVSTORE" --label dash-read@argv --scopes read 2>"$BASE/tok-argv.err")
+if [[ "$ARGVTOK" == tdt_* && ${#ARGVTOK} -eq 47 ]]; then ok "the --token-file mint printed a token"; else bad "--token-file mint failed (${ARGVTOK:0:12}…): $(cat "$BASE/tok-argv.err")"; fi
+grep -q "dashboard token store: $ARGVSTORE" "$BASE/tok-argv.err" && ok "the mint named the flag-addressed store" || bad "the mint did not name $ARGVSTORE: $(cat "$BASE/tok-argv.err")"
+if [[ -f "$ARGVSTORE" ]]; then ok "the mint landed in the daemon's argv store"; else bad "no store at the argv path $ARGVSTORE: $(cat "$BASE/tok-argv.err")"; fi
+[[ "$(stat -c '%a' "$ARGVSTORE" 2>/dev/null)" == "600" ]] && ok "the argv store is 0600" || bad "argv store mode = $(stat -c '%a' "$ARGVSTORE" 2>/dev/null), want 600"
+if [[ -n "$ARGVTOK" ]] && grep -q "$ARGVTOK" "$ARGVSTORE" 2>/dev/null; then bad "the argv store leaked the plaintext"; else ok "the argv store holds no plaintext"; fi
+
+# The daemon reads that store from argv: the flag-minted token authenticates and
+# the default-store control token does not. That pair is the row's silent 401,
+# closed.
+HOME="$ARGVHOME" XDG_CONFIG_HOME="$ARGVHOME/.config" "$TROUBLED" --config "$ARGVCFG" \
+  --dashboard-token_file "$ARGVSTORE" > "$BASE/troubled-argv.log" 2>&1 &
+APID=$!
+code=""
+for _ in $(seq 1 60); do
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$ARGVPORT/health.json" || true)
+  [[ "$code" == "200" ]] && break
+  sleep 0.5
+done
+[[ "$code" == "200" ]] && ok "the argv-store daemon booted" || { bad "argv-store daemon never answered (code=$code)"; tail -20 "$BASE/troubled-argv.log"; }
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $ARGVTOK" "http://127.0.0.1:$ARGVPORT/incidents")
+[[ "$code" == "200" ]] && ok "the --token-file token authenticates: GET /incidents = 200" || { bad "GET /incidents with the --token-file token = $code, want 200 (TRBL-081)"; tail -20 "$BASE/troubled-argv.log"; }
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CTLTOK" "http://127.0.0.1:$ARGVPORT/incidents")
+[[ "$code" == "401" ]] && ok "the default-store token still 401s against the argv-store daemon" || bad "default-store token = $code, want 401"
+kill -TERM "$APID" 2>/dev/null
+wait "$APID" 2>/dev/null
+
 printf '\n'
 if [[ $FAIL -eq 0 ]]; then echo "CLI SMOKE: all checks passed"; else echo "CLI SMOKE: FAILURES above"; fi
 exit $FAIL

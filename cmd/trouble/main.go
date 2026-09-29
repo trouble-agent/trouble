@@ -25,6 +25,7 @@ import (
 
 	"github.com/trouble-agent/trouble/internal/dashboard"
 	"github.com/trouble-agent/trouble/internal/lifecycle"
+	"github.com/trouble-agent/trouble/internal/scrub"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -38,15 +39,21 @@ usage:
   trouble check-stall [--health-url URL] [--state-root DIR] [--json]
   trouble escalate --unit NAME
   trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
-            [--output-env ENVFILE]
-  trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
-  trouble dashboard token revoke --label LABEL
-  trouble dashboard token list [--json]
+            [--output-env ENVFILE] [--token-file PATH]
+  trouble dashboard token rotate --label LABEL [--output-env ENVFILE] [--token-file PATH]
+  trouble dashboard token revoke --label LABEL [--token-file PATH]
+  trouble dashboard token list [--json] [--token-file PATH]
   trouble hub status [--json]
   trouble hub archive [--dry-run] [--file FILE] [--force]
   trouble hub dedup --key KEY [--json]
   trouble hub drain [--timeout DURATION]
   trouble --version
+
+--token-file PATH (alias --dashboard-token_file PATH) is how the dashboard token
+verbs address a store other than the resolved dashboard.token_file: pass the
+daemon's own --dashboard-token_file value and the mint lands in the file that
+daemon reads. The value must be an explicit path (/…, ~/…, ./… or ../…), the
+same rule the daemon's argv control enforces.
 
 Config precedence is flag > env > file > default (SPEC-12 §3.1); every key has a
 default and ` + "`trouble config explain`" + ` shows which source won.
@@ -135,12 +142,31 @@ func defaultTokenPath() (string, error) {
 // Remedy line: the two switches that make the sides agree. The CLI side is
 // spelled as the env var because the documented container mint runs the CLI in
 // the container image, where the daemon's store lives under /data/state.
-func storeNotice(w io.Writer, verb, storePath, cfgDeclaredStore string) {
-	fmt.Fprintf(w, "dashboard token store: %s\n", storePath)
+//
+// src names the source that won the store path and is rendered as a suffix on
+// the path line: "" for the resolved config, "--token-file" for the explicit
+// flag. The flag is a source now (TRBL-081), and a source an operator cannot
+// name in a transcript is a source they cannot debug.
+func storeNotice(w io.Writer, verb, storePath, cfgDeclaredStore, src string) {
+	note := ""
+	if src != "" {
+		note = " (from " + src + ")"
+	}
+	fmt.Fprintf(w, "dashboard token store: %s%s\n", storePath, note)
 	if cfgDeclaredStore == "" || cfgDeclaredStore == storePath {
 		return
 	}
 	fmt.Fprintf(w, "WARNING: the resolved config declares dashboard.token_file = %s, but `dashboard token %s` addresses %s.\n", cfgDeclaredStore, verb, storePath)
+	if src != "" {
+		// The operator named the store on the command line, and argv outranks
+		// the file for the DAEMON too (SPEC-12 §3.1) — so the two sides agree
+		// whenever the daemon was booted with the same value. Claiming the
+		// token "will not authenticate" here would be a guess in the wrong
+		// direction; state the condition instead.
+		fmt.Fprintf(w, "  the daemon reads the config's path unless it was booted with --dashboard-token_file, which wins over the file.\n")
+		fmt.Fprintf(w, "    if it was not: boot it with  --dashboard-token_file=%s\n", storePath)
+		return
+	}
 	fmt.Fprintf(w, "  the daemon reads the config's path, so a token minted here will not authenticate. To agree:\n")
 	fmt.Fprintf(w, "    CLI:    TROUBLE_DASHBOARD_TOKEN_FILE=%s\n", cfgDeclaredStore)
 	fmt.Fprintf(w, "    daemon: --dashboard-token_file=%s\n", cfgDeclaredStore)
@@ -178,6 +204,97 @@ func configDeclaredStore(cfgPath string) string {
 		return abs
 	}
 	return ""
+}
+
+// flagTokenFile and flagDaemonTokenFile are the two spellings of the one flag
+// that addresses the store a `dashboard token` verb reads or writes.
+//
+// Two names, one value: `--token-file` is the CLI's own spelling, and
+// `--dashboard-token_file` is the daemon's — the word the daemon's own
+// resolution table derives for the `dashboard.token_file` key (SPEC-12 §2.5a,
+// where a.b_c -> --a-b_c). An operator who booted a scratch daemon with
+// `troubled --dashboard-token_file /tmp/x/tokens.json` can therefore copy that
+// argument onto the mint instead of translating it, which is the property
+// TRBL-081 is about: before this, `create` exposed -label/-scopes/-output-env/
+// -json and nothing that named a store, so it wrote the compiled default while
+// the daemon read the argv store — the plaintext was printed once and the token
+// 401'd everywhere, with nothing on either side saying why.
+const (
+	flagTokenFile       = "token-file"
+	flagDaemonTokenFile = "dashboard-token_file"
+)
+
+// storeFlagDoc is the --token-file help line. Both spellings share it so the two
+// cannot come to describe different behaviour.
+const storeFlagDoc = "address this token store (an explicit path, e.g. /tmp/tokens.json) instead of the resolved dashboard.token_file; pass the daemon's --dashboard-token_file value to mint into the store the daemon reads"
+
+// dashboardStorePath resolves the absolute file a `dashboard token` verb reads
+// or writes, plus a short provenance note for the store notice ("" when the
+// resolved config supplied the path).
+//
+// Precedence: an explicit --token-file value, then the resolved
+// `dashboard.token_file` (already flag > env > file > default through
+// lifecycle.Resolve), then the compiled default of SPEC-10 §3.4. Every branch
+// expands through dashboard.ExpandTokenPath — the same helper the daemon's store
+// uses — so a mint can never land in a differently-expanded file, and all four
+// verbs go through this one function, so they cannot address different stores.
+//
+// explicitGiven distinguishes "no store flag" from "a store flag given an empty
+// value": the second is refused rather than silently treated as the first.
+func dashboardStorePath(res lifecycle.Resolved, explicit string, explicitGiven bool) (string, string, int) {
+	if explicitGiven && explicit == "" {
+		fmt.Fprintf(os.Stderr, "dashboard token: --%s was given an empty value; refusing to fall back to the resolved dashboard.token_file\n", flagTokenFile)
+		return "", "", 13
+	}
+	if explicit != "" {
+		if err := checkStorePathValue(explicit); err != nil {
+			fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+			return "", "", 13
+		}
+		abs, err := dashboard.ExpandTokenPath(explicit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+			return "", "", 13
+		}
+		return abs, "--" + flagTokenFile, 0
+	}
+	path := res.Config.Dashboard.TokenFile
+	if path == "" {
+		def, err := defaultTokenPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+			return "", "", 13
+		}
+		path = def
+	}
+	abs, err := dashboard.ExpandTokenPath(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
+		return "", "", 13
+	}
+	return abs, "", 0
+}
+
+// checkStorePathValue refuses a store value the daemon's own argv control would
+// refuse, by RUNNING that control: scrub.MandatoryScan over the argv pair
+// `--dashboard-token_file <value>` (lifecycle.ScanProcCmdline is the daemon's
+// caller of the same function, SPEC-12 §3.2 rule 2).
+//
+// One rule, not two. SPEC-12 §2.5a has rule 9 leave an explicit path-shaped
+// value alone and read every other shape as a secret, which is what keeps a
+// pasted credential on argv a hard refusal (013). The whole point of the flag is
+// that the CLI and the daemon address ONE store; a value the daemon cannot be
+// booted with — a bare name (`scratch-store.json`), a relative word, a token —
+// would put the two back on different files silently, and the store notice would
+// echo the value itself. So the CLI applies the daemon's rule before it writes.
+//
+// The value is deliberately NOT echoed in the refusal: the same reason the
+// boundary scanner never returns the offending bytes (SPEC-02 §3.4 point 3).
+func checkStorePathValue(v string) error {
+	if err := scrub.MandatoryScan(context.Background(), []byte("--"+flagDaemonTokenFile+" "+v)); err != nil {
+		return fmt.Errorf("%w: --%s value is not an explicit path: %v (pass an absolute path such as /tmp/tokens.json, or set dashboard.token_file in the config file or TROUBLE_DASHBOARD_TOKEN_FILE; the value is not echoed here)", types.CodeLifecycle013, flagTokenFile, err)
+	}
+	return nil
 }
 
 // writeTokenEnv places TROUBLE_DASHBOARD_TOKEN=<plaintext> into the env file
@@ -528,7 +645,7 @@ func cmdUpgrade(args []string) int {
 
 func cmdDashboard(args []string) int {
 	if len(args) < 2 || args[0] != "token" {
-		fmt.Fprint(os.Stderr, "usage: trouble dashboard token create|rotate|revoke|list\n")
+		fmt.Fprint(os.Stderr, "usage: trouble dashboard token create|rotate|revoke|list [--token-file PATH]\n")
 		return 2
 	}
 	verb, rest := args[1], args[2:]
@@ -543,40 +660,44 @@ func cmdDashboard(args []string) int {
 	// have produced on a filesystem with no shell, editor or cp. Empty keeps
 	// the v0.1 contract: stdout only, the operator places the line.
 	outputEnv := fs.String("output-env", "", "also write TROUBLE_DASHBOARD_TOKEN=<plaintext> into this 0600 env file (the daemon's [secrets] environment_file)")
+	// The store-addressing flag, in both spellings (TRBL-081); see
+	// dashboardStorePath for the precedence and why the two share one variable.
+	var storeFlag string
+	fs.StringVar(&storeFlag, flagTokenFile, "", storeFlagDoc)
+	fs.StringVar(&storeFlag, flagDaemonTokenFile, "", "alias of --"+flagTokenFile+", spelled the way the daemon takes it on argv (SPEC-12 §2.5a)")
 	if err := fs.Parse(rest); err != nil {
 		return 2
 	}
+	// Which spelling the operator used is not interesting; THAT they used one is:
+	// an empty value then means "I named a store and my variable was empty",
+	// which dashboardStorePath refuses instead of falling back silently.
+	var storeGiven bool
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == flagTokenFile || f.Name == flagDaemonTokenFile {
+			storeGiven = true
+		}
+	})
 	res, code := resolve(fs.Args())
 	if code != 0 {
 		return code
 	}
-	path := res.Config.Dashboard.TokenFile
-	if path == "" {
-		def, err := defaultTokenPath()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
-			return 13
-		}
-		path = def
-	}
-	// SPEC-10 §3.2: the shipped default is a ~/ path. Resolve it with the same
-	// helper the daemon's store uses, so the file this CLI mints into is the
-	// file the daemon reads (a CLI-only expansion is how a minted token ended
-	// up 401ing as TROUBLE-DASHBOARD-002).
-	path, err := dashboard.ExpandTokenPath(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dashboard token: %v\n", err)
-		return 13
+	// SPEC-10 §3.2: the shipped default is a ~/ path, resolved with the same
+	// helper the daemon's store uses (a CLI-only expansion is how a minted token
+	// ended up 401ing as TROUBLE-DASHBOARD-002). An explicit --token-file wins
+	// over the resolved config; dashboardStorePath owns that precedence.
+	path, storeSrc, code := dashboardStorePath(res, storeFlag, storeGiven)
+	if code != 0 {
+		return code
 	}
 
 	if verb == "list" {
-		return listTokens(os.Stdout, os.Stderr, path, *asJSON, configDeclaredStore(resolvedConfigPath()))
+		return listTokens(os.Stdout, os.Stderr, path, *asJSON, configDeclaredStore(resolvedConfigPath()), storeSrc)
 	}
 
 	// Which store this verb addresses, and the divergence warning when the
 	// resolved config names a different one (TRBL-063). Printed before the
 	// write so the path is on screen even if the store write then fails.
-	storeNotice(os.Stderr, verb, path, configDeclaredStore(resolvedConfigPath()))
+	storeNotice(os.Stderr, verb, path, configDeclaredStore(resolvedConfigPath()), storeSrc)
 
 	// The plaintext is shown exactly once, here: this is the only code path in
 	// the repository that can mint a dashboard token (SPEC-10 §3.2).
@@ -588,7 +709,7 @@ func cmdDashboard(args []string) int {
 	switch verb {
 	case "create":
 		if *label == "" || *scopes == "" {
-			fmt.Fprint(os.Stderr, "usage: trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]\n")
+			fmt.Fprint(os.Stderr, "usage: trouble dashboard token create --label LABEL --scopes read[,write][,autonomy] [--token-file PATH]\n")
 			return 2
 		}
 		sc, err := parseScopes(*scopes)
@@ -617,7 +738,7 @@ func cmdDashboard(args []string) int {
 		return 0
 	case "rotate":
 		if *label == "" {
-			fmt.Fprint(os.Stderr, "usage: trouble dashboard token rotate --label LABEL\n")
+			fmt.Fprint(os.Stderr, "usage: trouble dashboard token rotate --label LABEL [--token-file PATH]\n")
 			return 2
 		}
 		tok, plaintext, err := store.Rotate(*label, time.Now())
@@ -641,7 +762,7 @@ func cmdDashboard(args []string) int {
 		return 0
 	case "revoke":
 		if *label == "" {
-			fmt.Fprint(os.Stderr, "usage: trouble dashboard token revoke --label LABEL\n")
+			fmt.Fprint(os.Stderr, "usage: trouble dashboard token revoke --label LABEL [--token-file PATH]\n")
 			return 2
 		}
 		if err := store.Revoke(*label, time.Now()); err != nil {
@@ -668,12 +789,12 @@ type tokenFileView struct {
 	Tokens  []types.Token `json:"tokens"`
 }
 
-func listTokens(stdout, stderr io.Writer, path string, asJSON bool, cfgDeclaredStore string) int {
+func listTokens(stdout, stderr io.Writer, path string, asJSON bool, cfgDeclaredStore, src string) int {
 	// The read side owes the same feedback as the mint: which store was read,
 	// and the divergence warning when the config names another one. An operator
 	// debugging a 401 needs to know the list they are looking at is not the
 	// daemon's store (TRBL-063).
-	storeNotice(stderr, "list", path, cfgDeclaredStore)
+	storeNotice(stderr, "list", path, cfgDeclaredStore, src)
 	b, err := os.ReadFile(path)
 	if err != nil {
 		fmt.Fprintf(stderr, "dashboard token list: %v\n", err)

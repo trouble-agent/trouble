@@ -1,0 +1,21 @@
+{
+  "tick": "trouble-2026-09-29-23-28-53",
+  "wave_budget": 6,
+  "workers": [
+    {
+      "task": "TRBL-083",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-083",
+      "branch": "wt/TRBL-083",
+      "base_sha": "50e49be",
+      "scope": "tests/e2e/cli_smoke.sh"
+    },
+    {
+      "task": "INT-CI-002",
+      "worktree": "/home/kara/worktrees/trouble-INT-CI-002",
+      "branch": "wt/INT-CI-002",
+      "base_sha": "50e49be",
+      "scope": "internal/research/poll_test.go"
+    }
+  ],
+  "independence": "TRBL-083 touches tests/e2e/cli_smoke.sh only; INT-CI-002 touches internal/research/poll_test.go only; no shared files, no depends_on edges"
+}

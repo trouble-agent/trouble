@@ -192,6 +192,46 @@ Prerequisites: Docker with the compose plugin. No ports are touched besides
    when the resolved config declares a different one, so the mismatch is visible
    instead of silent.
 
+   The stack can be healthy at the process level (`docker compose ps`) while the
+   health request of step 2 reports `status=degraded`. On this image that is the
+   expected posture, **not a fault**: a container has no host systemd/D-Bus
+   surface to watch and cannot arm PSI triggers, so its sensor batch degrades by
+   design on every boot. Measured on this tree's compose stack, with
+   `docker compose ps` reading `healthy`:
+
+   ```json
+   {"status":"degraded","detail":{"reason":"sensors_container","sensor_degraded":"timers"}}
+   ```
+
+   Read the block, not the status word — the same request as step 2, with the
+   projection widened to the whole `detail` block and the degraded `sensors[]`
+   rows:
+
+   ```sh
+   curl -s -H "<step 2's auth header>" http://127.0.0.1:7644/health.json \
+     | jq '{status, detail, degraded_sensors: [.sensors[] | select(.degraded) | {sensor, reason}]}'
+   ```
+
+   Three things answer it. `detail.sensor_degraded=<sensor>` names one degraded
+   sensor (one cause per alarm, exactly as `subsystems[]` reports one refused
+   plane) — on this stack `timers`, and that sensor's own `sensors[]` row carries
+   the `reason` behind it, `dependency dbus degraded`: there is no host D-Bus for
+   it to watch. A read in the first minute can name `psi` instead
+   (`mode=sampling-only`: the trigger write was refused) before the first timer
+   sweep runs; either name is the same posture. `detail.reason=sensors_container`
+   is the piece that identifies the cause as this container environment rather
+   than a fault on the host sensor plane. The posture is stable — every boot of
+   this image reports it on a working stack — so a change in it is the signal,
+   never the `degraded` word on its own.
+
+   What IS worth stopping for, from the same block: `status=stalled` (the ledger
+   writer is not advancing), a `detail.reason` other than `sensors_container`
+   (`unstamped_build` for a build git could not stamp), `detail.subsystem_refused`
+   (a plane of the daemon never built), `rss_over_budget`, or a
+   `hub.degraded_reason` on the light-hub profile. The step-2 fields stay the
+   positive proof that this stack is fine: `git_sha` stamped (never `unknown`)
+   and `ledger_last_seq` advancing as events arrive.
+
 3. Send the first event. A request through the published port arrives from a
    non-loopback zone, so the foreground quickstart's `?sentry_key=`-only form is
    refused here; use the header form with the project's `secret_key` (step 1,

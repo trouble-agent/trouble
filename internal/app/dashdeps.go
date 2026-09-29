@@ -289,6 +289,13 @@ func (d *Daemon) health() types.HealthResponse {
 	}
 	in.RSSWarnBytes = parseBytes(d.Cfg.Lifecycle.SelfRSSWarn)
 	in.Stalled = stall > d.Cfg.Stall.MaxSeqAge.Seconds() && d.Cfg.Stall.MaxSeqAge.Seconds() > 0
+	// TRBL-077: a container boot's sensor batch is degraded by the environment
+	// (no host systemd/D-Bus to watch) rather than by a fault. Name that cause
+	// when it is the only one, so the designed posture carries a
+	// machine-readable reason on the wire instead of a bare sensor name.
+	if r := sensorsContainerReason(in, inContainer()); r != "" {
+		in.DegradedReasons = append(in.DegradedReasons, r)
+	}
 	return lifecycle.Health(d.Cfg, in)
 }
 

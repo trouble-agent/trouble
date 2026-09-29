@@ -23,20 +23,71 @@ bad()  { printf '   FAIL %s\n' "$*"; FAIL=1; }
 need() { [[ -x "$1" ]] || { echo "missing binary $1 (run make bin)"; exit 2; }; }
 need "$TROUBLE"; need "$TROUBLED"
 
+# --- TRBL-083: verified-free PORT PAIR allocation ---------------------------
+# The dashboard and ingest binds must be neighboring ports, but two
+# independent ephemeral allocations are NOT an atomic pair: on a busy box the
+# kernel can hand port+1 to another process between our pick and the daemon's
+# listen (TROUBLE-LIFECYCLE-003 bind: address already in use; live probe:
+# 15/200 fresh ephemeral binds had the adjacent port occupied).
+#
+# Strategy: bind BOTH ports (base = ephemeral pick, ingest = base+1) in one
+# python3 helper, RETRY the whole pair (cap: 20 attempts) whenever base+1 is
+# taken, and HOLD the bound listener sockets in a forked child so neither port
+# can be re-allocated while the script prepares the config and runs the
+# CLI-only checks. The holders are killed immediately before each daemon boot.
+#
+# Residual TOCTOU window (documented, not removable from a shell script):
+# between closing the holders and the daemon's listen() the pair is briefly
+# unbound, so another process could still claim it. Holding shrinks the
+# window from the whole script's prep time to microseconds; a full fix would
+# need product-side port reservation or SO_REUSEPORT handoff.
+allocate_port_pair() {
+  python3 - <<'PY'
+import os, socket, sys, time
+for attempt in range(1, 21):
+    a = socket.socket()
+    a.bind(("127.0.0.1", 0))
+    base = a.getsockname()[1]
+    b = socket.socket()
+    try:
+        b.bind(("127.0.0.1", base + 1))
+    except OSError:
+        b.close()
+        a.close()
+        continue  # port+1 taken: retry the WHOLE pair
+    pid = os.fork()
+    if pid == 0:
+        # holder child: keep both listener sockets open; killed by the script.
+        # Detach stdio so a parent's $(...) substitution sees EOF immediately.
+        devnull = os.open(os.devnull, os.O_RDWR)
+        os.dup2(devnull, 0); os.dup2(devnull, 1); os.dup2(devnull, 2)
+        try:
+            while True:
+                time.sleep(3600)
+        finally:
+            os._exit(0)
+    print(base, base + 1, pid)
+    sys.exit(0)
+sys.exit(1)  # 20 attempts exhausted
+PY
+}
+HOLD1="" HOLD2="" HOLD3=""
+release_pair() { [[ -n "$1" ]] && { kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
+trap 'kill $HOLD1 $HOLD2 $HOLD3 2>/dev/null; rm -rf "$BASE"' EXIT
+
+PAIR=$(allocate_port_pair) || { echo "could not allocate a free port pair after 20 attempts"; exit 2; }
+read -r PORT INGEST HOLD1 <<< "$PAIR"
+
 BASE="${HOME}/.local/state/trouble-test/cli-$$"
 mkdir -p "$BASE"
 chmod 700 "$BASE"
-trap 'rm -rf "$BASE"' EXIT
+trap 'kill $HOLD1 $HOLD2 $HOLD3 2>/dev/null; rm -rf "$BASE"' EXIT
 
-PORT=$(python3 - <<'PY'
-import socket
-s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
-PY
-)
-INGEST=$((PORT+1))
-CFG="$BASE/config.toml"
+say "version triple is stamped"
 ENVF="$BASE/trouble.env"
 : > "$ENVF"; chmod 600 "$ENVF"
+
+CFG="$BASE/config.toml"
 
 cat > "$CFG" <<TOML
 state_root = "$BASE"
@@ -148,6 +199,8 @@ grep -q "TROUBLE_DASHBOARD_TOKEN=$TOK3\$" "$ENVF" && ok "env file carries the ro
 TOK2="" TOK3="" # only the LIVE token ($TOK) is used by the daemon checks below
 
 say "daemon boots on the configured port and serves the health surface"
+release_pair "$HOLD1"   # TRBL-083: drop the reservation microseconds before the daemon listens
+HOLD1=""
 "$TROUBLED" --config "$CFG" > "$BASE/troubled.log" 2>&1 &
 DPID=$!
 for _ in $(seq 1 60); do
@@ -205,12 +258,8 @@ say "the shipped DEFAULT token_file path works end to end (no [dashboard] token_
 # INSIDE $BASE: the operator's real store is never read or written, and the
 # existing EXIT trap removes everything. Both variables are set as per-command
 # prefixes only, so the outer shell's HOME is never modified.
-DEFPORT=$(python3 - <<'PY'
-import socket
-s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
-PY
-)
-DEFINGEST=$((DEFPORT+1))
+PAIR=$(allocate_port_pair) || { echo "could not allocate a free port pair after 20 attempts"; exit 2; }
+read -r DEFPORT DEFINGEST HOLD2 <<< "$PAIR"
 DEFCFG="$BASE/config-default.toml"
 DEFHOME="$BASE/home"
 DEFENVF="$BASE/default.env"
@@ -251,6 +300,8 @@ if [[ -f "$DEFSTORE" ]]; then ok "the mint landed at \$HOME/.config/trouble/dash
 [[ "$(stat -c '%a' "$DEFSTORE" 2>/dev/null)" == "600" ]] && ok "the default-path store is 0600" || bad "default-path store mode = $(stat -c '%a' "$DEFSTORE" 2>/dev/null), want 600"
 if [[ -n "$DEFTOK" ]] && grep -q "$DEFTOK" "$DEFSTORE" 2>/dev/null; then bad "the default-path store leaked the plaintext"; else ok "the default-path store holds no plaintext"; fi
 
+release_pair "$HOLD2"   # TRBL-083: drop the reservation microseconds before the daemon listens
+HOLD2=""
 HOME="$DEFHOME" XDG_CONFIG_HOME="$DEFHOME/.config" "$TROUBLED" --config "$DEFCFG" > "$BASE/troubled-default.log" 2>&1 &
 DPID2=$!
 code=""
@@ -277,12 +328,10 @@ say "a daemon booted with --dashboard-token_file accepts a token the CLI minted 
 # HOME is isolated here (the compiled default lives under $HOME), so the
 # without-flag control below writes a throwaway store instead of the operator's
 # real one.
-ARGVPORT=$(python3 - <<'PY'
-import socket
-s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
-PY
-)
-ARGVINGEST=$((ARGVPORT+1))
+PAIR=$(allocate_port_pair) || { echo "could not allocate a free port pair after 20 attempts"; exit 2; }
+read -r ARGVPORT ARGVINGEST HOLD3 <<< "$PAIR"
+release_pair "$HOLD1"   # the first pair's holders died before the first boot; slot is free again
+HOLD1=""
 ARGVCFG="$BASE/config-argv.toml"
 ARGVHOME="$BASE/home-argv"
 ARGVSTORE="$BASE/argv-tokens.json"
@@ -334,6 +383,8 @@ if [[ -n "$ARGVTOK" ]] && grep -q "$ARGVTOK" "$ARGVSTORE" 2>/dev/null; then bad 
 # The daemon reads that store from argv: the flag-minted token authenticates and
 # the default-store control token does not. That pair is the row's silent 401,
 # closed.
+release_pair "$HOLD3"   # TRBL-083: drop the reservation microseconds before the daemon listens
+HOLD3=""
 HOME="$ARGVHOME" XDG_CONFIG_HOME="$ARGVHOME/.config" "$TROUBLED" --config "$ARGVCFG" \
   --dashboard-token_file "$ARGVSTORE" > "$BASE/troubled-argv.log" 2>&1 &
 APID=$!

@@ -782,6 +782,114 @@ func asStringSlice(v any) ([]string, error) {
 	}
 }
 
+// expandHome resolves the two tilde forms a shell resolves against the
+// operator's OWN home directory: "~" and "~/…". Every other string is returned
+// byte-for-byte — an absolute path, a relative path, and a "~" that is not at
+// the front, including the "~user" form, which names another user's home and
+// which this layer cannot tell apart from a plain string that merely starts with
+// a tilde (TRBL-086).
+//
+// A tilde this layer CAN classify but cannot resolve is an error, never the
+// literal string: os.Stat("~/x") fails with ENOENT relative to the cwd, so a
+// fall-back hands the operator a path-shaped name for a path that was never
+// meant to exist, and the daemon reports it as its own misconfiguration
+// (TROUBLE-LIFECYCLE-004 "cannot stat").
+func expandHome(s string) (string, error) {
+	if !strings.HasPrefix(s, "~") {
+		return s, nil
+	}
+	rest := strings.TrimPrefix(s, "~")
+	if rest != "" && !strings.HasPrefix(rest, "/") {
+		// "~user/…": not a form this layer expands.
+		return s, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("value %q: home directory unknown: %w", s, err)
+	}
+	rest = strings.TrimPrefix(rest, "/")
+	if rest == "" {
+		return filepath.Clean(home), nil
+	}
+	return filepath.Join(home, rest), nil
+}
+
+// expandHomeValue rewrites the tilde of every string a decoded source value can
+// carry, so a value written the way a shell writes it — `state_root =
+// "~/.local/state/trouble"` — names a real path instead of the literal directory
+// `~/.local/…` under the cwd. It walks the shapes a source value actually has: a
+// scalar string, a string array (the reader produces []any), and the string
+// fields of a declaration table (`sensors.inotify.paths` rows). A value of any
+// other type is returned unchanged — including a SubsystemTable, whose text is
+// handed verbatim to the subsystem that decodes it and expands its own paths
+// (internal/issues, internal/hub).
+func expandHomeValue(v any) (any, error) {
+	switch x := v.(type) {
+	case string:
+		return expandHome(x)
+	case []string:
+		out := make([]string, len(x))
+		for i, e := range x {
+			s, err := expandHome(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = s
+		}
+		return out, nil
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			ev, err := expandHomeValue(e)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = ev
+		}
+		return out, nil
+	case []map[string]any:
+		for _, row := range x {
+			for k, e := range row {
+				ev, err := expandHomeValue(e)
+				if err != nil {
+					return nil, err
+				}
+				row[k] = ev
+			}
+		}
+		return x, nil
+	case map[string]any:
+		for k, e := range x {
+			ev, err := expandHomeValue(e)
+			if err != nil {
+				return nil, err
+			}
+			x[k] = ev
+		}
+		return x, nil
+	default:
+		return v, nil
+	}
+}
+
+// expandHomeMap normalizes every value of ONE decoded source map in place. It
+// runs once per source — the file, the environment, the flags — BEFORE the
+// conflict scan and the setters: the ladder (flag > env > file > default) is
+// untouched, because this rewrites what a source SAID and never which source
+// won, and two sources that spell the same path differently (`~/state` and
+// `/home/op/state`) then compare equal instead of reading as a
+// TROUBLE-LIFECYCLE-002 disagreement.
+func expandHomeMap(m map[string]any) error {
+	for k, v := range m {
+		ev, err := expandHomeValue(v)
+		if err != nil {
+			return fmt.Errorf("key %q: %w", k, err)
+		}
+		m[k] = ev
+	}
+	return nil
+}
+
 // setRouteModeMap is the `sentinel.routes.per_class` setter: the sig-prefix →
 // route table of SPEC-04 §3.10a / SPEC-TYPES §3.15.3. It accepts BOTH the raw
 // file form (map[string]any, what the TOML reader and a flag/env string
@@ -1808,6 +1916,19 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	if err := absorbTables(fileVals, tableDocs, known); err != nil {
 		return Resolved{}, err
 	}
+	// TRBL-086: a leading `~` in a value is the operator's home directory, the
+	// way a shell reads it — `state_root = "~/.local/state/trouble"`, the shape
+	// the shipped example declares, must name $HOME/.local/state/trouble and not
+	// the literal `~/.local/…` under the cwd. Each source is normalized ONCE,
+	// here, before the allowlist loop, the conflict scan and the setters: the
+	// precedence ladder is untouched (this rewrites what a source said, never
+	// which source won) and the value the daemon uses is the value every
+	// `config explain` row reports. Subsystem tables are excluded by design (see
+	// expandHomeValue): their verbatim text goes to the owner that decodes it
+	// and expands its own paths.
+	if err := expandHomeMap(fileVals); err != nil {
+		return Resolved{}, fmt.Errorf("%w: %s: %v", types.CodeLifecycle001, cfgPath, err)
+	}
 	for k, fv := range fileVals {
 		if _, ok := known[k]; !ok {
 			return Resolved{}, fmt.Errorf("%w: unknown file key %q", types.CodeLifecycle001, k)
@@ -1827,6 +1948,13 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 		rev[envName(k)] = k
 	}
 	envMap := parseEnv(env, rev, known, &resolved)
+	// TRBL-086: the environment is a source like any other, and `TROUBLE_STATE_ROOT=~/x`
+	// reaches the daemon unexpanded whenever it is set without a shell. Normalized
+	// before the ladder, so an env value that spells the file's own path the other
+	// way is the same value rather than a 002 disagreement.
+	if err := expandHomeMap(envMap); err != nil {
+		return Resolved{}, fmt.Errorf("%w: environment: %v", types.CodeLifecycle001, err)
+	}
 	for k, ev := range envMap {
 		values[k] = types.ConfigValue{
 			Key:       k,
@@ -1841,6 +1969,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	flagMap, err := parseArgs(args, known)
 	if err != nil {
 		return Resolved{}, err
+	}
+	// TRBL-086: same rule for argv — `--state-root=~/x` is only expanded by the
+	// shell when the operator did not quote it, so the parser does it.
+	if err := expandHomeMap(flagMap); err != nil {
+		return Resolved{}, fmt.Errorf("%w: argv: %v", types.CodeLifecycle001, err)
 	}
 	for k, fv := range flagMap {
 		values[k] = types.ConfigValue{

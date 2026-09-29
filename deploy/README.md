@@ -10,10 +10,24 @@ release process, then run the commands from that checkout.
 
 Prerequisites:
 
-- Go 1.26 or newer (`go.mod` declares `go 1.26.0`); `make` and a POSIX shell.
+- Go 1.26 or newer (`go.mod` declares `go 1.26.0`) — install it from
+  <https://go.dev/dl/> if `go version` is not already on `PATH`; `make` and a
+  POSIX shell.
 - `curl` for the readiness and first-event requests; `jq` for the ledger check.
 - A writable local filesystem for the state root. Do not use `/tmp`, `/var/tmp`,
   or a network mount.
+
+Install the Go toolchain before anything else.
+
+A bare host — a fresh container, a minimal VM, an ephemeral bunker agent — has no
+Go at all, and the build below stops with `/bin/sh: 1: go: not found`. Download
+the Go 1.26+ archive for your OS and architecture from the canonical page
+<https://go.dev/dl/>, unpack it, and add its `bin` directory to `PATH` (a
+per-user unpack under `$HOME` needs no root), then confirm before continuing:
+
+```sh
+go version      # → go version go1.26.x <os>/<arch>
+```
 
 Create the files and directories the foreground daemon validates. The copied
 configuration and environment file are mode `0600`; the state root is mode
@@ -67,6 +81,8 @@ Build the stamped binaries and start the daemon in the foreground. Leave this
 terminal running until the shutdown step.
 
 ```sh
+# Requires Go 1.26+ on PATH — install it first from https://go.dev/dl/ (see above);
+# without it this line stops at `/bin/sh: 1: go: not found`.
 make bin
 bin/troubled --config "$CONFIG_DIR/config.toml"
 ```

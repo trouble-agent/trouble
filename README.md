@@ -243,23 +243,36 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
 
 ## Getting the source
 
+Install the Go toolchain first. **Go 1.26.0 or newer is required** (`go.mod`
+declares `go 1.26.0`) — the daemon core uses the 1.26 language and stdlib
+surface and will not build on older toolchains, and a bare machine has no `go`
+at all. Download it for your OS and architecture from the canonical page,
+<https://go.dev/dl/>, put its `bin` directory on `PATH`, and check it before you
+build anything:
+
+```
+go version          # → go version go1.26.x <os>/<arch>
+```
+
+Without it the first build command below (`make bin`) fails as
+`/bin/sh: 1: go: not found` instead of compiling. Nothing else is needed: no
+cgo, no third-party dependencies, no external service for a first boot.
+
+Then clone the source:
+
 ```
 git clone https://github.com/trouble-agent/trouble
 cd trouble
 ```
 
 The module path is `github.com/trouble-agent/trouble`, so the operator CLI and the
-daemon also install directly from a checkout-free environment:
+daemon also install directly from a checkout-free environment (this still needs
+the Go 1.26 toolchain above):
 
 ```
 go install github.com/trouble-agent/trouble/cmd/trouble@latest    # operator CLI
 go install github.com/trouble-agent/trouble/cmd/troubled@latest   # the daemon
 ```
-
-**Go 1.26.0 or newer is required** (`go.mod` declares `go 1.26.0`) — the daemon core
-uses the 1.26 language and stdlib surface and will not build on older toolchains.
-Nothing else is needed: no cgo, no third-party dependencies, no external service
-for a first boot.
 
 ## Build and test
 

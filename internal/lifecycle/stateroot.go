@@ -65,7 +65,11 @@ func CheckStateRoot(cfg Config) (StateRoot, error) {
 		return StateRoot{}, fmt.Errorf("%w: state_root %q is not a directory", types.CodeLifecycle004, abs)
 	}
 	if info.Mode().Perm() != 0o700 {
-		return StateRoot{}, fmt.Errorf("%w: state_root %q mode is %04o, want 0700", types.CodeLifecycle005, abs, info.Mode().Perm())
+		// The refusal names the required mode (0700) AND the command that applies
+		// it: a fresh `mkdir` under a umask-022 shell lands 0755 (umask-002 →
+		// 0775) and the operator must not have to read the source to repair the
+		// state root (TRBL-087). The enforcement itself is unchanged.
+		return StateRoot{}, fmt.Errorf("%w: state_root %q mode is %04o, want 0700 (required mode: 0700; fix: chmod 0700 %q)", types.CodeLifecycle005, abs, info.Mode().Perm(), abs)
 	}
 
 	if isRemoteFS(abs, cfg.FS.RemoteTypes) {

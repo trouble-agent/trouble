@@ -1,0 +1,12 @@
+{
+  "tick": "trouble-2026-09-28-20-38-54",
+  "project": "trouble",
+  "base_sha": "578a3b1",
+  "wave_budget": 3,
+  "tasks": [
+    {"id":"TRBL-083","worktree":"~/worktrees/trouble-TRBL-083","branch":"wt/TRBL-083","base_sha":"578a3b1","model":"glm-5.3-flash","provider":"zai-glm-default","status":"prepared"},
+    {"id":"README-2","worktree":"~/worktrees/trouble-README-2","branch":"wt/README-2","base_sha":"578a3b1","model":"glm-5.3-flash","provider":"zai-glm-default","status":"prepared"},
+    {"id":"INT-CI-002","worktree":"~/worktrees/trouble-INT-CI-002","branch":"wt/INT-CI-002","base_sha":"578a3b1","model":"glm-5.3-flash","provider":"zai-glm-default","status":"prepared"}
+  ],
+  "created_by":"foreman"
+}

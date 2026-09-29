@@ -55,7 +55,8 @@ plus one deterministic 404 rule), token/scope auth with CSRF on every POST, the 
 fragments with their stale-render guard, server-rendered pages for incidents, groups, rules and
 breakers, and the §2.9 budget discipline — no handler opens a ledger file, fragments fit an 8 KB cap,
 and compression concurrency is bounded. Import rule: stdlib + `internal/types`, with every subsystem
-arriving through `Deps`.
+arriving through `Deps`. The 20 routes are itemized with their scopes, CSRF rules and
+request/response shapes in [docs/dashboard-http-api.md](docs/dashboard-http-api.md).
 
 `internal/hub` — the light-hub runtime (SPEC-13): the second server profile next to the
 zero-dependency standalone default. Redis streams buffer ingestion into the SAME group-commit

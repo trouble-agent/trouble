@@ -303,6 +303,14 @@ stays inside the closed draft 2020-12 keyword subset. A descriptor edit without 
 binary as the daemon, serving server-rendered pages and htmx fragments from the SPEC-01 in-memory
 index. It writes nothing to the ledger. Reads default to `127.0.0.1:7644`.
 
+**The route table in full, one hop away.** All 20 registrable rows — the 7 pages, `/health.json`,
+the 3 POST actions, the 7 polling partials, `/static/{asset}` and the unknown-partial guard — are
+listed with their method, path, scope, auth and request/response shapes in
+[docs/dashboard-http-api.md](dashboard-http-api.md), which also states the wrapping rules (URL-token
+refusal, the deterministic 404, CSRF, the load shed) and how to check every row against
+`internal/dashboard/routes.go` without opening SPEC-10. This section keeps the operational prose and
+the numbers measured on this host.
+
 **The route table is the whole surface.** Twenty registrable `(method, path)` rows in §2.1 plus one
 rule for everything else: a pair that is not a row answers **404** with the `Allow` header naming the
 methods the path does accept — never 405, and the body never echoes the requested path. A browser

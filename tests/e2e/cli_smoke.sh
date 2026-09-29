@@ -73,6 +73,39 @@ PY
 }
 HOLD1="" HOLD2="" HOLD3=""
 release_pair() { [[ -n "$1" ]] && { kill "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
+
+# --- self-check: the pair allocator re-allocates when port+1 is occupied ----
+# Regression arm for TRBL-083 (the CI flake that motivated this allocator):
+# hold a base+1 port out-of-band and prove the allocator RETRIES the whole
+# pair instead of handing back a colliding pair. Cheap (sub-second); runs on
+# every smoke so the CI flake stays covered.
+if true; then
+  OB_BASE=$(python3 - <<'PY'
+import socket
+s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()
+PY
+  )
+  OB_PID=$(python3 - "$OB_BASE" <<'PY' &
+import socket, sys, time
+s=socket.socket()
+s.bind(("127.0.0.1", int(sys.argv[1])+1))  # occupy the sibling port
+s.listen(1)
+time.sleep(60)
+PY
+  )
+  OB_PAIR=$(allocate_port_pair) || { echo "   FAIL pair self-check: allocator exhausted with port+1 occupied"; FAIL=1; }
+  [[ -n "$OB_PAIR" ]] && {
+    read -r OB_P1 OB_P2 OB_H1 <<< "$OB_PAIR"
+    if [[ "$OB_P2" -eq $((OB_BASE+1)) ]]; then
+      echo "   FAIL pair self-check: allocator returned the occupied pair $OB_P1/$OB_P2"; FAIL=1
+    else
+      echo "   ok   pair self-check: with $((OB_BASE+1)) occupied, allocator re-allocated $OB_P1/$OB_P2"
+    fi
+    release_pair "$OB_H1"
+  }
+  kill "$OB_PID" 2>/dev/null; wait "$OB_PID" 2>/dev/null
+fi
+
 trap 'kill $HOLD1 $HOLD2 $HOLD3 2>/dev/null; rm -rf "$BASE"' EXIT
 
 PAIR=$(allocate_port_pair) || { echo "could not allocate a free port pair after 20 attempts"; exit 2; }

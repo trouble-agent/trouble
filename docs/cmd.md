@@ -148,6 +148,10 @@ trouble install [--check] [--dry-run] [--root DIR] [--force]
 trouble upgrade [--to PATH|VERSION] [--rollback] [--wait DURATION]
 trouble escalate --unit NAME            invoked by trouble-escalate@.service only
 trouble dashboard token create|rotate|revoke|list
+trouble hub status [--json]             the light-hub profile: stream, dedup and archive state
+trouble hub archive [--dry-run] [--file FILE] [--force]   export closed generations to DuckBrain
+trouble hub dedup --key KEY [--json]    probe the dedup gate for one idempotency key
+trouble hub drain [--timeout DURATION]  consume the stream into the ledger, then stop
 ```
 
 Exit codes are contract: `0` ok · `8` liveness surface stale/unreadable
@@ -158,6 +162,29 @@ The dashboard token plaintext is printed exactly once, by
 `trouble dashboard token create` / `rotate`, on stdout; it is unrecoverable
 afterwards because only `sha256(token)[:32]` is stored (SPEC-10 §3.2). There is no
 token-management HTTP route in v0.1, by design.
+
+### The `trouble hub` verbs
+
+The four `hub` verbs are SPEC-13 §2.2's operator surface for the light-hub
+profile. The CLI is a separate process from the daemon: every verb re-resolves
+config the way every other verb does and then reads Redis + the state root
+directly, so each verb carries its own exit codes rather than the suite-wide
+ones above.
+
+| Verb | Meaning | Exit codes |
+|---|---|---|
+| `trouble hub status [--json]` | the `HubStatus`: hub profile, Redis stream length/lag/pending, dedup hit/miss counters, archive queue depth and last verified export. Reads Redis + the state root; writes nothing | `0` ok, `1` degraded |
+| `trouble hub archive [--dry-run] [--file FILE] [--force]` | the archival job for one generation (default: every closed generation without an `exported` marker); `--dry-run` prints the `ArchivePlan` (file, bytes, gzip bytes, marker id, target namespace) and writes nothing | `0` ok, `1` failed, `2` refused |
+| `trouble hub dedup --key KEY [--json]` | read-only probe of the dedup gate for one idempotency key: present/absent plus TTL. No mutation, and nothing but presence is revealed | `0` present, `1` absent, `2` Redis unreachable |
+| `trouble hub drain [--timeout DURATION]` | consume-and-ack the stream to empty (or the timeout), then stop — the pre-migration drain of SPEC-12 §3.6 | `0` drained, `1` timeout with pending entries |
+
+`drain` is the only mutating verb: it moves entries from Redis into the ledger
+and never deletes an un-acked entry. `status` and `dedup` write nothing, and
+`archive` writes only when it is not a `--dry-run`. Beyond the §2.2 rows, every
+hub verb keeps the suite-wide codes: `2` for a usage error (an unknown verb, a
+missing `--key`) and `13` when a refusable condition stops it (a config or
+profile refusal, or `drain` finding the ledger already held by a running
+daemon).
 
 ## Building
 

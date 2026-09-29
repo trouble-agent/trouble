@@ -193,8 +193,8 @@ that runs the tests (kernel 7.0.0-30-generic, uid in `adm`):
 | an **unarmed** fd polled with a zero timeout | 338,711 hits in 200 ms — a 100 % CPU busy loop, which is why an unarmed fd is never placed in an epoll set |
 | window ceiling on this kernel | 10 s (the spec's "20 s is accepted" note does not hold here) |
 
-Because the ceiling and the privilege answer differ per host, the daemon **probes** them at boot
-(`trouble sensors probe`): one real arm, a downward ceiling sweep `20s → 10s → 2s`, and a `stall=0`
+Because the ceiling and the privilege answer differ per host, the daemon **probes** them at boot —
+one real arm, a downward ceiling sweep `20s → 10s → 2s`, and a `stall=0`
 probe that must be refused. The result selects `triggers+sampling` or `sampling-only`, is written to
 the ledger as one `capability_probe` record, and is repeated verbatim in `/health.json`. Trigger
 arming is never attempted speculatively again after the probe.
@@ -256,8 +256,10 @@ go version          # → go version go1.26.x <os>/<arch>
 ```
 
 Without it the first build command below (`make bin`) fails as
-`/bin/sh: 1: go: not found` instead of compiling. Nothing else is needed: no
-cgo, no third-party dependencies, no external service for a first boot.
+`/bin/sh: 1: go: not found` instead of compiling. Nothing else is needed for a
+first boot: no cgo, no external service. The build does pull in a small set of
+third-party Go modules (the TOML parser, D-Bus bindings, a Redis client, and
+`golang.org/x/sys`) — they resolve automatically from `go.mod` during the build.
 
 Then clone the source:
 

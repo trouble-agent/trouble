@@ -143,21 +143,46 @@ heartbeat with `stage="shutdown"`, close the listeners, exit 0 within
 trouble --version                       version git_sha build_time (and whether the build is stamped)
 trouble config explain [--key K] [--json]   every resolved key with its winning source
 trouble topology [--json]               the T1..T5 decisions for this configuration
-trouble check-stall [--json]            the external stall checker: exit 0 / 8 / 9
+trouble check-stall [--health-url URL] [--state-root DIR] [--json]   the external stall checker: exit 0 / 8 / 9
 trouble install [--check] [--dry-run] [--root DIR] [--force]
 trouble upgrade [--to PATH|VERSION] [--rollback] [--wait DURATION]
 trouble escalate --unit NAME            invoked by trouble-escalate@.service only
-trouble dashboard token create|rotate|revoke|list
+trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
+                               [--output-env ENVFILE]
+trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
+trouble dashboard token revoke --label LABEL
+trouble dashboard token list [--json]
 ```
 
 Exit codes are contract: `0` ok · `8` liveness surface stale/unreadable
 (TROUBLE-LIFECYCLE-008) · `9` ledger-sequence stall (TROUBLE-LIFECYCLE-009) ·
 `13` a refusable condition (config, bind, state root, units).
 
+`check-stall` carries two overrides for the case where the config is not the
+thing to change: `--health-url URL` overrides the health URL (default:
+`dashboard.bind` + `/health.json`) and `--state-root DIR` overrides the state
+root — the pair a container `HEALTHCHECK` and a second-instance probe need.
+`--json` prints the machine-readable verdict.
+
 The dashboard token plaintext is printed exactly once, by
 `trouble dashboard token create` / `rotate`, on stdout; it is unrecoverable
 afterwards because only `sha256(token)[:32]` is stored (SPEC-10 §3.2). There is no
 token-management HTTP route in v0.1, by design.
+
+`--output-env ENVFILE` is the other half of the same mint, and the path a
+shell-less image has to take (TRBL-002: no shell, no editor, no `cp`). `create`
+and `rotate` write `TROUBLE_DASHBOARD_TOKEN=<plaintext>` into ENVFILE — the line
+the operator would otherwise place by hand in the daemon's
+`secrets.environment_file` — while still printing the plaintext on stdout;
+`revoke` and `list` parse the flag and ignore it. The write is atomic and 0600 by
+construction (temp file in ENVFILE's own directory, chmod 0600, rename), so
+ENVFILE is created 0600 when it is absent, an existing ENVFILE must already be a
+regular file whose mode is exactly 0600 (`env file <path> mode is 0644, want
+0600`, exit 13), its other lines are preserved, and an existing
+`TROUBLE_DASHBOARD_TOKEN=` line is replaced in place rather than appended. The
+refusal comes after the token itself is stored, so a 0644 ENVFILE costs a
+rotation, not a lost token. Omitting the flag (the default) keeps the v0.1
+contract: stdout only, the operator places the line.
 
 ## Building
 

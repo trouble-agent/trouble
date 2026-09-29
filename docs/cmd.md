@@ -145,10 +145,15 @@ trouble config explain [--key K] [--json]   every resolved key with its winning 
 trouble topology [--json]               the T1..T5 decisions for this configuration
 trouble check-stall [--json]            the external stall checker: exit 0 / 8 / 9
 trouble install [--check] [--dry-run] [--root DIR] [--force]
-trouble upgrade [--to PATH|VERSION] [--rollback] [--wait DURATION]
+trouble upgrade [--to PATH] [--rollback] [--wait DURATION]
 trouble escalate --unit NAME            invoked by trouble-escalate@.service only
 trouble dashboard token create|rotate|revoke|list
 ```
+
+`trouble upgrade --to` names the PATH of the binary to stage, which is copied over
+the running one: a version string is not resolved to an artifact, so `--to v0.1.1`
+stages a path that does not exist. `--rollback` ignores `--to` and restores the
+newest `backups/bin/` generation instead; one of the two is required.
 
 Exit codes are contract: `0` ok · `8` liveness surface stale/unreadable
 (TROUBLE-LIFECYCLE-008) · `9` ledger-sequence stall (TROUBLE-LIFECYCLE-009) ·

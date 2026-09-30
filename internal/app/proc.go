@@ -1,11 +1,11 @@
 package app
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/trouble-agent/trouble/internal/lifecycle"
 )
 
 // proc.go reads the daemon's own resource facts for the health watermarks
@@ -25,24 +25,11 @@ func processMemory() (rss, peak, binary int64) {
 	return rss, peak, binary
 }
 
-// stableHostID derives the host identity from /etc/machine-id when it exists
-// (systemd's stable machine identity), hashed so the raw id is never written into
-// a ledger record. Without it, the hostname is the last resort and it is marked
-// as such by using its own bytes rather than pretending to be a derived id.
-func stableHostID() string {
-	if b, err := os.ReadFile("/etc/machine-id"); err == nil {
-		s := strings.TrimSpace(string(b))
-		if s != "" {
-			sum := sha256.Sum256([]byte(s))
-			return hex.EncodeToString(sum[:8])
-		}
-	}
-	if h, err := os.Hostname(); err == nil && h != "" {
-		sum := sha256.Sum256([]byte("hostname:" + h))
-		return hex.EncodeToString(sum[:8])
-	}
-	return "0000000000000000"
-}
+// stableHostID is the daemon-side name of the one host-identity derivation;
+// the implementation moved to internal/lifecycle so the CLI verbs that build
+// a record-bearing plane out-of-band (`trouble sensors probe`, SPEC-03 §2)
+// derive the SAME identity as this boot does.
+func stableHostID() string { return lifecycle.StableHostID() }
 
 // readStatmRSS reads /proc/self/statm (resident pages × page size). A failure
 // returns 0, which the health assembly reports as an unknown watermark rather

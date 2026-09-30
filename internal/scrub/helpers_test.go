@@ -105,19 +105,49 @@ func readTestdata(rel string) (string, error) {
 }
 
 // mustMkdirTemp makes a state root that the ledger accepts (never under /tmp,
-// SPEC-01 §4.3) and cleans it up with the test.
+// SPEC-01 §4.3) and cleans it up with the test. It must NOT be derived from the
+// repo cwd: when the checkout itself lives under /tmp (ephemeral CI clone,
+// review clone), TROUBLE-LEDGER-012 would refuse every state root. Resolve a
+// writable scratch root outside /tmp instead: $TROUBLE_TEST_SCRATCH_ROOT if
+// set, else the user cache dir, else $HOME. If all of those fail we still fall
+// back to the old cwd behavior rather than skip the test.
 func mustMkdirTemp(t *testing.T, prefix string) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(wd, prefix)
+	root := testScratchRoot(t)
+	dir, err := os.MkdirTemp(root, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
+}
+
+// testScratchRoot picks a writable directory for scratch state roots that is
+// guaranteed not under /tmp even when the repo cwd is.
+func testScratchRoot(t *testing.T) string {
+	t.Helper()
+	if v := os.Getenv("TROUBLE_TEST_SCRATCH_ROOT"); v != "" {
+		return v
+	}
+	if cache, err := os.UserCacheDir(); err == nil && cache != "" {
+		root := filepath.Join(cache, "trouble-test-scratch")
+		if err := os.MkdirAll(root, 0o755); err == nil {
+			return root
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		root := filepath.Join(home, ".cache", "trouble-test-scratch")
+		if err := os.MkdirAll(root, 0o755); err == nil {
+			return root
+		}
+	}
+	// Last resort: the repo cwd (pre-fix behavior). Tests running there still
+	// fail the ledger guard, but only when nothing better exists.
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }
 
 func writeFileT(t *testing.T, path, content string) {
@@ -127,5 +157,27 @@ func writeFileT(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestMustMkdirTempNotUnderTmpOrRepoCwd is the TRBL-090 regression test: the
+// scratch state root must never be under /tmp (TROUBLE-LEDGER-012 refuses it,
+// SPEC-01 §4.3) even when the checkout itself lives under /tmp, and must not
+// pollute the repo cwd. Replicates the guard's predicate locally (test-only;
+// internal/ledger is not modified).
+func TestMustMkdirTempNotUnderTmpOrRepoCwd(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := mustMkdirTemp(t, ".scrub-regression-")
+	if clean := filepath.Clean(dir); clean == "/tmp" || strings.HasPrefix(clean, "/tmp/") {
+		t.Fatalf("scratch root %s is under /tmp; ledger guard TROUBLE-LEDGER-012 would refuse it", dir)
+	}
+	if rel, err := filepath.Rel(wd, dir); err == nil && !strings.HasPrefix(rel, "..") {
+		t.Fatalf("scratch root %s is inside repo cwd %s", dir, wd)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("scratch root %s does not exist: %v", dir, err)
 	}
 }

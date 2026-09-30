@@ -31,11 +31,13 @@ const (
 // real durability guarantees run against ledger.Ledger in e2e_test.go; the rest
 // use this so a test can inspect the exact record stream without a filesystem.
 type memSink struct {
-	mu    sync.Mutex
-	recs  []types.Record
-	seq   uint64
-	fail  error
-	delay time.Duration
+	mu      sync.Mutex
+	recs    []types.Record
+	seq     uint64
+	fail    error
+	delay   time.Duration
+	batches int // TRBL-084: AppendBatch call count
+	singles int // TRBL-084: single-record Append call count
 }
 
 func (m *memSink) Append(ctx context.Context, d types.RecordDraft) (types.Record, error) {
@@ -56,6 +58,7 @@ func (m *memSink) Append(ctx context.Context, d types.RecordDraft) (types.Record
 	if fail != nil {
 		return types.Record{}, fail
 	}
+	m.singles++ // TRBL-084: per-record window
 	m.seq++
 	rec := types.Record{
 		Seq: m.seq, RecID: fmt.Sprintf("rec_%d", m.seq),
@@ -91,7 +94,41 @@ func (m *memSink) ScanFrom(seq uint64, yield func(types.Record) bool) error {
 	return nil
 }
 
-// records of one kind.
+// AppendBatch (TRBL-084) is the batch member: one call = one window. It
+// allocates contiguous seqs and records the members in order, mirroring the
+// real ledger's §3.5a batch semantics at the observation level the tests need.
+func (m *memSink) AppendBatch(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error) {
+	m.mu.Lock()
+	delay, fail := m.delay, m.fail
+	m.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if fail != nil {
+		return nil, fail
+	}
+	m.batches++
+	recs := make([]types.Record, 0, len(drafts))
+	for _, d := range drafts {
+		m.seq++
+		recs = append(recs, types.Record{
+			Seq: m.seq, RecID: fmt.Sprintf("rec_%d", m.seq),
+			TS: types.FormatUTC(nowFunc()), Kind: d.Kind, SchemaVersion: 1,
+			Sig: d.Sig, Inc: d.Inc, Origin: d.Origin, Actor: d.Actor,
+			Redactions: d.Redactions, Payload: d.Payload,
+			Codeplane: d.Codeplane,
+		})
+	}
+	m.recs = append(m.recs, recs...)
+	return recs, nil
+}
+
 // setDelay sets the sink's simulated write latency (races-free with Append).
 func (m *memSink) setDelay(d time.Duration) {
 	m.mu.Lock()
@@ -115,6 +152,15 @@ func (m *memSink) count() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.recs)
+}
+
+// windowCounts (TRBL-084) reports how many write calls reached the sink:
+// batches vs single-record appends. The batch path must show as 1 batch and
+// 0 singles for one admitted event that opens a group.
+func (m *memSink) windowCounts() (batches, singles int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.batches, m.singles
 }
 
 // testProjects is the two-project fixture the AC-18 lab shape uses.

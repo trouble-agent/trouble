@@ -29,6 +29,15 @@ type ledgerSink interface {
 	LastSeq() uint64
 }
 
+// ledgerBatchSink is the optional batch side (TRBL-084): a sink that can write
+// K records in ONE group-commit window (SPEC-01 §3.5a). *ledger.Ledger
+// satisfies it through LedgerSink.AppendBatch; a sink without the method keeps
+// the plain per-record ledgerSink surface — the call site upgrades via type
+// assertion, never a hard requirement.
+type ledgerBatchSink interface {
+	AppendBatch(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error)
+}
+
 // ledgerReader is the optional read side: when the sink can scan, sentinel
 // rebuilds its group index at boot instead of starting blind (§3.3, §4.2 step 3).
 // It is an addition to the §2.2 surface, documented as a deviation.
@@ -60,6 +69,16 @@ func (s LedgerSink) Append(ctx context.Context, d types.RecordDraft) (types.Reco
 		return types.Record{}, errors.New("sentinel: nil ledger")
 	}
 	return s.L.Append(ctx, d)
+}
+
+// AppendBatch appends drafts through the real ledger in ONE group-commit
+// window (TRBL-084): the batch is the durability unit (§3.5a), so nil error
+// means every returned record is durable.
+func (s LedgerSink) AppendBatch(ctx context.Context, drafts []types.RecordDraft) ([]types.Record, error) {
+	if s.L == nil {
+		return nil, errors.New("sentinel: nil ledger")
+	}
+	return s.L.AppendBatch(ctx, drafts)
 }
 
 // LastSeq reports the ledger's sequence watermark.
@@ -1103,6 +1122,68 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		extra["item_types"] = ev.ItemTypes
 	}
 	payload := eventRecordPayload(ev, sig, itemType, redactions, extra)
+	edraft := types.RecordDraft{
+		Kind:       types.KEvent,
+		Sig:        sigStr,
+		Origin:     types.Origin{HostID: s.cfg.HostID, Source: "sentinel", Route: string(s.routeTable.resolve(sigStr))},
+		Actor:      s.cfg.Actor,
+		Redactions: redactions,
+		Payload:    payload,
+	}
+	// TRBL-084: the group create/release/flush records for THIS admission are
+	// prepared before the write (their content is derived from the observe
+	// above, unchanged) so event + group members can share ONE group-commit
+	// window when the sink batches. The watermark inside the group record must
+	// still be THIS event's seq (the batch is contiguous and the event is
+	// member 0, so the event lands at sinkLastSeq+1): set it before the group
+	// state is snapshotted, and re-stamp with the durable seq after the batch
+	// returns. A rebuild then replays exactly the events the counters do not
+	// include and no others (§3.3).
+	eventSeq := s.sink.LastSeq() + 1
+	if hasGroupPending := res.created || res.release != "" || res.flush; hasGroupPending {
+		s.groups.markFlushed(digest, eventSeq, s.sampleRateFor(digest))
+	}
+	gdraft, hasGroup, flushDraft, hasFlush := s.groupAdmissionDraft(digest, sigStr, entry, ev, res)
+
+	if recs, berr, batched := s.appendRecordBatch(ctx, draftsForBatch(edraft, gdraft, hasGroup, flushDraft, hasFlush)); batched {
+		// One window for the records one admitted event emits together. The
+		// event record is batch member 0: a batch failure means the event is
+		// not durable either, so the request fails exactly as a failed event
+		// append did. The group arm stays best-effort — its loss is only the
+		// logged failure it was before.
+		if berr != nil {
+			if hasGroup || hasFlush {
+				s.logger.Printf("sentinel: group records in ingest batch failed: %v", berr)
+			}
+			if e, isErr := berr.(*Error); isErr {
+				return types.Record{}, e
+			}
+			return types.Record{}, &Error{
+				Code:   types.CodeSentinel010,
+				Status: http.StatusInternalServerError,
+				Causes: []string{causeOverloaded},
+				Msg:    berr.Error(),
+			}
+		}
+		rec := recs[0]
+		s.counters.events.Add(1)
+		entry.mu.Lock()
+		entry.eventsTotal++
+		entry.lastEvent = ev.TS
+		if disposition == dispSampled {
+			entry.sampled++
+		}
+		entry.mu.Unlock()
+		if disposition == dispSampled {
+			s.groups.markDropped(digest, 1, outcome.sampleRate)
+			s.counters.sampled.Add(1)
+		}
+		if res.created || res.release != "" || res.flush {
+			s.groups.markFlushed(digest, rec.Seq, s.sampleRateFor(digest))
+		}
+		return rec, nil
+	}
+
 	rec, aerr := s.appendRecord(ctx, types.KEvent, sigStr, "sentinel", payload, redactions)
 	if aerr != nil {
 		return types.Record{}, aerr
@@ -1119,10 +1200,6 @@ func (s *Server) admitEvent(ctx context.Context, entry *projectEntry, ev *rawEve
 		s.groups.markDropped(digest, 1, outcome.sampleRate)
 		s.counters.sampled.Add(1)
 	}
-
-	// Group records: create / release / the 100-event flush. The watermark is
-	// this event's seq, so a rebuild replays exactly the events the counters do
-	// not include and no others (§3.3).
 	if res.created || res.release != "" || res.flush {
 		s.groups.markFlushed(digest, rec.Seq, s.sampleRateFor(digest))
 	}

@@ -136,13 +136,27 @@ type groupEntry struct {
 	retired  bool // evicted cold: kept in the order slice, skipped by the sieve
 }
 
-// newGroupLocked creates and registers a group.
+// newGroupLocked creates and registers a group. A slot released by a dropped
+// cold group is reused before the parallel rank arrays grow: without that,
+// `order`/`counts`/`rates`/`trends`/`retired` gain one slot per distinct group
+// ever seen and never shrink — an unbounded structure §3.6 forbids (TRBL-092).
 func (ix *index) newGroupLocked(digest string) *groupEntry {
 	ge := &groupEntry{bytes: 512}
 	ge.stat.Digest = digest
 	ge.stat.GroupID = types.NewID(types.PGrp)
 	ge.stat.Counters.SampleRate = 1
 	ix.groups[digest] = ge
+	if n := len(ix.freeSlots); n > 0 {
+		ge.slot = ix.freeSlots[n-1]
+		ix.freeSlots = ix.freeSlots[:n-1]
+		ix.order[ge.slot] = ge
+		ix.counts[ge.slot] = 0
+		ix.rates[ge.slot] = 0
+		ix.trends[ge.slot] = 0
+		ix.retired[ge.slot] = false
+		ix.indexBytes += 512 + 25
+		return ge
+	}
 	ge.slot = len(ix.order)
 	ix.order = append(ix.order, ge)
 	ix.counts = append(ix.counts, 0)
@@ -151,6 +165,22 @@ func (ix *index) newGroupLocked(digest string) *groupEntry {
 	ix.retired = append(ix.retired, false)
 	ix.indexBytes += 512 + 25
 	return ge
+}
+
+// releaseSlotLocked frees the slot of an entry that left the index entirely
+// (neither live nor in the cold shadow), so a later group can take it.
+func (ix *index) releaseSlotLocked(ge *groupEntry) {
+	if ge == nil || ge.slot < 0 || ge.slot >= len(ix.order) {
+		return
+	}
+	ix.order[ge.slot] = nil
+	ix.counts[ge.slot] = 0
+	ix.rates[ge.slot] = 0
+	ix.trends[ge.slot] = 0
+	ix.retired[ge.slot] = true
+	ix.freeSlots = append(ix.freeSlots, ge.slot)
+	ix.indexBytes -= 512 + 25
+	ge.slot = -1
 }
 
 // rankKeys refreshes a group's parallel rank keys. The top-N sieve streams a
@@ -179,6 +209,7 @@ type index struct {
 	rates         []float64
 	trends        []float64
 	retired       []bool // parallel eviction flags: the sieve never derefs
+	freeSlots     []int  // slots of dropped entries, reused by new groups (TRBL-092)
 	cold          map[string]*groupEntry
 	sigToDigest   map[string]string
 	mergeToDigest map[string]string
@@ -957,6 +988,18 @@ func (ix *index) applyEventLocked(rec *types.Record, ts time.Time) {
 		ge.stat.FirstSeenTS = rec.TS
 		ge.firstSeq = rec.Seq
 	}
+	// A group's merge key is RE-DERIVED per arrival (a class/subject pair that
+	// changes with the diagnosis), while `mergeToDigest` is a last-writer-wins
+	// reverse index with exactly one live entry per key. When the key rotates,
+	// the abandoned entry kept pointing at this digest forever, so the map grew
+	// with the number of DISTINCT keys ever seen instead of the live key space —
+	// the TRBL-092 leak shape. Sigs are deliberately NOT pruned here: `sigToDigest`
+	// is a many-to-one alias map that `incidentForSig`/AC-22 requires (three
+	// arrival paths sharing one merge key must reach one incident), so its bound
+	// is the live-group count, enforced by eviction instead.
+	if prevMK := ge.stat.MergeKey; prevMK != "" && prevMK != mergeKey && ix.mergeToDigest[prevMK] == digest {
+		delete(ix.mergeToDigest, prevMK)
+	}
 	ge.stat.Sig = rec.Sig
 	if mergeKey != "" {
 		ge.stat.MergeKey = mergeKey
@@ -1273,6 +1316,56 @@ func (ix *index) touchSource(rec *types.Record, ts time.Time) {
 	}
 }
 
+// expireColdLocked drops the least-recently-seen cold groups and releases their
+// slots. The cold shadow is a RETENTION area, not a second index: without this
+// pass it kept one entry per eviction forever, so a churn of distinct groups
+// made the combined footprint grow without bound — the unbounded structure §3.6
+// forbids (TRBL-092: the +7.3 MB RSS split between this shadow and the group
+// entry/parallel arrays). The SIG/MERGE alias entries of a dropped group ARE
+// deleted here (the group is gone, unlike an eviction where the cold shadow
+// still answers for it); alias entries of a live or cold group are never
+// touched, which is what keeps AC-22's one-incident-per-sig-space resolution
+// working. The batch shape matches the sensors' stabilizer tables.
+func (ix *index) expireColdLocked() {
+	if ix.opts.MaxGroups <= 0 {
+		return
+	}
+	over := len(ix.cold) - ix.opts.MaxGroups
+	if over <= 0 {
+		return
+	}
+	// Expire the FULL overshoot: a capped batch lets the shadow sit up to one
+	// batch above its own bound (TRBL-092 test: 17 vs MaxGroups=16), which also
+	// pushes the parallel slot arrays past their ceiling. The churn shape this
+	// guard exists for produces large overshoots per arrival, so the batch cap
+	// buys nothing — the bound is the amortized guarantee §3.6 requires.
+	batch := over
+	type victim struct {
+		key  string
+		seen string
+	}
+	victims := make([]victim, 0, batch)
+	for k, ge := range ix.cold {
+		victims = append(victims, victim{key: k, seen: ge.stat.LastSeenTS})
+	}
+	sort.Slice(victims, func(i, j int) bool { return victims[i].seen < victims[j].seen })
+	for i := 0; i < batch && i < len(victims); i++ {
+		v := victims[i]
+		ge := ix.cold[v.key]
+		if ge == nil {
+			continue
+		}
+		delete(ix.cold, v.key)
+		if ge.stat.Sig != "" && ix.sigToDigest[ge.stat.Sig] == v.key {
+			delete(ix.sigToDigest, ge.stat.Sig)
+		}
+		if ge.stat.MergeKey != "" && ix.mergeToDigest[ge.stat.MergeKey] == v.key {
+			delete(ix.mergeToDigest, ge.stat.MergeKey)
+		}
+		ix.releaseSlotLocked(ge)
+	}
+}
+
 // evictIfNeededLocked applies rung 4: the least-recently-seen group with no open
 // incident goes cold, its counts preserved in a per-day aggregate row.
 func (ix *index) evictIfNeededLocked() {
@@ -1308,6 +1401,12 @@ func (ix *index) evictIfNeededLocked() {
 	}
 	delete(ix.groups, victim)
 	ix.cold[victim] = ge
+	// the cold shadow shares the live bound: drop the oldest cold groups (and
+	// release their slots) AFTER parking the victim, so live+cold lands at exactly
+	// 2× index_max_groups (expiring first would let the shadow sit one victim
+	// above its bound — 17 vs 16 in the TRBL-092 bound test). Neither the maps
+	// nor the parallel arrays grow with the number of distinct groups ever seen.
+	ix.expireColdLocked()
 	if ix.mergeToDigest[ge.stat.MergeKey] == victim {
 		delete(ix.mergeToDigest, ge.stat.MergeKey)
 	}

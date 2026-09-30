@@ -343,7 +343,7 @@ func (d *dashReader) GroupsSince(seq uint64, limit int) []types.GroupStat {
 	ix.mu.RLock()
 	out := make([]types.GroupStat, 0, 16)
 	for _, ge := range ix.order {
-		if ge.retired || ge.lastSeq <= seq {
+		if ge == nil || ge.retired || ge.lastSeq <= seq {
 			continue
 		}
 		st := ge.stat

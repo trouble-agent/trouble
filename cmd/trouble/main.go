@@ -47,6 +47,7 @@ usage:
   trouble hub archive [--dry-run] [--file FILE] [--force]
   trouble hub dedup --key KEY [--json]
   trouble hub drain [--timeout DURATION]
+  trouble sensors probe [--json] [--timeout DURATION]
   trouble --version
 
 --token-file PATH (alias --dashboard-token_file PATH) is how the dashboard token
@@ -101,6 +102,8 @@ func run(args []string) int {
 		return cmdDashboard(args[1:])
 	case "hub":
 		return cmdHub(args[1:])
+	case "sensors":
+		return cmdSensors(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

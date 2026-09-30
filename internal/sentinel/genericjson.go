@@ -47,6 +47,9 @@ func parseGenericEvent(obj map[string]any) (*rawEvent, *Error) {
 		ev.Message = v
 	} else if v, present := obj["message"]; present && v != nil {
 		causes = append(causes, "message_not_string")
+		// TRBL-088: teach the caller the accepted shape — `message` must be a
+		// string (≤16KB) or absent in favor of an `exception` object.
+		causes = append(causes, "message_shape_expected")
 	}
 	if v, ok := obj["exception"].(map[string]any); ok {
 		ev.Frames, ev.ExcClass, ev.ExcValue = genericException(v, &causes)

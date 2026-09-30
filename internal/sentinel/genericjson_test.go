@@ -125,6 +125,31 @@ func TestGenericJSONFieldLimits(t *testing.T) {
 	_ = readBody(t, resp)
 }
 
+// TestGenericJSONMessageShapeHint pins TRBL-088: when `message` is present but
+// not a string, the 400 causes must carry a shape hint teaching the caller the
+// accepted §3.6 shape, alongside the original message_not_string cause.
+func TestGenericJSONMessageShapeHint(t *testing.T) {
+	ts := newTestServer(t, func(c *Config) { c.CanaryProject = "" })
+	defer ts.close()
+	resp := ts.postGeneric(t, `{"message":42}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status %d, want 400", resp.StatusCode)
+	}
+	var out struct {
+		Detail string   `json:"detail"`
+		Causes []string `json:"causes"`
+	}
+	if err := json.Unmarshal(readBody(t, resp), &out); err != nil {
+		t.Fatalf("error body: %v", err)
+	}
+	if !contains(out.Causes, "message_not_string") {
+		t.Errorf("causes %v lost message_not_string", out.Causes)
+	}
+	if !contains(out.Causes, "message_shape_expected") {
+		t.Errorf("causes %v do not carry the shape hint message_shape_expected", out.Causes)
+	}
+}
+
 // TestGenericJSONInvalidLevelDegrades pins §3.6: an unrecognized level becomes
 // `error` with a counter — never a refusal.
 func TestGenericJSONInvalidLevelDegrades(t *testing.T) {

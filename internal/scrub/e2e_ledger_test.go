@@ -44,16 +44,41 @@ func newTestEngine(t *testing.T, cfg string) *scrub.Engine {
 
 func mustMkdirTemp(t *testing.T, prefix string) string {
 	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir, err := os.MkdirTemp(wd, prefix)
+	root := testScratchRoot(t)
+	dir, err := os.MkdirTemp(root, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 	return dir
+}
+
+// testScratchRoot picks a writable directory for scratch state roots that is
+// guaranteed not under /tmp even when the repo cwd is. Same fallback chain as
+// the in-package helper in helpers_test.go: env override, user cache dir, $HOME,
+// then the repo cwd as last resort.
+func testScratchRoot(t *testing.T) string {
+	t.Helper()
+	if v := os.Getenv("TROUBLE_TEST_SCRATCH_ROOT"); v != "" {
+		return v
+	}
+	if cache, err := os.UserCacheDir(); err == nil && cache != "" {
+		root := filepath.Join(cache, "trouble-test-scratch")
+		if err := os.MkdirAll(root, 0o755); err == nil {
+			return root
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		root := filepath.Join(home, ".cache", "trouble-test-scratch")
+		if err := os.MkdirAll(root, 0o755); err == nil {
+			return root
+		}
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wd
 }
 
 func writeFileT(t *testing.T, path, content string) {

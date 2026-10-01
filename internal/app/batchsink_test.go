@@ -123,7 +123,7 @@ func newIngestChain(t *testing.T, batched bool) *ingestChain {
 		t.Fatalf("scrub.New: %v", err)
 	}
 	l, err := ledger.Open(context.Background(), ledger.Options{
-		Root:      filepath.Join(root, "ledger"),
+		Root: filepath.Join(root, "ledger"),
 		// Sharp window policy: a small window keeps the fsync COUNT the
 		// structural assertion (40ms windows do not coalesce across the
 		// test's sequential requests, and MaxBatchRecords is far above the

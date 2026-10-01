@@ -5,9 +5,9 @@
   "base": "origin/main",
   "base_sha": "5d9f72b",
   "rows": [
-    {"id": "QA-TROUBLE-12", "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-12", "branch": "wt/QA-TROUBLE-12"},
-    {"id": "TRBL-084", "worktree": "/home/kara/worktrees/trouble-TRBL-084", "branch": "wt/TRBL-084"},
-    {"id": "TRBL-078", "worktree": "/home/kara/worktrees/trouble-TRBL-078", "branch": "wt/TRBL-078"},
-    {"id": "TRBL-082", "worktree": "/home/kara/worktrees/trouble-TRBL-082", "branch": "wt/TRBL-082"}
+    {"id": "QA-TROUBLE-12", "worktree": "~/worktrees/trouble-QA-TROUBLE-12", "branch": "wt/QA-TROUBLE-12"},
+    {"id": "TRBL-084", "worktree": "~/worktrees/trouble-TRBL-084", "branch": "wt/TRBL-084"},
+    {"id": "TRBL-078", "worktree": "~/worktrees/trouble-TRBL-078", "branch": "wt/TRBL-078"},
+    {"id": "TRBL-082", "worktree": "~/worktrees/trouble-TRBL-082", "branch": "wt/TRBL-082"}
   ]
 }

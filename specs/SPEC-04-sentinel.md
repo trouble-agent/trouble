@@ -446,7 +446,8 @@ bug class land in the SAME group (AC-18, AC-22). Auth is the DSN public key in a
 `?sentry_key=` is the documented curl form. Body cap, gzip handling, quota, loss policy, canary
 exemption and error shape are byte-identical to the envelope path. A body that is not a JSON object,
 exceeds a limit, or carries none of `message`/`exception` → 400 + TROUBLE-SENTINEL-019 with
-`causes` naming each field.
+`causes` naming each field; when `message` is present but not a string, `causes` additionally
+carries the shape hint `message_shape_expected` so the caller learns the accepted shape.
 
 ### 3.7 Request, connection and trust limits
 

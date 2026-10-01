@@ -162,6 +162,12 @@ why `internal/ledger/durability_test.go` asserts the fsync count is *structural*
 (`ceil(records / max_batch_records)`) rather than a timing proxy, and why the test-only per-line mode
 exists at all — so the amortized mode's advantage cannot be optimised away silently.
 
+That per-record figure is amortized: it holds only while many records share each 200 ms fsync
+window, whereas an event ingested on its own pays a group commit per record kind — event →
+group → incident, about three windows — which measured about 0.65 s end to end per event over ten
+sequential single-event ingests (TRBL-084). Low-volume deployments that feed events one at a time,
+the common case, therefore see roughly 650 ms per event, not the 1.94 µs headline.
+
 ## Ledger file layout
 
 ```
@@ -318,7 +324,11 @@ assertions). The full 60s load test saturates the host for its duration, so run
 the tree with `-p 1` when it is in the same run — otherwise it can push
 `internal/ledger`'s fsync-window and `internal/scrub`'s µs/KiB assertions over
 their host-measured bounds. Measured numbers, and the reason the §7 latency budget
-is asserted at a host factor, are in `docs/operations.md` §13.
+is asserted at a host factor, are in `docs/operations.md` §13. Note that the
+fsync window is a group-commit amortization, not a latency floor: under a
+one-event-at-a-time load each ingested event pays about three group commits
+(event → group → incident) and lands on the order of ~650 ms end to end — see
+the durability-contract section above for the measured single-event cost.
 
 ### Smoke checks
 

@@ -127,6 +127,27 @@ func absentConfig(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "absent.toml")
 }
 
+// tempStateRootRefused makes a state root the boot gate MUST refuse with
+// TROUBLE-LIFECYCLE-004: a 0700 directory directly under the real /tmp, which
+// fs.forbidden_state_roots forbids. The command the test runs is an exact
+// argv, so the control arm is deterministic on every host: it cannot ride the
+// test tmpdir, because GOTMPDIR/TMPDIR move t.TempDir() elsewhere (e.g.
+// /mnt/bulk/go-tmp) where the forbidden-root check does not fire and the boot
+// reports 005 (mode) instead — the ordering regression this control exists to
+// refute would then be masked by a different, honest refusal.
+func tempStateRootRefused(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "trouble-test-004-")
+	if err != nil {
+		t.Fatalf("mkdirtemp /tmp: %v", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func rowFor(t *testing.T, rows []types.ConfigValue, key string) types.ConfigValue {
 	t.Helper()
 	for _, r := range rows {
@@ -552,7 +573,11 @@ func TestSecretShapedFlagValueStillRefusedOnArgv(t *testing.T) {
 	}
 	// (d) control: the same argv shape failing a DIFFERENT gate reports that gate
 	// (the state root under /tmp, 004), so (c) is not "the child always exits 13".
-	code, out = runChild(t, "run", "--state_root", t.TempDir(), "--dashboard-mandate", secret)
+	// The root is created under the real /tmp, not t.TempDir(): GOTMPDIR moves
+	// the test tmpdir out of the forbidden-root set on some hosts, and the boot
+	// would then report 005 (mode) — an honest refusal, but the wrong gate for
+	// this control (QA-TROUBLE-12).
+	code, out = runChild(t, "run", "--state_root", tempStateRootRefused(t), "--dashboard-mandate", secret)
 	if code != 13 || !strings.Contains(out, string(types.CodeLifecycle004)) {
 		t.Errorf("daemon control with an unusable state root: exit %d, stderr %q; want 13 naming %s",
 			code, out, types.CodeLifecycle004)

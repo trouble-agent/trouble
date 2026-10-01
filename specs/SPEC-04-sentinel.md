@@ -372,6 +372,55 @@ A folded retry is never a dropped event: it moves its own counter (`counters.sup
 record says both numbers, and the fold's `op=update` record clears the group's dirty flag, so the
 periodic flush has nothing to repeat for the folds.
 
+### 3.4b The single-event ingest batch write path (TRBL-084)
+
+The §3.3 group table decides the records one admitted event emits (the `event`
+record, plus the `group` create/release record, plus the `group` flush record
+when the 100-event threshold crossed) — but it does not have to PAY one
+group-commit window per record. SPEC-12 §7b measured the serial posture and
+TRBL-084's follow-up found the ingest path still paying ~3 windows (event /
+group / incident-scale round-trip ≈ 650 ms) because the composition root's
+sinks carried only `Append`. The write half of the single-event ingest is the
+batch path, spelled here per SPEC-01 §3.5a rule 2:
+
+- **One offer, one window.** The `event` draft and its group draft(s) are
+  prepared BEFORE the write (their content derives from the same §3.3 observe
+  result the sequential path used) and handed to the sink's `AppendBatch` in
+  one call: ONE group-commit window (SPEC-01 §3.5a) covers everything one
+  admitted event emits. A sink without the batch capability keeps the
+  sequential per-record path unchanged — identical records, identical error
+  semantics, one window per record (the §2.2 ledger seam stays as written;
+  the batch member is an optional capability asserted by type, never a
+  required method, so no sink is forced to batch).
+- **The record is unchanged.** A batch member carries the same kinds, sigs,
+  origins (including the §3.10a `origin.route` stamp), redaction counts and
+  payloads the sequential path wrote; the group watermark inside the batch's
+  group record is the EVENT record's seq (the batch is contiguous and the
+  event is member 0), and the in-memory index is re-stamped with the durable
+  seq after the batch returns. A rebuild replays exactly the events the
+  counters do not include and no others (§3.3).
+- **Error semantics per member role.** The event record is batch member 0: a
+  batch failure means the event is not durable, so the request fails exactly
+  as a failed event `Append` did (010, the hub/overload mapping of §2.2's
+  backpressure rule). The group members keep the sequential path's
+  best-effort posture: their loss is the logged failure it always was. The
+  `ledger_wait` bound applies to the whole batch.
+- **The durability trade is named (the §3.5a conflict rule, applied).** A
+  caller handing the event+group pair to one batch accepts
+  "every record durable when the batch returns" in place of per-record
+  durable-on-return: the worst case a SIGKILL can lose inside the window is
+  the batch — the event record plus its group create/release — instead of
+  the event alone. The loss is bounded by `ledger.max_batch_records` and
+  self-healing: the sender's retry re-admits the event (the §6.6 dedup window
+  or the §4.4a on-ramp fold answers an already-durable retry), and the group
+  index re-folds it; no count, no incident and no watermark survives in a
+  state the sequential path would not have reached.
+- **Verification.** `internal/app/batchsink_test.go` drives the composition
+  root's own sinks over the real ledger: one single-event ingest POST = 1
+  `FsyncCalls` delta on the batched sink, = 2 on the batchless control (the
+  pre-fix posture, kept as the control arm); both sinks satisfy the batch
+  seam; the latency arm reports before/after p50/p95 on the same host.
+
 ### 3.5 Collector parsers (v0.1: `go-panic`, `py-traceback`, `node-reject`)
 
 Sources: the collector journald child (sentinel-owned, one supervised `journalctl -f -o json

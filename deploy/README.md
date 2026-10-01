@@ -81,14 +81,24 @@ Build the stamped binaries and start the daemon in the foreground. Leave this
 terminal running until the shutdown step.
 
 ```sh
-# Requires Go 1.26+ on PATH — install it first from https://go.dev/dl/ (see above);
-# without it this line stops at `/bin/sh: 1: go: not found`.
-make bin
+# Requires Go 1.26+ on PATH (a distro Go with GOTOOLCHAIN=auto also works) —
+# install it first from https://go.dev/dl/ (see above); without it this line
+# stops at `/bin/sh: 1: go: not found`. make is OPTIONAL: the stamped build is
+# two go build lines (see README.md "Build and test") — the direct equivalent
+# of `make bin`, used here:
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
+GIT_SHA=$(git rev-parse --short=7 HEAD)          # no .git? pass the source's short sha
+BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+LDFLAGS="-s -w -X github.com/trouble-agent/trouble/internal/lifecycle.Version=$VERSION \
+  -X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$GIT_SHA \
+  -X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$BUILD_TIME"
+CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/troubled ./cmd/troubled
+CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/trouble ./cmd/trouble
 bin/troubled --config "$CONFIG_DIR/config.toml"
 ```
 
 A checkout supplied by a source transfer (an exported tarball, `git archive`,
-a release archive — anything without `.git`) gives `make bin` nothing to
+a release archive — anything without `.git`) gives the build nothing to
 derive the version stamp from, and the pair comes out unstamped:
 `trouble --version` prints
 `0.0.0-dev unknown <build-time> [UNSTAMPED (degraded; trouble install
@@ -102,7 +112,8 @@ of the compose quickstart below); on the command line it overrides the
 Makefile default whose fallback is the `unknown` sentinel:
 
 ```sh
-make bin GIT_SHA=<short-sha-of-the-transferred-source>
+# No .git — same direct build with the sha of the transferred source:
+GIT_SHA=<short-sha-of-the-transferred-source>  # then run the go build block above
 bin/trouble --version   # → 0.0.0-dev <sha> <build-time> [stamped]
 ```
 
@@ -296,7 +307,8 @@ resolve. `nogit00` is a placeholder, not the unstamped sentinel (`unknown`);
 
 `trouble install [--scope user|system] [--root DIR] [--check] [--dry-run] [--force]`
 is not the first-run path. Run it only after the foreground quickstart succeeds,
-a stamped `make bin` build is available, the target systemd scope is usable, and
+a stamped build is available (`make bin` or the direct `go build` equivalent —
+make is OPTIONAL), the target systemd scope is usable, and
 `[escalate] channels` is configured. `trouble install --check` validates the
 installed units and escalation wiring without writing them.
 

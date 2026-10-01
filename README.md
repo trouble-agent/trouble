@@ -224,7 +224,8 @@ facts that surprise people) lives in `docs/operations.md` §12–§18.
 The canonical fresh-install, foreground-run and first-event path is
 [deploy/README.md — First foreground run](deploy/README.md#first-foreground-run-canonical-quickstart).
 It is the only quickstart: it covers the supported Go toolchain, local state and
-secret-file modes, the required host/project edits, `make bin`, foreground
+secret-file modes, the required host/project edits, the stamped build (make
+optional — direct `go build` form below), foreground
 `troubled`, readiness, generic JSON ingestion, ledger proof and clean shutdown.
 
 Do not start with `trouble install`; systemd installation has additional
@@ -255,7 +256,15 @@ build anything:
 go version          # → go version go1.26.x <os>/<arch>
 ```
 
-Without it the first build command below (`make bin`) fails as
+A distro-packaged Go older than 1.26 also works with `GOTOOLCHAIN=auto` in the
+environment: the `go 1.26.0` directive in `go.mod` then makes the `go` command
+download and use a 1.26+ toolchain for this build automatically.
+
+**`make` is NOT required.** The Makefile's `bin` target is only two `go build`
+lines with version-stamp `-ldflags` variables — the direct equivalents appear in
+[Build and test](#build-and-test) below, so a bare agent with `go` but no build
+tools (no `cc`, no `make`) can build everything. Without `go` itself the first
+build command below fails as
 `/bin/sh: 1: go: not found` instead of compiling. Nothing else is needed for a
 first boot: no cgo, no external service. The build does pull in a small set of
 third-party Go modules (the TOML parser, D-Bus bindings, a Redis client, and
@@ -280,7 +289,16 @@ go install github.com/trouble-agent/trouble/cmd/troubled@latest   # the daemon
 ## Build and test
 
 ```
-make bin                                     # the stamped build (version/GitSHA/BuildTime)
+# Stamped build — `make bin` equivalent, no make needed (make is OPTIONAL):
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
+GIT_SHA=$(git rev-parse --short=7 HEAD)          # no .git? pass the source's short sha
+BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+LDFLAGS="-s -w -X github.com/trouble-agent/trouble/internal/lifecycle.Version=$VERSION \
+  -X github.com/trouble-agent/trouble/internal/lifecycle.GitSHA=$GIT_SHA \
+  -X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$BUILD_TIME"
+CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/troubled ./cmd/troubled
+CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/trouble ./cmd/trouble
+
 go build ./...                               # unstamped: fine for a quick compile check
 go test -count=1 ./internal/...              # the CI gate
 go test -count=1 -short ./internal/...        # skips the large fixtures and the 60s load test
@@ -288,7 +306,8 @@ go test -count=1 -run TestLoadIngestThroughput ./internal/sentinel/   # SPEC-04 
 go test -count=1 ./...                       # everything, including cmd/ and the e2e smoke
 ```
 
-`make bin` is the build that matters: `go build` alone leaves the binary *unstamped*,
+`make bin` (or the direct `go build` block above — they are equivalent) is the
+build that matters: an unstamped binary, which `go build` alone produces,
 which `/health.json` reports as a degraded posture (`version=0.0.0-dev`,
 `git_sha=unknown`) by design — see SPEC-12 §3.4. Use the plain `go build ./...` form
 only to check that the tree compiles.

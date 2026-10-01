@@ -382,6 +382,127 @@ func (s *Server) appendRecordDraft(ctx context.Context, draft types.RecordDraft)
 	}
 }
 
+// groupAdmissionDraft (TRBL-084) prepares the group create/release record for
+// THIS admission — and the flush record when the 100-event threshold crossed —
+// as drafts, exactly as the sequential path would have written them
+// (attachCodeplane included). hasGroup/hasFlush report whether each draft
+// exists.
+func (s *Server) groupAdmissionDraft(digest, sigStr string, entry *projectEntry, ev *rawEvent, res observeResult) (gdraft types.RecordDraft, hasGroup bool, flushDraft types.RecordDraft, hasFlush bool) {
+	if res.created || res.release != "" {
+		st, ok := s.groups.state(digest)
+		if !ok {
+			return gdraft, false, flushDraft, false
+		}
+		switch {
+		case res.created:
+			op := "create"
+			extraG := map[string]any{}
+			if verdict := s.releases.regressionVerdict(sigStr, ev.Release); verdict != "" {
+				extraG["regression"] = verdict
+				s.noteRegression(sigStr, verdict)
+				op = "release"
+			}
+			gdraft = types.RecordDraft{Kind: types.KGroup, Sig: sigStr, Payload: groupRecordPayload(op, st, extraG)}
+		case res.release != "":
+			extraG := map[string]any{"release": res.release}
+			if verdict := s.releases.regressionVerdict(sigStr, res.release); verdict != "" {
+				extraG["regression"] = verdict
+				s.noteRegression(sigStr, verdict)
+			}
+			gdraft = types.RecordDraft{Kind: types.KGroup, Sig: sigStr, Payload: groupRecordPayload("release", st, extraG)}
+		}
+		s.attachCodeplane(&gdraft, digest, entry.proj.ID, st)
+		return gdraft, true, flushDraft, false
+	}
+	if res.flush {
+		if st, ok := s.groups.state(digest); ok {
+			flushDraft = types.RecordDraft{Kind: types.KGroup, Sig: sigStr, Payload: groupRecordPayload("flush", st, nil), Redactions: 0}
+			return gdraft, false, flushDraft, true
+		}
+	}
+	return gdraft, false, flushDraft, false
+}
+
+// draftsForBatch (TRBL-084) assembles the batch members in order: the event
+// record first (member 0 — the record admitEvent returns), then the group
+// create/release record, then the flush record. No group/flush record means a
+// one-member batch, which is the same single window the event paid before.
+func draftsForBatch(edraft types.RecordDraft, gdraft types.RecordDraft, hasGroup bool, flushDraft types.RecordDraft, hasFlush bool) []types.RecordDraft {
+	drafts := make([]types.RecordDraft, 0, 3)
+	drafts = append(drafts, edraft)
+	if hasGroup {
+		drafts = append(drafts, gdraft)
+	}
+	if hasFlush {
+		drafts = append(drafts, flushDraft)
+	}
+	return drafts
+}
+
+// appendRecordBatch (TRBL-084) is the multi-draft shape of appendRecordDraft:
+// it stamps Origin/Actor on every draft exactly as the single-record path
+// would, then writes them through the sink's batcher in ONE group-commit
+// window. Nil error means every record is durable (the batch is the durability
+// unit, §3.5a); the LedgerWait bound applies to the whole batch. A sink
+// without a batcher returns ok=false and the caller falls back to the
+// sequential per-record path — identical records, identical error semantics,
+// one window per record as before.
+func (s *Server) appendRecordBatch(ctx context.Context, drafts []types.RecordDraft) (recs []types.Record, err error, ok bool) {
+	bs, batchable := s.sink.(ledgerBatchSink)
+	if !batchable {
+		return nil, nil, false
+	}
+	for i := range drafts {
+		d := &drafts[i]
+		if d.Origin.Source == "" {
+			d.Origin.Source = "sentinel"
+		}
+		if d.Payload == nil {
+			d.Payload = map[string]any{}
+		}
+		if d.Origin.HostID == "" {
+			d.Origin.HostID = s.cfg.HostID
+		}
+		if d.Origin.Route == "" {
+			d.Origin.Route = string(s.routeTable.resolve(d.Sig))
+		}
+		if d.Actor.Kind == "" {
+			d.Actor = s.cfg.Actor
+		}
+	}
+	type res struct {
+		recs []types.Record
+		err  error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		r, e := bs.AppendBatch(ctx, drafts)
+		ch <- res{r, e}
+	}()
+	t := time.NewTimer(s.cfg.LedgerWait.Std())
+	defer t.Stop()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			if hubCode := hub.CodeOf(r.err); hubCode != "" {
+				return nil, &Error{
+					Code:        types.CodeSentinel010,
+					Status:      statusForHub(r.err),
+					Causes:      []string{causeOverloaded},
+					Msg:         "ingestion unavailable: " + string(hubCode),
+					RetryAfterS: 1,
+				}, true
+			}
+			return nil, r.err, true
+		}
+		return r.recs, nil, true
+	case <-t.C:
+		return nil, errf(types.CodeSentinel010, "ledger backpressure", causeOverloaded), true
+	case <-ctx.Done():
+		return nil, errf(types.CodeSentinel010, "request cancelled during append", causeOverloaded), true
+	}
+}
+
 // eventRecordPayload builds the §4 `event` record payload for an admitted,
 // scrubbed event.
 func eventRecordPayload(ev *rawEvent, sig types.Sig, itemType string, redactions int, extra map[string]any) map[string]any {

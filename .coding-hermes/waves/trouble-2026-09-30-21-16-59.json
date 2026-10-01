@@ -1,0 +1,12 @@
+{
+  "tick": "trouble-2026-09-30-21-16-59",
+  "wave_budget": 6,
+  "workers": [
+    {"task": "TRBL-084", "brief": "ingest single-event AppendBatch round-trip"},
+    {"task": "TRBL-088", "brief": "ingest 400 error hint for message shape"},
+    {"task": "TRBL-090", "brief": "scrub helpers_test state root under /tmp clone"}
+  ],
+  "foreman_direct": ["TRBL-073 (untracked .sentinel-load-* residue sweep, trivial file deletion)"],
+  "skipped": ["TRBL-085 (wt/TRBL-085 already merged; ExpandTokenPath lands the fix)"],
+  "status": "dispatching"
+}

@@ -1,0 +1,12 @@
+{
+  "tick": "trouble-2026-10-01-23-32-48",
+  "wave_budget": 9,
+  "base": "origin/main",
+  "base_sha": "511c919",
+  "tasks": [
+    {"id": "RELEASE-002", "worktree": "/home/kara/worktrees/trouble-RELEASE-002", "branch": "wt/RELEASE-002", "class": "on-ramp dedup"},
+    {"id": "RELEASE-003", "worktree": "/home/kara/worktrees/trouble-RELEASE-003", "branch": "wt/RELEASE-003", "class": "spec selfcheck file-existence"},
+    {"id": "README-3", "worktree": "/home/kara/worktrees/trouble-README-3", "branch": "wt/README-3", "class": "docs load-shape caveat"}
+  ],
+  "note": "TRBL-082 excluded from wave: fix 16fba44 already merged at HEAD; row stale, foreman closes it serially."
+}

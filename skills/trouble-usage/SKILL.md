@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.0.0
+version: 1.1.0
 category: software-development
 ---
 
@@ -181,6 +181,17 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   renumbering). Specs are authority before the wave.
 * **Never bind the daemon on a port another trouble instance uses**; run
   throwaway state roots next to the live one, with distinct ports.
+
+* **Never mint a dashboard token while the daemon is down (TRBL-093, P1).** A
+  token minted between a stop and the next boot answers 401 forever, even though
+  the store looks right. Mint with the daemon running; the token then survives
+  restarts. And capture the one-shot plaintext with a strict full-line regex
+  (`grep -o 'tdt_[A-Za-z0-9_-]*'`) — a loose grep truncates tokens containing
+  `-` and a heredoc passes `$TOK` literally; the plaintext is unrecoverable.
+* **A fresh headless boot opens its first-minute breaker by design** (dbus
+  session noise → 20+ incidents in seconds → `rule:dbus_unit_failed` open, see
+  TRBL-094). Do not treat an open breaker on a brand-new install as a fault;
+  look for the real signal under it.
 
 ## Where the knowledge lives
 

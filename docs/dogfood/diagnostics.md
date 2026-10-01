@@ -369,3 +369,58 @@ transcript; here are the lessons that generalize.
   history), unknown-flag refusal returns rc=13, `config explain --key
   ingest.bind --json` emits provenance, `topology` renders. Four commands, no
   daemon, all from the public module path.
+
+## 2026-10-01 run — fresh-machine install + incident/dashboard loop (tick 17-02-42)
+
+### What was driven, and how it works
+
+The install leg prior tick 09-28 skipped (TRBL-089) ran for real on las-bunker-03
+agent 4812a03c: bundle-transfer (private repo, no credential — the per-file loop
+was replaced by ONE `git bundle` file, size-verified both sides), clone inside the
+agent, Go 1.26.5 tarball 31 s (README documents this prerequisite first — the
+quickstart passed the top-down-order test), `make bin` 39 s stamped e2b5b6d,
+canonical config edits, healthy <1 s, first event 200 cold 291 ms, ledger proof,
+auth fail-closed, clean stop, restart persistence verified.
+
+Then the ladder surface no prior run had touched on a CLEAN host: boot noise
+(dbus 36 events/8 s → 22 incidents/5 s → rule:dbus_unit_failed breaker open within
+the first minute), the groups page rendering the deliberate first POST grouped
+correctly (4 identical events → 1 event record + 4 group records, one sig), and
+dashboard pages at 0.9–4.3 ms with read-scope enforcement.
+
+### Why the traps exist (learned this run)
+
+- **Mint-while-daemon-down tokens 401 forever (TRBL-093, P1).** The CLI mint
+  writes the store; the daemon (on next boot) rejects the token. Contrast arms:
+  mint-while-up works immediately AND survives restart. The broken arm is narrow
+  and needs source triage in cmd/trouble vs internal/dashboard/tokens.go.
+- **A first boot is a guaranteed breaker trip.** Storm breakers keyed on
+  "N incidents in 5m" fire on a clean headless host's own session noise. Design
+  tension, not a bug: the breaker is correct; the first-minute noise is the
+  problem (TRBL-094, P2, consequence of TRBL-078 one rung up).
+- **Bundle > per-file loop for private repos on unattended surfaces.** One 20 MB
+  file vs hundreds of ssh cats; `git clone ~/x.bundle` gives real fetch semantics;
+  remember `git remote set-url origin <real-url>` afterward, and say "bundle-based"
+  in the report — it is not a network-fetch proof.
+
+### What held (the value case)
+
+Fresh machine, zero operator config beyond the documented edits: daemon healthy in
+under a second, ingest fail-closed on bad key, the ladder reacting to real host
+noise within seconds, the dashboard rendering real counts/rates immediately, ledger
+and tokens persisting across restart. The product promise — "a self-hosted incident
+brain that detects, records, and decides" — held end-to-end on a machine that had
+never seen it.
+
+### Harness lessons for the next runner
+
+- Bunker agent `/tmp` is root-owned: write build logs to `$HOME` (hit twice across
+  two runs — it is now a known agent property, not a fluke).
+- `head`/`tail` are absent on the bare agent; the quickstart's own curl+jq
+  dependency list is exactly right.
+- Two token-fumbling modes in one run: a heredoc that passes `$TOK` literally
+  (single-quote the heredoc delimiter AND verify `tok_len`), and grep truncation of
+  tokens containing `-`. The one-shot plaintext design makes script mistakes
+  permanent — mint interactively or capture with a strict full-line regex.
+- Verify token auth with `tok_len` + one immediately-following authed request in
+  the SAME ssh session; cross-session env assumptions cost three false 401s here.

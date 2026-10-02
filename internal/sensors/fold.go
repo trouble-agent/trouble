@@ -224,9 +224,14 @@ func (f *eventFold) close(ctx context.Context, emit EmitFunc, e *foldEntry) {
 
 // foldableObservation reports whether one event may be folded (SPEC-03 §3.8a):
 // a plain sampled observation (a sampler tick, never a trigger wake) for which
-// no rule fired. A firing event is the ladder's input and is always written
-// immediately, and a wake is an edge observation the sampler did not produce —
-// neither is a repeat.
+// no rule fired, OR a D-Bus outcome the merge tracker merely counted into an
+// already-open story with an unchanged signature (TRBL-075: res.Counted-only,
+// marked foldable_repeat — the arrival decided nothing outside the fold, so a
+// signature repeating 15x inside the merge window must not write 15 records). A
+// firing event is the ladder's input and is always written immediately, and a
+// wake is an edge observation the sampler did not produce — neither is a
+// repeat. Anything that changed incident state (Opened/Attached/Reopened)
+// carries no marker and is written immediately, exactly as today.
 func foldableObservation(ev types.SensorEvent, d types.RecordDraft) bool {
 	if ev.Wake {
 		return false
@@ -234,6 +239,11 @@ func foldableObservation(ev types.SensorEvent, d types.RecordDraft) bool {
 	if fire, _ := d.Payload["fire"].(bool); fire {
 		return false
 	}
-	backed, _ := ev.Detail["sample_backed"].(bool)
-	return backed
+	if backed, _ := ev.Detail["sample_backed"].(bool); backed {
+		return true
+	}
+	if repeat, _ := ev.Detail["foldable_repeat"].(bool); repeat {
+		return true
+	}
+	return false
 }

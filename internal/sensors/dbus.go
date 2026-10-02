@@ -911,6 +911,13 @@ func (s *Sensors) emitDBusOutcome(ctx context.Context, res mergeOutcome, manager
 		"window_s":          0,
 		"age_s":             0,
 	}
+	// TRBL-075: a counted-only arrival (the merge tracker counted it into an
+	// already-open story with an unchanged signature) decided nothing outside
+	// the fold, so it is marked foldable_repeat and the §3.8a sample fold may
+	// absorb it instead of writing one record per repeat.
+	if res.Counted && !res.Opened && !res.Attached && !res.Reopened {
+		detail["foldable_repeat"] = true
+	}
 	ev := types.SensorEvent{
 		ID:     types.NewID(types.PEv),
 		TS:     types.FormatUTC(s.now()),
@@ -959,6 +966,11 @@ func (s *Sensors) dbusOutcomeDraft(res mergeOutcome, manager, activeState, subst
 		"substr":            "",
 		"window_s":          0,
 		"age_s":             0,
+	}
+	// TRBL-075: the batch path carries the SAME marker as emitDBusOutcome so
+	// the two §3.3a surfaces stay indistinguishable (see above).
+	if res.Counted && !res.Opened && !res.Attached && !res.Reopened {
+		detail["foldable_repeat"] = true
 	}
 	ev := types.SensorEvent{
 		ID:     types.NewID(types.PEv),

@@ -322,7 +322,14 @@ func TestTokenCreateNoConfigNamesDefaultAndDoesNotWarn(t *testing.T) {
 	// A config path with no file behind it: the no-config case.
 	cfg := filepath.Join(base, "absent", "config.toml")
 	t.Setenv("TROUBLE_CONFIG_PATH", cfg)
-	t.Setenv("TROUBLE_STATE_ROOT", filepath.Join(base, "state"))
+	// TRBL-085: this scenario DECLARES a state root (env), so the resolved
+	// store is anchored to it, not the home default. The pure no-config
+	// default (no declared state root) is pinned by
+	// internal/lifecycle's TestResolveTokenFileNoDeclaredStateRootKeepsHomeDefault
+	// and by TestTokenCreateDefaultIgnoresXDGConfigHome's defaultTokenPath arm.
+	stateRoot := filepath.Join(base, "state")
+	t.Setenv("TROUBLE_STATE_ROOT", stateRoot)
+	wantDefault := filepath.Join(stateRoot, "dashboard-tokens.json")
 	unsetEnv(t, "TROUBLE_DASHBOARD_TOKEN_FILE")
 
 	if got := configDeclaredStore(cfg); got != "" {
@@ -339,15 +346,12 @@ func TestTokenCreateNoConfigNamesDefaultAndDoesNotWarn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dashboard.DefaultTokenPath: %v", err)
 	}
-	wantDefault := filepath.Join(home, ".config/trouble/dashboard-tokens.json")
-	if cliDefault != wantDefault {
-		t.Fatalf("CLI default = %q, want %q", cliDefault, wantDefault)
-	}
-	if pkgDefault != wantDefault {
-		t.Fatalf("dashboard default = %q, want %q", pkgDefault, wantDefault)
-	}
+	wantHomeDefault := filepath.Join(home, ".config/trouble/dashboard-tokens.json")
 	if cliDefault != pkgDefault {
 		t.Fatalf("CLI default %q != daemon default %q", cliDefault, pkgDefault)
+	}
+	if cliDefault != wantHomeDefault {
+		t.Fatalf("HOME default expression = %q, want %q (unchanged when no state root anchors)", cliDefault, wantHomeDefault)
 	}
 
 	errOut := captureStderr(t, func() {
@@ -424,12 +428,12 @@ func TestTokenStorePathMatchesDaemonResolution(t *testing.T) {
 				t.Fatalf("daemon store %q != the config's declared %q", daemonStore, c.wantDeclared)
 			}
 			if c.wantDeclared == "" {
-				cliDefault, err := defaultTokenPath()
-				if err != nil {
-					t.Fatalf("defaultTokenPath: %v", err)
-				}
+				// TRBL-085: this scenario declares a state root (env), so the
+				// two sides must agree on the ANCHORED store — the equality
+				// this test defends, now with the anchoring included.
+				cliDefault := filepath.Join(filepath.Join(dir, "state"), "dashboard-tokens.json")
 				if daemonStore != cliDefault {
-					t.Fatalf("no-config: daemon store %q != CLI default %q", daemonStore, cliDefault)
+					t.Fatalf("declared state root: daemon store %q != anchored CLI store %q", daemonStore, cliDefault)
 				}
 			}
 		})
@@ -515,16 +519,25 @@ func TestTokenCreateDefaultIgnoresXDGConfigHome(t *testing.T) {
 		t.Fatalf("CLI default still follows XDG_CONFIG_HOME (%q)", stale)
 	}
 
+	// The defaultTokenPath arm above (no declared state root involved) pins the
+	// unchanged §3.4 HOME default. The live mint below runs with
+	// TROUBLE_STATE_ROOT declared, so per TRBL-085 the store is anchored to the
+	// declared state root — not the home store.
+	anchored := filepath.Join(base, "state", "dashboard-tokens.json")
+
 	errOut := captureStderr(t, func() {
 		if code := run([]string{"dashboard", "token", "create", "--label", "xdg", "--scopes", "read"}); code != 0 {
 			t.Errorf("create exit = %d, want 0", code)
 		}
 	})
-	if !strings.Contains(errOut, "dashboard token store: "+want) {
-		t.Errorf("mint output %q does not name %q", errOut, want)
+	if !strings.Contains(errOut, "dashboard token store: "+anchored) {
+		t.Errorf("mint output %q does not name %q", errOut, anchored)
 	}
-	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("mint did not write the daemon's store %s: %v", want, err)
+	if _, err := os.Stat(anchored); err != nil {
+		t.Fatalf("mint did not write the anchored store %s: %v", anchored, err)
+	}
+	if stale := filepath.Join(xdg, "trouble", "dashboard-tokens.json"); strings.Contains(errOut, stale) {
+		t.Fatalf("CLI mint followed XDG_CONFIG_HOME (%q)", stale)
 	}
 }
 

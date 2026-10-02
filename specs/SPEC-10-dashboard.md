@@ -493,8 +493,14 @@ self-consistent — a value a poll later corrects is a lie on the operator's scr
 ### 3.2 Token store (hashed at rest, 0600, plaintext shown once)
 
 `dashboard.token_file` default `~/.config/trouble/dashboard-tokens.json` — deliberately **not** inside the
-state root (SPEC-INDEX §6.4/SPEC-TYPES §6.1): the state root is the ledger's home, it is rotated, compacted
-and backed up, and credentials must never ride along in a ledger backup. File mode **0600**, parent dir
+default state root (SPEC-INDEX §6.4/SPEC-TYPES §6.1): the state root is the ledger's home, it is rotated, compacted
+and backed up, and credentials must never ride along in a ledger backup. The default is, however, ANCHORED to a
+state root the operator explicitly declares (`state_root` in the config file, `TROUBLE_STATE_ROOT` or `--state_root`):
+a daemon (or `dashboard token` mint) resolving against a config that declares `state_root` but leaves
+`dashboard.token_file` unset uses `<state_root>/dashboard-tokens.json`, never the operator's home store — a scratch
+config must not read or mint tokens in the installed daemon's credentials (TRBL-085). An explicitly declared
+`dashboard.token_file` always wins over this anchoring, and with no declared state root the §3.4 home default is
+unchanged. File mode **0600**, parent dir
 **0700**, ownership = the daemon's user, checked at startup (TROUBLE-LIFECYCLE-013 on a wrong mode).
 
 ```json
@@ -556,7 +562,7 @@ It is the same struct `/` renders and the stall checker parses; there is no seco
 | `dashboard.public_origin` | `""` | exact `scheme://host[:port]` used for Origin binding and CSRF |
 | `dashboard.project_scope` | `[]` | per-project scoping; required with >1 project off loopback |
 | `dashboard.identity` | `token` | identity seam selector (§2.5) |
-| `dashboard.token_file` | `~/.config/trouble/dashboard-tokens.json` | 0600 secret store (§3.2) |
+| `dashboard.token_file` | `~/.config/trouble/dashboard-tokens.json`; `<declared state_root>/dashboard-tokens.json` when `state_root` is declared without it (TRBL-085) | 0600 secret store (§3.2) |
 | `dashboard.poll_ms` / `dashboard.strip_poll_ms` | `2000` / `1000` | content-partial / accelerator intervals (§2.6) |
 | `dashboard.stall_alert_s` | `90` | stall banner threshold (3× the 30 s heartbeat) |
 | `dashboard.health_loopback_exempt` | `true` | `/health.json` exemption on a loopback bind |

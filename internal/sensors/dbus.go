@@ -397,6 +397,7 @@ type dbusState struct {
 	mu       sync.Mutex
 	watches  map[string]*dbusWatch
 	merge    *mergeTracker
+	boot     *bootStabilizer // TRBL-094: boot-inventory stabilization gate
 	arrivals atomic.Uint64
 	merges   atomic.Uint64
 	oomd     atomic.Bool
@@ -426,6 +427,10 @@ func (s *Sensors) startDBus(ctx context.Context) error {
 	}
 	s.dbState.watches = map[string]*dbusWatch{}
 	s.dbState.merge = newMergeTracker(s.cfg.mergeWindow, s.now)
+	// TRBL-094: arm the boot gate BEFORE the first reconcile so the daemon's
+	// very first ListUnits sweep — the boot inventory — is inside the
+	// stabilization window.
+	s.initBootGate()
 
 	// Substrate gate (SPEC-03 §3.2a, TRBL-078): a container substrate with no
 	// system D-Bus has no manager to watch — the reason says so with the 026
@@ -981,7 +986,17 @@ func (s *Sensors) dbusOutcomeDraft(res mergeOutcome, manager, activeState, subst
 // exactly as they would have per record — and one draft per arrival. It
 // writes NOTHING: the caller persists the returned drafts through writeDrafts,
 // which is what turns N durable commits into one (§3.3a).
+//
+// TRBL-094: the boot-stabilization gate decides each sighted unit first
+// (dbus_boot.go). A unit held as boot inventory still gets its record — fire
+// suppressed at the ladder gate, Suppressed counted, boot_stabilized named —
+// and the hold releases on later sweeps through the same phase, under the
+// paced per-sweep admission cap, so the boot burst cannot open >20 incidents
+// in any 300s window and the §3.8 rule scope never trips on a healthy host.
 func (s *Sensors) evaluateEveryUnit(ctx context.Context, name string, failed []unitStatus, now time.Time) []types.RecordDraft {
+	if s.dbState.boot != nil {
+		return s.runBootInventoryGate(name, failed, now)
+	}
 	drafts := make([]types.RecordDraft, 0, len(failed))
 	for _, u := range failed {
 		res := s.dbState.merge.arrival(name, u.Name, arrivalReconcile, u.SubState, "", "", now)
@@ -1008,7 +1023,20 @@ func (s *Sensors) emitBatchOutcome(ctx context.Context, drafts []types.RecordDra
 			rt.drops.Add(uint64(len(drafts)))
 		}
 		s.recError(types.SenDBus, types.CodeSensors015, fmt.Sprintf("reconcile batch write (%d records): %v", len(drafts), err))
+		// TRBL-094: a failed batch must not silently consume the boot drain's
+		// admission — the released slice rejoins the hold table and the next
+		// sweep retries it, with the cooldown spends of the failed attempt
+		// handed back (a fire the ledger refused never served its cooldown).
+		if s.dbState.boot != nil {
+			for _, e := range s.dbState.boot.reholdPending() {
+				s.cool.clear(e.rule, e.sig)
+			}
+		}
 		return
+	}
+	// TRBL-094: the batch landed; the drain's released slice is durable.
+	if s.dbState.boot != nil {
+		s.dbState.boot.clearPendingRehold()
 	}
 	for _, rec := range recs {
 		s.bridgeLadder(ctx, rec)

@@ -475,6 +475,16 @@ func (c *cooldownTable) fired(key ruleSigKey, now time.Time) {
 	c.last[key] = now
 }
 
+// clear forgets one (rule, sig)'s cooldown state. It exists for the boot
+// drain's failed-write handback (TRBL-094): a fire the ledger refused never
+// reached the ladder, so the cooldown its decide phase consumed has not
+// served its purpose and must not block the retry.
+func (c *cooldownTable) clear(rule, sig string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.last, ruleSigKey{rule: rule, sig: sig})
+}
+
 func (c *cooldownTable) evictIfFullLocked() {
 	if c.capacity <= 0 || len(c.last) < c.capacity {
 		return

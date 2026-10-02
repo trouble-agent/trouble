@@ -1,0 +1,20 @@
+{
+  "tick_id": "trouble-foreman-2026-10-02-19-22-39",
+  "created_at": "2026-10-02T19:40:00Z",
+  "project": "trouble",
+  "workdir": "~/trouble",
+  "wave_budget": 1,
+  "workers": [
+    {
+      "task": "TRBL-075",
+      "branch": "wt/TRBL-075",
+      "worktree": "~/worktrees/trouble-TRBL-075",
+      "base": "origin/main",
+      "base_sha": "b7e2bb9",
+      "model": "ox-alpha-free",
+      "provider": "opencode-go",
+      "status": "dispatched"
+    }
+  ],
+  "notes": "Serial tick (budget 1). Root cause pre-diagnosed by foreman: foldableObservation requires sample_backed which only psi sets; dbus counted-only repeats bypass the fold. Brief at /tmp/trbl075-brief.txt."
+}

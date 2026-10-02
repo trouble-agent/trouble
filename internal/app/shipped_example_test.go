@@ -321,8 +321,10 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	ready := make(chan struct{}, 1)
 	go func() {
 		_, err := RunDaemon(ctx, BootOptions{
-			Args:    args,
-			Env:     []string{},
+			Args: args,
+			// QA-TROUBLE-14: grade the shipped example's boot posture, not the
+			// host's RSS or D-Bus state (bootenv_test.go).
+			Env:     bootEnvWithNeutralizers(nil),
 			Log:     nil,
 			OnReady: func(booted *Daemon) { d = booted; ready <- struct{}{} },
 		})

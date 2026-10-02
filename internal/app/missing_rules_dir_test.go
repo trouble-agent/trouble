@@ -128,8 +128,11 @@ func TestMissingRulesDirBootsToHealthOK(t *testing.T) {
 	ready := make(chan struct{})
 	go func() {
 		_, err := RunDaemon(ctx, BootOptions{
-			Args:    args,
-			Env:     []string{},
+			Args: args,
+			// QA-TROUBLE-14: the first-run boot must be graded on the posture
+			// SPEC-03 §3.7b guarantees, not on the host's RSS or D-Bus state
+			// (see bootenv_test.go for both neutralizers).
+			Env:     bootEnvWithNeutralizers(nil),
 			Log:     nil,
 			OnReady: func(booted *Daemon) { d = booted; close(ready) },
 		})

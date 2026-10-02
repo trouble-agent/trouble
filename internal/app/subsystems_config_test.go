@@ -659,8 +659,10 @@ source_path = %q
 				"--dashboard-bind", fmt.Sprintf("127.0.0.1:%d", dashPort),
 				"--dashboard-token_file", tokenPath,
 			},
-			Env: []string{},
-			Log: nil,
+			// QA-TROUBLE-14: grade the shipped example's opt-in boot posture,
+			// not the host's RSS or D-Bus state (bootenv_test.go).
+			Env:     bootEnvWithNeutralizers(nil),
+			Log:     nil,
 			OnReady: func(d *Daemon) {
 				h.d = d
 				close(ready)

@@ -183,6 +183,31 @@ func triggerIncident(env *testEnv, i int) string {
 	return id
 }
 
+// livenessTimeout scales a pure liveness deadline (waiting for the poller to
+// produce a sample or a seq change) by the SPEC-01 §7a host profile, the same
+// host-truthful arithmetic budget_test.go uses. These deadlines are not the
+// assertion under test — they only decide whether the measurement happens at
+// all — but they are wall-clock waits on a real HTTP poller, so under full-suite
+// load a fixed 3 s window can expire before the poller's first ticker fires and
+// the test dies with "the strip poller never produced a seq" before measuring
+// anything (QA-TROUBLE-16). The AC-19 budgets themselves (p100 ≤2000 ms,
+// p50 ≤1100 ms) are NOT scaled by this helper and keep their exact strength:
+// a longer liveness window only lets the test proceed; any latency that exceeds
+// a budget still fails the percentile assertion below.
+func livenessTimeout(base time.Duration) time.Duration {
+	scale := hostCalibration().CPUScale()
+	if scale < 1 {
+		scale = 1
+	}
+	// A ceiling past which the host is no longer the explanation: the poller
+	// failing to sample at all is a real defect the error will surface.
+	const ceiling = 8
+	if scale > ceiling {
+		scale = ceiling
+	}
+	return time.Duration(float64(base) * scale)
+}
+
 // TestAC19LiveIncidentWithinBudget is the AC-19 timing assertion with the
 // accelerator running: 20 iterations, p100 ≤2000 ms and p50 ≤1100 ms.
 func TestAC19LiveIncidentWithinBudget(t *testing.T) {
@@ -190,8 +215,10 @@ func TestAC19LiveIncidentWithinBudget(t *testing.T) {
 
 	poller := startStripPoller(env, time.Duration(env.cfg.StripPollMS)*time.Millisecond)
 	defer poller.close()
-	// Let the poller take its first sample so a change is detectable.
-	baseline, err := poller.waitFirst(3 * time.Second)
+	// Let the poller take its first sample so a change is detectable. The
+	// deadline is load-scaled (see livenessTimeout): it is a liveness wait,
+	// not part of the measured budget.
+	baseline, err := poller.waitFirst(livenessTimeout(3 * time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +241,11 @@ func TestAC19LiveIncidentWithinBudget(t *testing.T) {
 
 		// The accelerator: the strip reports the new seq, and the client reacts
 		// by refetching the content partial immediately (troubleSeq).
-		if _, err := poller.waitChange(preSeq, 4*time.Second); err != nil {
+		// waitChange is a liveness wait, not part of the measured latency: t0
+		// was captured before the trigger, so a longer deadline cannot inflate
+		// the measurement — the latency recorded below includes the full wait
+		// either way, and the AC-19 percentile budgets stay untouched.
+		if _, err := poller.waitChange(preSeq, livenessTimeout(4*time.Second)); err != nil {
 			t.Fatalf("iteration %d: %v", i, err)
 		}
 		resp, body := env.get(fmt.Sprintf("/partials/incidents?since=%d", preSeqInt), env.readPlain)

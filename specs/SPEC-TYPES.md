@@ -2064,6 +2064,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-SENSORS-023 | permanent | systemd timer list parse failed | SPEC-03 |
 | TROUBLE-SENSORS-024 | transient | sensor heartbeat stale beyond its expectation → gap + degraded | SPEC-03 |
 | TROUBLE-SENSORS-025 | permanent | sensor disabled: host capability absent (documented no-op) | SPEC-03 |
+| TROUBLE-SENSORS-026 | permanent | container substrate: sensor facility probed absent on an observed container substrate (TRBL-078 §3.2a) | SPEC-03 |
 | TROUBLE-SENTINEL-001 | permanent | envelope malformed (bad header/length framing) | SPEC-04 |
 | TROUBLE-SENTINEL-002 | permanent | envelope exceeds the compressed cap (200KB) | SPEC-04 |
 | TROUBLE-SENTINEL-003 | permanent | decompressed payload exceeds the cap (1MB) → gzip-bomb guard | SPEC-04 |

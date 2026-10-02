@@ -427,6 +427,18 @@ func (s *Sensors) startDBus(ctx context.Context) error {
 	s.dbState.watches = map[string]*dbusWatch{}
 	s.dbState.merge = newMergeTracker(s.cfg.mergeWindow, s.now)
 
+	// Substrate gate (SPEC-03 §3.2a, TRBL-078): a container substrate with no
+	// system D-Bus has no manager to watch — the reason says so with the 026
+	// code and the sensor never starts, so no 013 failure record and no
+	// connect-error storm for a state that is the designed posture.
+	if !dbusSystemFacilityPresent() {
+		if s.containerSubstrate() {
+			reason := substrateSensorReason(types.CodeSensors026, "no system D-Bus (no system_bus_socket)")
+			s.setSensor(types.SenDBus, false, true, reason)
+			return nil
+		}
+	}
+
 	managers := s.resolveManagers()
 	var unwatched []string
 	for _, m := range managers {

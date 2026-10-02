@@ -197,6 +197,19 @@ func (s *Sensors) startJournald(ctx context.Context) error {
 	s.jlState.followers = map[string]*journalFollower{}
 	s.jlState.capacity.Store(int64(s.cfg.journald.queue))
 
+	// Substrate gate (SPEC-03 §3.2a, TRBL-078): a container substrate with no
+	// journal facility has nothing to follow — the reason says so with the
+	// 026 code and the sensor never starts, so no 006 failure record is filed
+	// for a state that is the designed posture, not a fault.
+	if !journaldFacilityPresent() {
+		if s.containerSubstrate() {
+			reason := substrateSensorReason(types.CodeSensors026, "no journal (no journalctl binary, no journal socket)")
+			s.setSensor(types.SenJournald, false, true, reason)
+			s.jlState.disabled.Store(true)
+			return nil
+		}
+	}
+
 	path := s.jlState.path
 	if path == "" {
 		p, err := exec.LookPath("journalctl")

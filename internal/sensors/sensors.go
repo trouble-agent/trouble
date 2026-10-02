@@ -132,9 +132,11 @@ type Sensors struct {
 	canarySeq     atomic.Uint64
 	canaryLanded  atomic.Int64
 	canaryMissing atomic.Uint64
-	// reloadDeadline overrides the 1s reload abandon budget. It exists so the
-	// abandon path can be exercised deterministically; production always uses
-	// reloadTimeout.
+	// reloadDeadline overrides the reload abandon budget when set to a
+	// POSITIVE value: it exists so the abandon path can be exercised
+	// deterministically, and so a test driving hundreds of sequential
+	// reloads can opt into the load-scaled budget below. Production always
+	// uses reloadTimeout (the 1s spec figure) — untouched.
 	reloadDeadline time.Duration
 
 	reloadPending atomic.Bool

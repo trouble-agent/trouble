@@ -517,7 +517,7 @@ Defaults from `dashboard.*`; the listener defaults to `127.0.0.1:7644`.
 | `allow_full` | `false` | gates `mode:"full"` |
 | `public_origin` | unset | required off loopback; the exact `scheme://host[:port]` an `Origin` must equal |
 | `proxy_trusted` / `proxy_cidrs` | `false` / unset | whether `X-Forwarded-For` is honored at all |
-| `token_file` | `~/.config/trouble/dashboard-tokens.json` | the 0600 store; outside the state root on purpose |
+| `token_file` | `~/.config/trouble/dashboard-tokens.json`; anchored to `<declared state_root>/dashboard-tokens.json` when `state_root` is declared without it (TRBL-085) | the 0600 store; outside the DEFAULT state root on purpose |
 | `identity` | `token` | `tailscale` / `proxy-header` select the unimplemented seam → `503` + `013` |
 
 ## 11. Known gaps and residuals

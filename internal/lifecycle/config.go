@@ -2041,12 +2041,37 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	}
 
 	// post-resolve path defaults that depend on state_root
+	// TRBL-085: when the operator DECLARED a state_root (file, env or flag)
+	// but left dashboard.token_file unset, the token store is anchored to the
+	// declared state root instead of the HOME default. A scratch config that
+	// moves the daemon's state must never mint into or read the operator's
+	// real ~/.config/trouble/dashboard-tokens.json. An explicitly declared
+	// token_file always wins, and an undeclared state_root (the default
+	// install) keeps the SPEC-10 §3.4 HOME default unchanged. Filling the
+	// derived path here (like the heartbeat/checker paths) makes BOTH
+	// consumers — the daemon's dashboard config projection and the operator
+	// CLI's store resolution — take the anchored path without a second
+	// decision anywhere else.
+	tokenAnchored := false
+	if cv, ok := values["dashboard.token_file"]; ok && cv.Source == "default" {
+		if sr, ok := values["state_root"]; ok && sr.Source != "default" && resolved.Config.StateRoot != "" {
+			resolved.Config.Dashboard.TokenFile = filepath.Join(resolved.Config.StateRoot, "dashboard-tokens.json")
+			tokenAnchored = true
+		}
+	}
 	resolved.Config = postResolve(resolved.Config)
 	for i := range resolved.Values {
 		cv := &resolved.Values[i]
 		switch cv.Key {
 		case "lifecycle.heartbeat_path":
 			cv.Value = resolved.Config.Lifecycle.HeartbeatPath
+		case "dashboard.token_file":
+			// TRBL-085: like the two checker paths, the row must carry the
+			// derived path when the anchoring filled it — the state-root
+			// anchored store, not the empty marker the registry started from.
+			if tokenAnchored {
+				cv.Value = resolved.Config.Dashboard.TokenFile
+			}
 		case "checker.state_file":
 			cv.Value = resolved.Config.Checker.StateFile
 		case "checker.alarm_file":

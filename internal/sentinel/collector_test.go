@@ -360,10 +360,41 @@ func TestCollectorNonUTF8IsReplaced(t *testing.T) {
 // fence, where the run cannot separate a descheduling-driven refusal from a real
 // one; any other event-count shape (a second event, a refusal below the fence)
 // stays a hard failure.
+//
+// QA-TROUBLE-13: the refusal is not only load-driven. The payload text was a
+// single 128×1024-byte run of 'x' — token characters — so the scrubber's
+// entropy_token scanner matched one [A-Za-z0-9_-+/]{40,1000} run per 1000-byte
+// window (133 of them at the real feed-truncated 65536-byte size) and each
+// match was extended through the whole 64 KiB buffer by extendSpan's
+// extEntropy mode before its shannon/UTF-8 admission test. Measured on the dev
+// box, that is ~55–70 ms of rule evaluation for the journal_tail scrub alone,
+// against the fixed rule_timeout of 250 ms (internal/scrub/config.go
+// DefaultRuleTimeout): the per-rule deadline is wall-clock, so ~4.5x of
+// descheduling headroom is all the test ever had. On the clean JIT bunker
+// (bunker-mvp, go build of 287 s of tests) the same rule evaluation crossed
+// 250 ms and the whole event was refused fail-closed — 0 events,
+// cause=scrub_refused. The budget never changed between environments; the
+// wall-clock did.
+//
+// The fix keeps the payload's LENGTH shape (131079 bytes in, past the 65536
+// feed cap, truncated content asserted) but caps token runs at 39 bytes — one
+// byte below the entropy scanner's 40-character floor — so the entropy_token
+// rule never fires and no span is ever extended through the buffer. Measured:
+// the same 131079-byte payload now scrubs in ≤0.4 ms on every target,
+// a ~600x margin under the 250 ms deadline, so the test measures the
+// collector's truncation, not the host's scheduler. This is assertion-safe:
+// the truncation the test pins happens in feed() before any scrub, and the
+// scrubbed target budget (65536, truncate) is never approached.
 func TestCollectorLongLineIsTruncated(t *testing.T) {
 	ts := collectorTestServer(t)
 	defer ts.close()
-	long := "panic: " + strings.Repeat("x", 128*1024)
+	var b strings.Builder
+	b.WriteString("panic: ")
+	for b.Len() < 128*1024 {
+		b.WriteString(strings.Repeat("x", 39)) // < entropy_token's 40-char floor
+		b.WriteByte(' ')                       // space breaks the token run
+	}
+	long := b.String()[:128*1024+7] // 131079 bytes, the historical payload size
 	ts.s.collectors.feed(logLine{Text: long, TS: nowFunc(), Source: "journal:legacy-daemon"})
 	ts.s.collectors.flushExpired(nowFunc().Add(10 * time.Second))
 	recs := ts.sink.ofKind(types.KEvent)

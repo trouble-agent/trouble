@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -132,7 +133,7 @@ func Upgrade(ctx context.Context, cfg Config, plan upgradePlan) error {
 	// process's, because a sha is not recoverable from a binary on disk.
 	_, sha, _, _ := VersionInfo()
 	backupPath := filepath.Join(backupDir, fmt.Sprintf("%s-%s", from, sha))
-	if err := linkOrCopy(bin, backupPath); err != nil {
+	if err := writeBackup(bin, backupPath); err != nil {
 		_ = os.Remove(newPath)
 		return fmt.Errorf("%w: cannot backup current binary: %v", types.CodeLifecycle011, err)
 	}
@@ -146,8 +147,11 @@ func Upgrade(ctx context.Context, cfg Config, plan upgradePlan) error {
 
 	// Restart.
 	if err := plan.Restart(ctx); err != nil {
-		// Rollback: the previous binary is put back by the same rename recipe.
-		_ = os.Rename(backupPath, bin)
+		// Rollback: the previous binary is put back by the same recipe.
+		if rerr := restoreBackup(backupPath, bin); rerr != nil {
+			return fmt.Errorf("%w: restart failed AND the rollback could not restore %s: %v (restart error: %v)",
+				types.CodeLifecycle011, bin, rerr, err)
+		}
 		_ = recordStep(plan, UpgradeStepRollback, to, from, -1)
 		return fmt.Errorf("%w: restart failed, rolled back: %v", types.CodeLifecycle011, err)
 	}
@@ -157,7 +161,10 @@ func Upgrade(ctx context.Context, cfg Config, plan upgradePlan) error {
 	// upgrade real, so the record cannot precede it (§3.6 step 5).
 	ready := waitForReady(ctx, cfg, plan)
 	if !ready {
-		_ = os.Rename(backupPath, bin)
+		if rerr := restoreBackup(backupPath, bin); rerr != nil {
+			return fmt.Errorf("%w: new binary did not reach READY within %s AND the rollback could not restore %s: %v",
+				types.CodeLifecycle011, cfg.Lifecycle.UpgradeReadyTimeout, bin, rerr)
+		}
 		_ = plan.Restart(ctx)
 		_ = recordStep(plan, UpgradeStepRollback, to, from, -1)
 		return fmt.Errorf("%w: new binary did not reach READY within %s", types.CodeLifecycle011, cfg.Lifecycle.UpgradeReadyTimeout)
@@ -241,11 +248,80 @@ func verifySHA256(path, want string) error {
 	return nil
 }
 
-func linkOrCopy(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		return nil
+// writeBackup parks the current binary at <state>/backups/bin/<from>-<sha>.
+//
+// The backup is written by COPY with an explicit 0o755 exec bit, never by
+// hardlink: a hardlink inherits the LIVE binary's mode, and on a clean box the
+// live binary may have been staged without +x — a backup whose exec bit comes
+// from whatever happened to be on the live path makes the §3.6 step 6 rollback
+// non-deterministic. The mode must not depend on the source mode, so it is
+// always 0755 here.
+func writeBackup(src, dst string) error {
+	if err := copyFile(src, dst); err != nil {
+		return err
 	}
-	return copyFile(src, dst)
+	return os.Chmod(dst, 0o755)
+}
+
+// restoreBackup puts the parked previous binary back on the live path and
+// VERIFIES the restore before reporting success: bytes equal AND mode
+// executable. A bare os.Rename is not enough on a box where <state root> and
+// the live binary sit on different filesystems — rename(2) fails with EXDEV and
+// the previous build would silently never come back — so the restore falls
+// back to a rename-into-place via a temp file in the live binary's own
+// directory, and the caller learns about a failed restore instead of being
+// told "rolled back" over a live path that still runs the new build.
+func restoreBackup(backupPath, bin string) error {
+	want, err := os.ReadFile(backupPath)
+	if err != nil {
+		return fmt.Errorf("read backup %s: %v", backupPath, err)
+	}
+	if err := os.Rename(backupPath, bin); err == nil {
+		return verifyRestore(bin, want)
+	}
+	// Cross-device (or otherwise refused) rename: copy the backup next to the
+	// live binary and rename over it there, which is atomic on that filesystem.
+	tmp, err := os.CreateTemp(filepath.Dir(bin), filepath.Base(bin)+".restore-*")
+	if err != nil {
+		return fmt.Errorf("staging restore copy beside %s: %v", bin, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath) // no-op once the final rename moved it
+	if _, err := tmp.Write(want); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write restore copy: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close restore copy: %v", err)
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return fmt.Errorf("chmod restore copy: %v", err)
+	}
+	if err := os.Rename(tmpPath, bin); err != nil {
+		return fmt.Errorf("rename restored copy over %s: %v", bin, err)
+	}
+	return verifyRestore(bin, want)
+}
+
+// verifyRestore is the read-back half of restoreBackup: the live path must
+// carry the backed-up build's bytes. Only after this read-back passes does the
+// rollback report restored.
+func verifyRestore(bin string, want []byte) error {
+	got, err := os.ReadFile(bin)
+	if err != nil {
+		return fmt.Errorf("read restored %s: %v", bin, err)
+	}
+	if !bytes.Equal(got, want) {
+		return fmt.Errorf("restored %s bytes differ from the parked backup", bin)
+	}
+	fi, err := os.Stat(bin)
+	if err != nil {
+		return fmt.Errorf("stat restored %s: %v", bin, err)
+	}
+	if fi.Mode().Perm()&0o100 == 0 {
+		return fmt.Errorf("restored %s is not executable", bin)
+	}
+	return nil
 }
 
 func pruneBackups(dir string, keep int) {

@@ -180,6 +180,44 @@ Normative rules:
   cannot raise CPU: notification rate limiting (1/window) caps wake processing at ≤1 per 2 s per armed
   fd.
 
+### 3.2a Substrate self-detection (TRBL-078)
+
+The detection plane self-detects the substrate it boots on, at the probe, before any collector starts.
+The rule is the health reason's rule (the container posture is EVIDENCE, never a guess) applied one
+plane lower:
+
+- **The container verdict is marker evidence only.** The substrate is a container when the process
+  observes a runtime marker file in its root filesystem (`/.dockerenv`, `/run/.containerenv` — the same
+  evidence class the health reason's `sensors_container` uses). A missing socket or missing binary
+  NEVER produces the verdict: a plain host can lack either, and mislabelling that would hide a real
+  fault. The probe record's `substrate` object carries the verdict, the evidence list (each marker
+  path; the root fstype when it is an overlay, corroboration only, never load-bearing), and the
+  absent list.
+- **Facility absence is probed, never inferred.** On an observed container substrate, each facility a
+  collector needs is probed individually: the journal facility is the `journalctl` binary or one of the
+  journal sockets (`/run/systemd/journal/socket`); the D-Bus facility is a system bus socket
+  (`/run/dbus/system_bus_socket`) or an explicit `DBUS_SYSTEM_BUS_ADDRESS`. Timers are a consequence of
+  the D-Bus facility (they watch systemd units on it). Disk (statfs on a visible mount), inotify
+  (kernel syscalls) and PSI sampling/`/proc` reads work on containers and are never gated.
+- **One record, not one per subsystem.** When the probe observes the posture — container AND at least
+  one absent facility — it adds TROUBLE-SENSORS-026 to its own codes ONCE (never one code per absent
+  facility) and writes exactly ONE additional `gap` record beside the probe record:
+  `payload.kind = "container_substrate"`, `cause = "container_substrate"`, `est_lost = 0`, `fire =
+  false`, `sig_keyed = false`, `error_code = TROUBLE-SENSORS-026`, with the absent facilities and the
+  evidence in `payload.absent` / `payload.evidence`. No per-subsystem failure records are filed for
+  absent facilities: no TROUBLE-SENSORS-006 for a missing journalctl, no TROUBLE-SENSORS-013/011 for an
+  absent system bus, and the timers sweep produces no second record (one cause, one record, §3.9). A
+  host substrate writes NO substrate record and gains NO new records of any kind.
+- **The gate keys on the facility, not the container.** A sensor whose facility is probed absent sets
+  `Enabled: false` with `Reason: "TROUBLE-SENSORS-026: container substrate: <facility> is absent
+  (TRBL-078)"` and starts nothing (no follower child, no bus dial) — the documented-no-op shape of
+  TROUBLE-SENSORS-025, so the disabled sensor stays out of `sensors[]` (§3.9) and carries its reason on
+  the runtime the health assembly reads. A container that DOES ship a facility (a journal sidecar, a
+  mounted bus socket) runs its sensor through the normal path unchanged: a real container with a
+  working disk sensor keeps recording, and nothing here can disable a sensor that has its facility.
+- The codes' "at most once per boot" rule (§5) applies to 026 through the probe's own once-per-boot
+  shape; the payload's `absent` list is the per-facility detail the single code compresses.
+
 ### 3.3 Collector contracts
 
 **journald.** `exec.CommandContext(journalctl, "-f", "-o", "json", "--after-cursor", cur, "-u", unit…,
@@ -844,6 +882,7 @@ stabilization `for=` → dedup core (SPEC-01 index) → ladder (SPEC-05) → out
 | TROUBLE-SENSORS-023 | permanent | `ListTimers` reply could not be parsed | per-tick retry, raw reply size recorded, no invented timer list |
 | TROUBLE-SENSORS-024 | transient | sensor last-success older than its stale threshold | `gap` for the window + `Degraded: true` + `Reason`; `sensor_recovered` on recovery |
 | TROUBLE-SENSORS-025 | permanent | sensor disabled: host capability absent (no `/proc/pressure`, no D-Bus, no inotify) | documented no-op, `Enabled:false`, probe record lists the capability |
+| TROUBLE-SENSORS-026 | permanent | container substrate: a sensor facility (journal, system D-Bus) is probed absent on an observed container substrate (§3.2a, TRBL-078) | ONE `container_substrate` gap record beside the probe record, `fire:false`; gated sensors `Enabled:false` with the facility named in `Reason`; no per-subsystem failure records |
 
 Every code a sensor returns upward also appears in the ledger record that describes the failure
 (`Record.payload.error_code`, SPEC-INDEX §5 rule 3). Codes are emitted at most once per boot per sensor for
@@ -922,6 +961,7 @@ printed reason otherwise.
 | `sensors_ac_test.go` | AC-derived: **AC-1** a match at `for=2s` opens exactly one incident inside `2s ±250ms` of the qualifying stream; **AC-2** 10 crossings in 10s with `for=30s` ⇒ 0 incidents, one continuous 30s ⇒ 1, resolve+recurrence ⇒ same incident `reopen_count=1`; **AC-4** 10 000 rule-matching events in 60s ⇒ evaluations ≤120/min, breaker opens within 120s, `Suppressed == events - cap`, ladder gate invoked at most `cap` times; **AC-19** an event is queryable through the index ≤1s (p95) after emission and `Health()` reflects its `last_event_age_s` within one heartbeat. |
 | `fold_test.go` | §3.8a on an injected clock, no wall-clock wait: 150 identical sampled observations inside a 5m window ⇒ 1 record with `count=150`, `first_ts`/`last_ts`, `fold=true`, same sig and the first observation's `detail`; the boundary observation closes that window and opens the next (30 + 30 across two windows); a quiet signature's fold is written by the next unrelated arrival; `0` ⇒ one record per observation with no fold fields; a fire and a wake are written immediately with the fold they end written first; `Stop` flushes an open fold; the 4096-fold bound closes (writes) a fold rather than discarding one; the budget is derived and then measured — one simulated day of a repeating signature writes exactly 288 records whose counts sum to the 43 200 observations; a 600-observation over-cap sampled burst still trips the rule breaker, still caps the ladder at 120/min, and its records still account for every observation. |
 | `dedup_pin_test.go` | TRBL-009 AC1 pinned as satisfied (the refuted half, so a future change cannot reintroduce it): 12 sampled observations inside one 5m cooldown ⇒ 12 event records, one sig, one fired event, `Suppressed == 11`, no breaker; crossing the cooldown fires once more under the SAME signature (the ladder folds the recurrence into the same incident, AC-22). |
+| `substrate_test.go` | §3.2a (TRBL-078): no marker ⇒ no container verdict and no absent list (a host is never guessed into the posture); the marker decides and the evidence names it; the probe payload carries the `substrate` object and TROUBLE-SENSORS-026 exactly once; a container boot with absent facilities files exactly ONE `container_substrate` record and ZERO `sensor_error` records (the before-shape — a 006 failure record with no substrate record — is proven against the pre-change blobs); the gated sensors are `Enabled:false` with the 026 reason naming the substrate while the disk sensor stays enabled; a host boot writes no substrate record and no 026 anywhere. |
 | `perf_test.go` | 256 rules × 6 sensors: rule evaluation ≤2ms/event (measured p99 on the reference box); ≥5000 events/min sustained through normalize→scrub→dedup→ledger with group-commit; sensors' RSS contribution ≤12MB steady (reference: stdlib+godbus+x/sys binary 8.36MB measured; sensors add no sqlite). Host term (QA-TROUBLE-5, per SPEC-01 §7a): the 2ms p99, 12MB total-heap and process-RSS-ceiling budgets are reference-host numbers and scale by the box's measured calibration (`loadfence.Measure` — `CPUScale()`, loosening-only: a reference-class host asserts the bare numbers unchanged), the p99 gate composed with its own measured load degradation curve (SPEC-06a) at looser-of; the steady-state slope invariant is asserted unscaled. |
 
 ## 8. hilo impact

@@ -248,6 +248,15 @@ func (s *Sensors) stopTimers() {}
 
 // timerSweep lists timers on every watched manager and derives missed runs.
 func (s *Sensors) timerSweep(ctx context.Context) {
+	// Substrate gate (SPEC-03 §3.2a, TRBL-078): timers are systemd units, and
+	// a container substrate with no D-Bus has none — the reason names the 026
+	// posture and the sweep returns. It produces no gap and no second record:
+	// the substrate record already named the absent facility once.
+	if s.containerSubstrate() && !dbusSystemFacilityPresent() {
+		s.setSensor(types.SenTimers, false, true,
+			substrateSensorReason(types.CodeSensors026, "no system D-Bus, so no timer units to watch"))
+		return
+	}
 	if s.dbState.dead.Load() || s.dbState.merge == nil {
 		// One cause, one record: the D-Bus gap is already filed, so timers only
 		// report the dependency and produce no second gap (SPEC-03 §3.9).

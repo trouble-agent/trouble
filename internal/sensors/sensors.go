@@ -324,6 +324,10 @@ func (s *Sensors) Probe(ctx context.Context) error {
 	if _, err := s.emit(ctx, d); err != nil {
 		return fmt.Errorf("sensors: emitting the capability probe: %w", err)
 	}
+	// SPEC-03 §3.2a (TRBL-078): the ONE container-substrate posture record,
+	// written beside the probe record when the probe observed the posture. A
+	// host boot writes nothing here.
+	s.emitSubstrateRecord(ctx, res.Substrate, s.now())
 	if res.Mode == psiDisabled {
 		s.setSensor(types.SenPSI, false, true, res.Reason)
 	}
@@ -350,6 +354,12 @@ func (s *Sensors) Start(ctx context.Context) error {
 		return err
 	}
 	// §4 steps 5-9: the other five sensors, each degrading only itself.
+	// Substrate gate (SPEC-03 §3.2a, TRBL-078): on an observed container
+	// substrate a sensor whose facility is absent sets its /health reason with
+	// TROUBLE-SENSORS-026 and starts NOTHING — no follower child, no bus
+	// dial, no failure record. The facility, not the container verdict, is
+	// what each gate probes: a container that does ship the facility runs the
+	// sensor through the normal path unchanged.
 	if err := s.startJournald(ctx); err != nil {
 		s.setSensor(types.SenJournald, false, true, err.Error())
 	}

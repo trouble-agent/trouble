@@ -30,6 +30,7 @@ const (
 	CodeSensors023 ErrorCode = "TROUBLE-SENSORS-023" // permanent: ListTimers reply could not be parsed
 	CodeSensors024 ErrorCode = "TROUBLE-SENSORS-024" // transient: sensor last-success older than its stale threshold
 	CodeSensors025 ErrorCode = "TROUBLE-SENSORS-025" // permanent: sensor disabled, host capability absent
+	CodeSensors026 ErrorCode = "TROUBLE-SENSORS-026" // permanent: container substrate — sensor facility absent (documented posture; TRBL-078)
 )
 
 // SensorCodeClass is the SPEC-03 §5 class table.
@@ -59,6 +60,7 @@ var SensorCodeClass = map[ErrorCode]ErrorClass{
 	CodeSensors023: ErrClassPermanent,
 	CodeSensors024: ErrClassTransient,
 	CodeSensors025: ErrClassPermanent,
+	CodeSensors026: ErrClassPermanent,
 }
 
 func init() {

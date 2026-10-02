@@ -192,6 +192,11 @@ type probeResult struct {
 	PSIRead  bool
 	ArmOK    bool
 	MaxWinUS int64
+	// Substrate is the §3.2a self-detection outcome (TRBL-078): the container
+	// verdict with its evidence, plus the sensor facilities absent on this
+	// substrate. Start's per-sensor gates key on the FACILITIES, never on the
+	// container verdict alone.
+	Substrate substrateFacts
 }
 
 // kernelRelease returns the running kernel's release string (uname -r).
@@ -250,6 +255,19 @@ func (s *Sensors) probeCapabilities(ctx context.Context) (*probeResult, error) {
 	res.Payload["kind"] = "capability_probe"
 	res.Payload["probe_ts"] = types.FormatUTC(now)
 	res.Payload["kernel"] = release
+
+	// Substrate self-detection (SPEC-03 §3.2a, TRBL-078) runs FIRST, before any
+	// arming attempt: the container verdict and the absent-facility list are
+	// what the per-sensor start gates read, and the payload carries both so the
+	// claim is auditable from the ledger record alone.
+	res.Substrate = detectSubstrate()
+	res.Payload["substrate"] = s.substratePayload(res.Substrate)
+	if len(res.Substrate.Absent) > 0 {
+		// One code for the whole posture, once per boot: the record names every
+		// facility that is absent and fire=false — the per-sensor start gates
+		// carry the per-facility /health reasons, not eight failure records.
+		res.Codes = append(res.Codes, types.CodeSensors026)
+	}
 
 	// 1. readable?
 	ctr, readErr := readPSI("io")

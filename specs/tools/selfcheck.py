@@ -13,12 +13,17 @@ Steps implemented
   4  every error code exists in the SPEC-TYPES catalog, is unique, and is in its area's range
   5  cross-references (spec<->spec, spec<->PRD) resolve
   6  forbidden strings; deferred items never described as in-scope
+  7  spec-cited implementation evidence: every repo path cited in SPEC-INDEX §6.1
+     (the shipped-evidence table) must exist in the tree — hard FAIL; every other
+     repo-path citation in the specs must exist too, or carry an explicit,
+     self-invalidating RELEASE-003 KNOWN_ROTTED exemption (warned, never silent)
   +  counts: files, bytes, sections, types, AC coverage table
 
 Exit code 0 = clean, 1 = at least one hard failure.
 """
 from __future__ import annotations
 
+import glob
 import os
 import re
 import sys
@@ -26,6 +31,7 @@ from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPECS = os.path.dirname(HERE)
+ROOT = os.path.dirname(SPECS)  # the repository root every citation is relative to
 
 SPEC_IDS = [f"SPEC-{n:02d}" for n in range(1, 14)]
 META = ["Spec", "Area prefix", "Package", "Consumed types", "Local types", "ACs", "PRD"]
@@ -54,6 +60,59 @@ DEFERRED_TERMS = [
     "cron-monitors", "jira", "gitlab", "eBPF",
 ]
 HANDOFF_MARKERS = ["v1.0", "1.0 hand-off", "1.0 handoff", "deferred", "defers", "not in v0.1", "out of v0.1", "reserved", "hand-off"]
+
+# ---------------------------------------------------------------------------
+# Step 7 — spec-cited implementation evidence (RELEASE-003).
+#
+# A path cited in the specs is repo-relative unless it begins with `/`, `~/`,
+# `$`, `./`, or `../` (absolute or homedir examples), or its first segment is a
+# mount/state-root style token (e.g. a leading hyphen) or a protocol prefix
+# (`http/`, `text/`, `crypto/` — stdlib package paths).  The empirical test for
+# "repo path" is: the first segment names a directory that actually exists at
+# the repository root (derived from the live tree, never a hardcoded list), OR
+# the token ends in a source-code extension (.go/.sh/.py — a citation to code
+# is a citation to a repo file by construction, wherever it appears).
+#
+# Two enforcement tiers, both fail-closed:
+#   EVIDENCE sections (SPEC-INDEX §6.1, the cut-line-vs-AC reconciliation —
+#   the table that claims what v0.1 actually shipped) — a missing cited file is
+#   a hard FAIL with no exemption possible.
+#   OTHER citations (per-spec wiring/testing tables) — a missing cited file is
+#   a hard FAIL unless the citing line names its file in KNOWN_ROTTED (below);
+#   an exemption is self-invalidating: once the file appears on disk or the
+#   citation disappears, the stale exemption itself fails the gate.
+# ---------------------------------------------------------------------------
+EVIDENCE_SECTION_RE = re.compile(r"^### 6\.1 .*(reconciliation|honest table)", re.I)
+KNOWN_ROTTED: dict[str, str] = {
+    "cmd/trouble/issues.go": "SPEC-09 §8: design table — CLI verb never split into its own file",
+    "cmd/trouble/skills.go": "SPEC-11 §8: design table — CLI verb never split into its own file",
+    "examples/skills": "SPEC-11 §4: named directory never created in the cut line",
+    "integration/e2e_dashboard_test.go": "SPEC-10 §7: dashboard e2e lives in internal/app, never under integration/",
+    "internal/hub/profile_invariance_test.go": "SPEC-13 §8: coverage exists in lifecycle/hub batteries, file never created",
+    "internal/hub/status_test.go": "SPEC-13 §8: coverage exists in lifecycle/hub batteries, file never created",
+    "internal/registry/defaults.go": "SPEC-06 §4: defaults live in modules_config.go, file never created",
+    "internal/registry/modules/register.go": "SPEC-06 §3: no registration site; modules_*.go self-register in package init",
+    "internal/research/codeplane_test.go": "SPEC-07 §8: codeplane coverage lives in issues/ladder codeplane tests",
+    "internal/sentinel/routespool_test.go": "SPEC-04 §8: route/pool coverage lives in collectors_test.go",
+    "internal/types/types_test.go": "SPEC-TYPES §7: type round-trip tests live in per-package batteries",
+    "test/skills_e2e_test.go": "SPEC-11 §8: top-level test/ dir never existed",
+    "tests/e2e/ac14_ac18_remote_matrix.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    "tests/e2e/ac25_forward_spool.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    "tests/e2e/ac26_lifecycle_visibility.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    "tests/e2e/ac28_route_spool.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    "tests/e2e/ac29_light_hub.sh": "SPEC-13 §8: e2e script named in the design table, never landed",
+    "tests/e2e/escalation.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    "tests/e2e/unit_sandbox.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+}
+# path token shapes that are not file citations even when they look like paths
+NON_CITE_TOKEN_RE = re.compile(
+    r"^(?:/|~/|\$|\.{1,2}/|-\b|[A-Za-z][A-Za-z0-9+.-]*://)"   # absolute/homedir/var/rel/flag/URL
+)
+# source-code extensions: a citation to one of these is a repo-file claim by construction
+CITE_SOURCE_EXT = frozenset({"go", "sh", "py"})
+# go-stdlib / third-party import shapes (`os/exec`, `crypto/ed25519`, `x/sys/unix`) are
+# not repo files; they are excluded by the existence rule below, not by name.
+REPO_PATH_TOKEN_RE = re.compile(r"[A-Za-z0-9_@.\-/*]+")
 
 fails: list[str] = []
 warns: list[str] = []
@@ -121,6 +180,106 @@ def check_cited_implementation_artifacts(index_doc: str) -> None:
             fail(f"SPEC-INDEX §6.1 line {line_no}: cited implementation artifact missing: {path}")
 
 
+def _cited_repo_paths(doc: str) -> list[tuple[str, int]]:
+    """Inline-code tokens in one doc that cite a repository path.
+
+    Returns (path, line_number) pairs.  A token counts as a citation when its
+    first path segment names a directory that exists at the repository root
+    (the top-level vocabulary is derived from the live tree, never hardcoded)
+    or when the token ends in a source-code extension (.go/.sh/.py).  Globs,
+    templates, absolute/homedir/var-relative examples and URLs are not
+    citations.
+    """
+    top_dirs = frozenset(
+        n for n in os.listdir(ROOT)
+        if os.path.isdir(os.path.join(ROOT, n)) and not n.startswith(".")
+    )
+    citations: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for line_no, line in enumerate(doc.splitlines(), 1):
+        for span in re.findall(r"`([^`]+)`", line):
+            for tok in REPO_PATH_TOKEN_RE.findall(span):
+                if "/" not in tok or NON_CITE_TOKEN_RE.match(tok):
+                    continue
+                if any(c in tok for c in "<>{}"):
+                    continue  # template placeholders are claims about a class, not a file
+                tok = tok.rstrip("./")
+                if "/" not in tok:
+                    continue
+                ext = tok.rsplit(".", 1)[1].lower() if "." in os.path.basename(tok) else ""
+                first = tok.split("/", 1)[0]
+                if first not in top_dirs and ext not in CITE_SOURCE_EXT:
+                    continue
+                if tok in seen:
+                    continue
+                seen.add(tok)
+                citations.append((tok, line_no))
+    return citations
+
+
+def _citation_resolves(path: str) -> bool:
+    """Does a cited repo path name something that exists in the tree?
+
+    Handles four legitimate citation shapes beyond the plain file: a package
+    directory (`internal/ledger`), an extension-less `pkg.Symbol` token whose
+    package prefix is a real file (`internal/issues.DefaultConfig`), an
+    identifier qualified on a file with an extension kept in the middle of the
+    token, and a glob citation (`modules_*.go`, `units/*.tmpl`) whose claimed
+    file class exists — an empty glob match set is rotted evidence, not a pass.
+    """
+    if os.path.exists(os.path.join(ROOT, path)):
+        return True
+    if "*" in os.path.basename(path):
+        return bool(glob.glob(os.path.join(ROOT, path)))
+    base, dot, _ = path.rpartition(".")
+    if dot and "/" in base and not os.path.splitext(base)[1]:
+        return os.path.exists(os.path.join(ROOT, base))
+    return False
+
+
+def check_cited_repo_paths(all_docs: dict[str, str]) -> None:
+    """Step 7 — the citation census (RELEASE-003).
+
+    Every repo-path citation in the specs must resolve in the tree.  A missing
+    §6.1 evidence citation is a hard failure, always.  A missing citation from
+    the other spec tables is a hard failure unless KNOWN_ROTTED names it — and
+    an exemption is self-invalidating: it fails the gate the moment the cited
+    path appears, the citing line (and its citation) disappears, or the
+    exemption names a file that no longer needs it.
+    """
+    evidence_paths = {path for path, _ in cited_implementation_artifacts(all_docs["SPEC-INDEX.md"])}
+    rotted_seen: set[str] = set()
+    cited_count = 0
+    missing_count = 0
+    exempt_count = 0
+    for name in sorted(all_docs):
+        for path, line_no in _cited_repo_paths(all_docs[name]):
+            cited_count += 1
+            if _citation_resolves(path):
+                continue
+            missing_count += 1
+            cite = f"{name}:{line_no}"
+            if name == "SPEC-INDEX.md" and path in evidence_paths:
+                fail(f"evidence missing (§6.1): {path} — cited at {cite}")
+                continue
+            # exemption lookup ignores glob arity: `examples/skills` covers `examples/skills/*`
+            norm = path.rstrip("/*")
+            if norm in KNOWN_ROTTED:
+                rotted_seen.add(norm)
+                exempt_count += 1
+                warn(f"KNOWN_ROTTED (RELEASE-003): {path} — {KNOWN_ROTTED[norm]} (cited at {cite})")
+                continue
+            fail(f"spec-cited implementation file missing: {path} — cited at {cite}")
+    # --- exemption hygiene: a stale entry is itself a failure ---------------
+    for path in sorted(set(KNOWN_ROTTED) - rotted_seen):
+        if not os.path.exists(os.path.join(ROOT, path)):
+            fail(f"KNOWN_ROTTED entry no longer cited anywhere: {path} — delete the exemption")
+        else:
+            fail(f"KNOWN_ROTTED entry is stale: {path} now exists — delete the exemption")
+    print(f"cited repo paths checked: {cited_count}   missing: {missing_count}   "
+          f"exempted (KNOWN_ROTTED): {exempt_count}")
+
+
 def read(name: str) -> str:
     with open(os.path.join(SPECS, name), encoding="utf-8") as fh:
         return fh.read()
@@ -148,6 +307,7 @@ def main() -> int:
     types_doc = docs["SPEC-TYPES.md"]
     index_doc = docs["SPEC-INDEX.md"]
     check_cited_implementation_artifacts(index_doc)
+    check_cited_repo_paths(docs)
 
     # ---------- inventories -------------------------------------------------
     types = set(re.findall(r"^type\s+([A-Za-z_]\w*)\s", types_doc, re.M))

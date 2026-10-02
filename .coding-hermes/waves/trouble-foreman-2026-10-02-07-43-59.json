@@ -1,0 +1,48 @@
+{
+  "tick_id": "trouble-foreman-2026-10-02-07-43-59",
+  "project": "trouble",
+  "created_at": "2026-10-02T08:00:00Z",
+  "base_sha": "8bc2752",
+  "wave_budget": 9,
+  "workers": [
+    {
+      "task_id": "TRBL-085",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-085",
+      "branch": "wt/TRBL-085",
+      "base_sha": "8bc2752",
+      "gitreins_task": "TRBL-085",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "QA-TROUBLE-13",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-13",
+      "branch": "wt/QA-TROUBLE-13",
+      "base_sha": "8bc2752",
+      "gitreins_task": "QA-TROUBLE-13",
+      "status": "dispatched"
+    }
+  ],
+  "merge_order": [
+    "TRBL-085",
+    "QA-TROUBLE-13"
+  ],
+  "outcomes": [
+    {
+      "task_id": "TRBL-085",
+      "status": "merged",
+      "merge_commit": "5ff8995",
+      "branch_commit": "e7213fb",
+      "verdict": "25082c19 (tier1 baseline FAIL: harness-scope+test-timeout; build/selfcheck/tests PASS)",
+      "session": "20261002_025136_021e7c"
+    },
+    {
+      "task_id": "QA-TROUBLE-13",
+      "status": "merged",
+      "merge_commit": "1026993",
+      "branch_commit": "5f323b1",
+      "verdict": "6df6605f (tier1 baseline FAIL as above; build/vet/-count=3 PASS)",
+      "session": "20261002_025137_02ee21"
+    }
+  ],
+  "finished_at": "2026-10-02T10:30:00Z"
+}

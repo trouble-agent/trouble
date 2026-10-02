@@ -1,0 +1,42 @@
+{
+  "tick_id": "trouble-foreman-2026-10-02-10-44-23",
+  "created_at": "2026-10-02T10:55:00Z",
+  "project": "trouble",
+  "workdir": "~/trouble",
+  "wave_budget": 4,
+  "workers": [
+    {
+      "task": "QA-TROUBLE-10",
+      "branch": "wt/QA-TROUBLE-10",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-10",
+      "base": "origin/main",
+      "base_sha": "2f6daf9",
+      "model": "ox-alpha-free",
+      "provider": "opencode-go",
+      "status": "merged"
+    },
+    {
+      "task": "QA-TROUBLE-14",
+      "branch": "wt/QA-TROUBLE-14",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-14",
+      "base": "origin/main",
+      "base_sha": "2f6daf9",
+      "model": "ox-alpha-free",
+      "provider": "opencode-go",
+      "status": "merged"
+    },
+    {
+      "task": "QA-TROUBLE-16",
+      "branch": "wt/QA-TROUBLE-16",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-16",
+      "base": "origin/main",
+      "base_sha": "2f6daf9",
+      "model": "ox-alpha-free",
+      "provider": "opencode-go",
+      "status": "merged"
+    }
+  ],
+  "notes": "QA-TROUBLE-15 excluded: members span sensors/sentinel/ledger/scrub/dashboard \u2014 not middle-out-disjoint with QA-TROUBLE-16 (dashboard package overlap). Serial tick later.",
+  "finished_at": "2026-10-02T15:41:58.033454+00:00",
+  "recovered_by": "tick trouble-foreman-2026-10-02-15-06-27 \u2014 all 3 workers merged + CI-green at 0ad3a92; branches/worktrees already reaped; rows closed + events appended"
+}

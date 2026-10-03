@@ -296,9 +296,19 @@ read -r DEFPORT DEFINGEST HOLD2 <<< "$PAIR"
 DEFCFG="$BASE/config-default.toml"
 DEFHOME="$BASE/home"
 DEFENVF="$BASE/default.env"
-DEFSTORE="$DEFHOME/.config/trouble/dashboard-tokens.json"
-mkdir -p "$DEFHOME" "$BASE/state-default"
-chmod 700 "$BASE/state-default"
+# XDG_STATE_HOME pins the DEFAULT state root into $BASE: config.go's
+# defaultStateRoot honours it, so the fixture declares NO state_root and still
+# lands the implicit default outside the operator's real ~/.local/state.
+DEFSTATE="$BASE/state-default"
+# TRBL-085 (e7213fb): when state_root is DECLARED (as this fixture does) and
+# dashboard.token_file is left at its default, the resolved store is the
+# STATE-ROOT-anchored path — the same value the CLI and the daemon both take
+# through lifecycle.Resolve, which is why the mint's token authenticates below.
+# The HOME path must stay ABSENT: a declared state root never mints into the
+# operator's ~/.config store.
+DEFSTORE="$DEFSTATE/dashboard-tokens.json"
+mkdir -p "$DEFHOME/.config" "$DEFSTATE"
+chmod 700 "$DEFSTATE"
 : > "$DEFENVF"; chmod 600 "$DEFENVF"
 
 cat > "$DEFCFG" <<TOML
@@ -327,15 +337,16 @@ TOML
 chmod 600 "$DEFCFG"
 grep -q 'token_file' "$DEFCFG" && bad "the default-config fixture must not set dashboard.token_file" || ok "no dashboard.token_file in the default config"
 
-DEFTOK=$(HOME="$DEFHOME" XDG_CONFIG_HOME="$DEFHOME/.config" "$TROUBLE" dashboard token create --config "$DEFCFG" --label dash-read@default --scopes read 2>"$BASE/tok-default.err")
+DEFTOK=$(env HOME="$DEFHOME" XDG_CONFIG_HOME="$DEFHOME/.config" XDG_STATE_HOME="$DEFSTATE" "$TROUBLE" dashboard token create --config "$DEFCFG" --label dash-read@default --scopes read 2>"$BASE/tok-default.err")
 if [[ "$DEFTOK" == tdt_* && ${#DEFTOK} -eq 47 ]]; then ok "minted a tdt_ token against the default path"; else bad "default-path mint failed (${DEFTOK:0:12}…): $(cat "$BASE/tok-default.err")"; fi
-if [[ -f "$DEFSTORE" ]]; then ok "the mint landed at \$HOME/.config/trouble/dashboard-tokens.json"; else bad "no store at the default path $DEFSTORE: $(cat "$BASE/tok-default.err")"; fi
+if [[ -f "$DEFSTORE" ]]; then ok "the mint landed in the state-root-anchored store (TRBL-085)"; else bad "no store at the anchored path $DEFSTORE: $(cat "$BASE/tok-default.err")"; fi
+[[ ! -e "$DEFHOME/.config/trouble/dashboard-tokens.json" ]] && ok "the HOME store was never written (declared state root keeps the operator default untouched)" || bad "the HOME default store exists — a declared state_root must not mint there"
 [[ "$(stat -c '%a' "$DEFSTORE" 2>/dev/null)" == "600" ]] && ok "the default-path store is 0600" || bad "default-path store mode = $(stat -c '%a' "$DEFSTORE" 2>/dev/null), want 600"
 if [[ -n "$DEFTOK" ]] && grep -q "$DEFTOK" "$DEFSTORE" 2>/dev/null; then bad "the default-path store leaked the plaintext"; else ok "the default-path store holds no plaintext"; fi
 
 release_pair "$HOLD2"   # TRBL-083: drop the reservation microseconds before the daemon listens
 HOLD2=""
-HOME="$DEFHOME" XDG_CONFIG_HOME="$DEFHOME/.config" "$TROUBLED" --config "$DEFCFG" > "$BASE/troubled-default.log" 2>&1 &
+HOME="$DEFHOME" XDG_CONFIG_HOME="$DEFHOME/.config" XDG_STATE_HOME="$DEFSTATE" "$TROUBLED" --config "$DEFCFG" > "$BASE/troubled-default.log" 2>&1 &
 DPID2=$!
 code=""
 for _ in $(seq 1 60); do
@@ -369,6 +380,7 @@ ARGVCFG="$BASE/config-argv.toml"
 ARGVHOME="$BASE/home-argv"
 ARGVSTORE="$BASE/argv-tokens.json"
 ARGVDEF="$ARGVHOME/.config/trouble/dashboard-tokens.json"
+ARGVANCHOR="$BASE/state-argv/dashboard-tokens.json"
 mkdir -p "$ARGVHOME" "$BASE/state-argv"
 chmod 700 "$BASE/state-argv"
 
@@ -396,12 +408,14 @@ TOML
 chmod 600 "$ARGVCFG"
 grep -q 'token_file' "$ARGVCFG" && bad "the argv-store fixture must not declare dashboard.token_file" || ok "the argv-store config declares no dashboard.token_file"
 
-# Control: the mint WITHOUT the flag writes the compiled default — the store
-# this daemon does not read.
+# Control: the mint WITHOUT the flag resolves the config's anchored store
+# (state_root declared, token_file default => TRBL-085 anchoring) — the store
+# this daemon (booted with --dashboard-token_file) does not read.
 CTLTOK=$(HOME="$ARGVHOME" XDG_CONFIG_HOME="$ARGVHOME/.config" "$TROUBLE" dashboard token create \
   --config "$ARGVCFG" --label dash-read@argv-ctl --scopes read 2>"$BASE/tok-argv-ctl.err")
 if [[ "$CTLTOK" == tdt_* && ${#CTLTOK} -eq 47 ]]; then ok "the no-flag mint printed a token (the divergence the row reports)"; else bad "no-flag mint failed: $(cat "$BASE/tok-argv-ctl.err")"; fi
-if [[ -f "$ARGVDEF" ]]; then ok "the no-flag mint wrote the compiled default store, not the daemon's"; else bad "the no-flag mint did not write the default store"; fi
+if [[ -f "$BASE/state-argv/dashboard-tokens.json" ]]; then ok "the no-flag mint wrote the state-anchored default store (SPEC-10 §3.2 TRBL-085), not the daemon's argv store"; else bad "the no-flag mint did not write the anchored default store: $(cat "$BASE/tok-argv-ctl.err")"; fi
+[[ ! -e "$ARGVDEF" ]] && ok "the HOME default store stayed untouched" || bad "the HOME default store was written by the anchored mint"
 grep -q "dashboard token store: $ARGVSTORE" "$BASE/tok-argv-ctl.err" && bad "the no-flag mint claimed to address the argv store" || ok "the no-flag mint named the default store, not the argv store"
 
 # The flag: the mint lands in the file the daemon is booted to read.

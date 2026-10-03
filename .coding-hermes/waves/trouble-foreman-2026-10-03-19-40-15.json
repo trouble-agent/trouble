@@ -1,0 +1,1 @@
+{"tick":"trouble-foreman-2026-10-03-19-40-15","mode":"serial-fallback","reason":"only 1 implementable board row this tick (TRBL-049 blocked-close is foreman work; TRBL-096 filed+fixed by foreman)","tasks":[{"id":"TRBL-096","worktree":"/home/kara/trouble (main, foreman-implemented one-file fixture fix)","branch":"main","base_sha":"0eb55af","commit":"4dcdb3d"}],"wave_budget":5}

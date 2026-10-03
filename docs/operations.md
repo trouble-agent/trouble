@@ -1051,6 +1051,26 @@ docker compose stop redis            # SPEC-13 degradation check (see below)
 docker compose down                  # stop, keep volumes; `-v` also drops state
 ```
 
+**Rootless and managed-docker hosts.** Measured on a fresh-box clone →
+`docker compose` install (docs/dogfood/2026-09-25-compose-integration.md);
+three prerequisites the quickstart above assumes:
+
+1. `DOCKER_HOST`. On a managed-docker host the default
+   `/var/run/docker.sock` is root's — you get permission denied. Point
+   compose at the socket that exists:
+   `export DOCKER_HOST=unix:///run/bunker/<agent>/docker.sock` (managed
+   daemon) or `export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock`
+   (plain rootless docker). Do this before any `docker compose` command.
+2. No user-level `docker.service`. On a managed-daemon host,
+   `~/.config/systemd/user/docker.service` may exist but the user manager
+   cannot load it (`Unit docker.service not found`, even after
+   `daemon-reload`) — the daemon runs out-of-band. Do not try to
+   `systemctl --user start docker`; rely on the managed daemon.
+3. Temp files under `$HOME`. `$TMPDIR` on shared hosts is cross-agent (a
+   plain `/tmp/build.log` can be another agent's). Any temp file you use
+   with compose builds — build logs, contexts, scratch outputs — belongs
+   under `$HOME`, not `/tmp`.
+
 **Ports.** `7643` ingest, `7644` dashboard; both published on `127.0.0.1` only
 (`127.0.0.1:7643:7643`, `127.0.0.1:7644:7644`). This stack never binds `3000`,
 `8642`/`8643` (Hermes gateway) or `9090` (coding-hermes scheduler).

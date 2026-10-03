@@ -13,8 +13,9 @@
       "base_sha": "b7e2bb9",
       "model": "ox-alpha-free",
       "provider": "opencode-go",
-      "status": "dispatched"
+      "status": "merged"
     }
   ],
-  "notes": "Serial tick (budget 1). Root cause pre-diagnosed by foreman: foldableObservation requires sample_backed which only psi sets; dbus counted-only repeats bypass the fold. Brief at /tmp/trbl075-brief.txt."
+  "notes": "Serial tick (budget 1). Root cause pre-diagnosed by foreman: foldableObservation requires sample_backed which only psi sets; dbus counted-only repeats bypass the fold. Brief at /tmp/trbl075-brief.txt.",
+  "finished_at": "2026-10-03T12:45:00Z"
 }

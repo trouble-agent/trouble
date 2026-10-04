@@ -145,9 +145,10 @@ trouble --version                       version git_sha build_time (and whether 
 trouble config explain [--key K] [--json]   every resolved key with its winning source
 trouble topology [--json]               the T1..T5 decisions for this configuration
 trouble check-stall [--health-url URL] [--state-root DIR] [--json]   the external stall checker: exit 0 / 8 / 9
-trouble install [--check] [--dry-run] [--root DIR] [--force]
+trouble install [--scope user|system] [--check] [--dry-run] [--root DIR] [--force]
 trouble upgrade [--to PATH] [--rollback] [--wait DURATION]
 trouble escalate --unit NAME            invoked by trouble-escalate@.service only
+trouble sensors probe [--json] [--timeout DURATION]   run the capability probe without a boot (exit 0, degraded included)
 trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
                                [--output-env ENVFILE]
 trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
@@ -193,6 +194,7 @@ ones above.
 | `trouble hub archive [--dry-run] [--file FILE] [--force]` | the archival job for one generation (default: every closed generation without an `exported` marker); `--dry-run` prints the `ArchivePlan` (file, bytes, gzip bytes, marker id, target namespace) and writes nothing | `0` ok, `1` failed, `2` refused |
 | `trouble hub dedup --key KEY [--json]` | read-only probe of the dedup gate for one idempotency key: present/absent plus TTL. No mutation, and nothing but presence is revealed | `0` present, `1` absent, `2` Redis unreachable |
 | `trouble hub drain [--timeout DURATION]` | consume-and-ack the stream to empty (or the timeout), then stop — the pre-migration drain of SPEC-12 §3.6 | `0` drained, `1` timeout with pending entries |
+| `trouble hub --help` (or any unknown hub verb) | prints `unknown hub verb "--help"` followed by the full usage text — a usage error, NOT a help surface | `2` |
 
 `drain` is the only mutating verb: it moves entries from Redis into the ledger
 and never deletes an un-acked entry. `status` and `dedup` write nothing, and

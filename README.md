@@ -337,13 +337,13 @@ tell a bad build from a bad configuration:
 
 ```
 make smoke          # 3 lines: version triple, config explain, topology
-make smoke-e2e      # the live operator smoke: 45 assertions against both binaries
+make smoke-e2e      # 60 assertions against both binaries
 ```
 
 `make smoke` builds first, then runs the version triple, `config explain --json`
 and `topology` — if it prints, the binary is stamped and the CLI can read its own
 configuration. `make smoke-e2e` (aliased by `tests/e2e/cli_smoke.sh`) is the real
-one: 45 assertions from the version triple through the checker's exit 0 → exit 8
+60 assertions from the version triple through the checker's exit 0 → exit 8
 transition. Reach for `make smoke-e2e` after any change to the CLI surface,
 config resolution or the checker; reach for `make smoke` when you just want to
 know whether the daemon and CLI agree on the configuration at all.

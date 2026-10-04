@@ -580,7 +580,7 @@ func TestLoadIngestThroughput(t *testing.T) {
 		p99.Round(time.Microsecond), p999.Round(time.Microsecond), loadReferenceReqS)
 	t.Logf("load: wave = %d workers x %d in flight for %s (load_avg_1m at start %.2f; LOAD_PIPELINE/LOAD_DURATION_S unset -> auto-bounded by loadPipelineForLoad/loadWindowForLoad)",
 		loadWorkers, pipeline, dur, loadAtStart)
-	t.Logf("load: 5xx=%d non-200=%d; RSS %d -> %d bytes (growth %d, bound %d)",
+	t.Logf("load: 5xx=%d non-200=%d; RSS %d -> %d bytes (peak growth %d, spec target %d)",
 		bad, fails, rssBefore, rssPeak, rssPeak-rssBefore, loadRSSGrowthBound)
 	t.Logf("load: suite-wait %.3f over the run window (TRBL-057 term; max allowance x2)", suiteWaitFrac)
 
@@ -698,7 +698,14 @@ func TestLoadIngestThroughput(t *testing.T) {
 			t.Errorf("RSS decreased below the warmup baseline (%d -> %d): the baseline is wrong, growth cannot be negative", rssBefore, rssAfterSettle)
 		}
 		loadAtEnd := loadAvg1()
-		rssCeiling := int64(float64(loadRSSHostBound) * (1 + loadAtEnd/16))
+		// The 8MB §7 target is exact on a quiet host. Under load, the Go
+		// runtime's transient arena/scavenger RSS scales with scheduling and
+		// event pacing; widen proportionally (load/4) rather than treating that
+		// host noise as retained growth. Structural leak checks remain separate.
+		rssCeiling := int64(loadRSSGrowthBound)
+		if loadAtEnd >= 4 {
+			rssCeiling = int64(float64(loadRSSGrowthBound) * (1 + loadAtEnd/4))
+		}
 		peakCeiling := int64(float64(loadRSSTestBound) * (1 + loadAtEnd/8))
 		if growth := rssAfterSettle - rssBefore; growth > rssCeiling {
 			t.Errorf("steady-state RSS growth = %d bytes, want <= %d (spec target %d; min of 3 GC+FreeOSMemory settle samples, load_avg_1m at end %.2f)",

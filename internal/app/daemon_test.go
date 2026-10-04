@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -94,13 +96,25 @@ func bootDaemon(t *testing.T) *harness {
 	return bootDaemonWith(t, SubsystemOptions{})
 }
 
-// bootDaemonWith boots the daemon with per-subsystem options (the e2e for the
-// wired subsystems passes real project/driver tables through the same
-// BootOptions surface an embedding binary would).
-func bootDaemonWith(t *testing.T, so SubsystemOptions) *harness {
-	t.Helper()
+// bootPortPicker is the seam the bind-race retry arms drive: nil for every
+// ordinary boot, so freePortPair is consulted as usual; a test installs one to
+// return a chosen port pair (e.g. with one port already held by a throwaway
+// listener, mimicking a sibling test package that won the :0 probe race) or to
+// hold the pair fixed across attempts. bootDaemonWith clears it on return.
+var bootPortPicker func(t *testing.T) (int, int)
+
+// bootOnce performs ONE boot attempt: fresh state root, fresh token mint,
+// fresh port pick, config + env write, RunDaemon to READY. A boot the bind
+// preflight refuses (TROUBLE-LIFECYCLE-003) closes its own ledger and is
+// finished — nothing here is reusable by the next attempt, which is why
+// bootDaemonWith re-runs this whole step per attempt instead of only
+// regenerating the config.
+func bootOnce(t *testing.T, so SubsystemOptions) (*harness, error) {
 	root := stateBase(t)
 	dashPort, ingestPort := freePortPair(t)
+	if bootPortPicker != nil {
+		dashPort, ingestPort = bootPortPicker(t)
+	}
 	cfgPath := filepath.Join(root, "config.toml")
 	envFile := filepath.Join(root, "trouble.env")
 
@@ -188,12 +202,100 @@ token_file = %q
 		h.done <- err
 	}()
 	if reached, err := awaitBootReady(t, "daemon", bootReadyBase, ready, h.done); !reached {
-		t.Fatalf("daemon did not reach READY: %v", err)
+		// The boot refused (or settled without READY): RunDaemon has already
+		// returned, so release the attempt's context before the harness moves
+		// on — a retry builds a fresh everything.
+		cancel()
+		return nil, err
 	}
 	t.Cleanup(func() {
 		cancel()
 		awaitDrainBudget(t, "daemon", bootDrainBase, h.done)
 	})
+	return h, nil
+}
+
+// isBindInUseRefusal reports whether err is a bind preflight refusal
+// (TROUBLE-LIFECYCLE-003) caused by a port race — the `address already in
+// use` bind error — and not one of the config-shape refusals the same code
+// carries (a bad bind string, a duplicate listener, a policy refusal). Those
+// are permanent: a fresh port cannot fix them, and retrying would mask a real
+// defect.
+//
+// The preflight wraps the code but FORMATS the bind error into the message
+// (`%s`), so the errno is not in the unwrap chain; the discriminator is the
+// errno chain when present, else the platform's own EADDRINUSE text the
+// message embeds — the same text on every OS the constant builds for.
+func isBindInUseRefusal(err error) bool {
+	if err == nil || !strings.Contains(err.Error(), string(types.CodeLifecycle003)) {
+		return false
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return errno == syscall.EADDRINUSE
+	}
+	return strings.Contains(err.Error(), syscall.EADDRINUSE.Error())
+}
+
+// maxBootAttempts is the bound on boot attempts per harness: one ordinary
+// attempt plus retries only for the TROUBLE-LIFECYCLE-003 bind-in-use race,
+// where a sibling test package was handed the probed port between
+// freePortPair's release and the daemon's bind preflight (INT-CI-3, CI
+// 37163971052: issues.test pid 6463 held the port). Losing five fresh :0
+// picks in a row is no longer a race; the last refusal fails loudly, naming
+// the code.
+const maxBootAttempts = 5
+
+// runBootAttempts is bootDaemonWith's bounded attempt loop, with the failure
+// sink injected: production passes t.Fatalf (a refusal must fail the test
+// loud), and the exhaust arm of the regression passes a recorder so the
+// failure TEXT can be pinned without aborting the test mid-flight. Every
+// non-bind failure is permanent by class and fails on the first attempt;
+// only the TROUBLE-LIFECYCLE-003 bind-in-use race is retried, each attempt
+// re-running the whole boot step with a FRESH freePortPair (a fresh :0 pick
+// is the remedy — no sleep-poll), up to maxBootAttempts.
+func runBootAttempts(t *testing.T, so SubsystemOptions, failf func(string, ...any)) (*harness, error) {
+	// The phase marks of a boot the preflight refuses stop at bind_preflight;
+	// clearing the observer between attempts means a retry's marks start from
+	// scratch instead of the phase table (bootphase_test) seeing the sequence
+	// twice. Attempt 1 keeps whatever the calling test installed.
+	var lastErr error
+	for attempt := 1; attempt <= maxBootAttempts; attempt++ {
+		if attempt > 1 {
+			bootPhaseObserver = nil
+		}
+		h, err := bootOnce(t, so)
+		if err == nil {
+			return h, nil
+		}
+		lastErr = err
+		if !isBindInUseRefusal(err) {
+			failf("daemon did not reach READY: %v", err)
+			return nil, err
+		}
+		t.Logf("boot attempt %d/%d refused by the bind preflight (bind race): %v", attempt, maxBootAttempts, err)
+	}
+	failf("daemon did not reach READY after %d attempts; last bind refusal: %v", maxBootAttempts, lastErr)
+	return nil, lastErr
+}
+
+// bootDaemonWith boots the daemon with per-subsystem options (the e2e for the
+// wired subsystems passes real project/driver tables through the same
+// BootOptions surface an embedding binary would).
+//
+// The harness retries only the TROUBLE-LIFECYCLE-003 bind-in-use race (see
+// runBootAttempts) and reports the last refusal loud after the final attempt.
+func bootDaemonWith(t *testing.T, so SubsystemOptions) *harness {
+	t.Helper()
+	defer func() {
+		bootPortPicker = nil
+		bootPhaseObserver = nil
+	}()
+	h, err := runBootAttempts(t, so, t.Fatalf)
+	if err != nil {
+		// Unreachable: the injected t.Fatalf does not return (FailNow).
+		return nil
+	}
 	return h
 }
 
@@ -426,5 +528,160 @@ func TestDaemonRefusesWriteActionsWithAReadToken(t *testing.T) {
 		if resp.Header.Get("X-Trouble-Required-Scope") == "" {
 			t.Errorf("POST %s refusal does not name the required scope", path)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The TROUBLE-LIFECYCLE-003 bind-race retry (INT-CI-3). CI runs
+// `go test ./...`, so test packages run in parallel and every one of them
+// probes :0 for its own scratch listeners; a package can be handed the port
+// freePortPair just released between that release and the daemon's bind
+// preflight, and the preflight refuses with TROUBLE-LIFECYCLE-003 naming the
+// sibling's pid (CI 37163971052: issues.test pid 6463). freePortPair already
+// narrows the window by holding both listeners while choosing; the retry is
+// the remedy for the window that remains — re-run the whole boot step with a
+// FRESH pick, bounded, loud after the last attempt.
+// ---------------------------------------------------------------------------
+
+// TestBootDaemonWithRetriesABindInUseRace is the INT-CI-3 regression: a port
+// the picker chose is already held (the sibling won the race), and
+// bootDaemonWith must come back with a boot that SERVES on a different port,
+// not a refusal naming a foreign holder.
+func TestBootDaemonWithRetriesABindInUseRace(t *testing.T) {
+	// The sibling's holder: a plain throwaway listener kept open across the
+	// first boot attempt(s), released once the retry re-picks — the shape of a
+	// sibling package that is holding the port when the daemon binds.
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen (the sibling holder): %v", err)
+	}
+	heldPort := held.Addr().(*net.TCPAddr).Port
+
+	// Attempt 1's pick lands on the held dashboard port (the race already
+	// lost); later attempts pick fresh via the ordinary freePortPair path.
+	attempt := 0
+	bootPortPicker = func(t *testing.T) (int, int) {
+		t.Helper()
+		attempt++
+		if attempt == 1 {
+			return heldPort, freePort(t)
+		}
+		held.Close() // the sibling let go: later picks are ordinary
+		return freePortPair(t)
+	}
+
+	h := bootDaemonWith(t, SubsystemOptions{})
+
+	// The boot SERVES: the harness's base URL answers an unauthenticated
+	// /health.json (SPEC-10 §2.1 footnote 1), so the retried boot demonstrably
+	// reached READY on a port the preflight could hold.
+	code, body := h.anon("/health.json", "application/json")
+	if code != http.StatusOK {
+		t.Fatalf("after the bind-race retry GET /health.json = %d %s, want 200", code, body)
+	}
+
+	// ... and the serving address is NOT the held port.
+	if strings.Contains(h.d.HealthURL, fmt.Sprintf(":%d", heldPort)) {
+		t.Fatalf("the boot is serving on the held port %d: the retry must pick a fresh port (%s)", heldPort, h.d.HealthURL)
+	}
+	if attempt < 2 {
+		t.Fatalf("the picker was consulted %d time(s); the race arm must have forced a retry", attempt)
+	}
+}
+
+// TestBootDaemonWithExhaustedBindRetriesFailsLoud is the exhaust arm: with
+// every pick colliding for the whole bounded window, the attempt loop must
+// exhaust, fail LOUD through the production failure sink (naming
+// TROUBLE-LIFECYCLE-003, the attempt bound and the foreign holder), and hand
+// the error back — never a half-built harness or a success.
+func TestBootDaemonWithExhaustedBindRetriesFailsLoud(t *testing.T) {
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen (the sibling holder): %v", err)
+	}
+	heldPort := held.Addr().(*net.TCPAddr).Port
+	t.Cleanup(func() { held.Close() })
+
+	// Every pick for the whole window returns the held dashboard port: the
+	// race is lost on every attempt.
+	bootPortPicker = func(t *testing.T) (int, int) {
+		t.Helper()
+		return heldPort, freePort(t)
+	}
+	t.Cleanup(func() { bootPortPicker = nil })
+
+	// Drive the loop with a recorder sink: the production path's t.Fatalf is
+	// injected unchanged in bootDaemonWith; here the same failf call site is
+	// captured so the failure TEXT can be pinned without aborting the test
+	// before its assertions.
+	var fatal string
+	var fatals int
+	failf := func(format string, args ...any) {
+		fatals++
+		fatal = fmt.Sprintf(format, args...)
+	}
+	h, err := runBootAttempts(t, SubsystemOptions{}, failf)
+	if h != nil || err == nil {
+		t.Fatalf("a fully-colliding window returned h=%v, err=%v; the loop must exhaust and fail", h, err)
+	}
+	if fatals != 1 {
+		t.Errorf("the failure sink fired %d times, want exactly 1 (loud, not per-attempt)", fatals)
+	}
+	for _, want := range []string{
+		string(types.CodeLifecycle003),
+		fmt.Sprintf("%d attempts", maxBootAttempts),
+		fmt.Sprintf("%d", heldPort),
+	} {
+		if !strings.Contains(fatal, want) {
+			t.Errorf("exhaustion failure does not name %q: %s", want, fatal)
+		}
+	}
+	// The refusal must name the FOREIGN HOLDER (TRBL-042's diagnostic), so the
+	// failure reads as a hygiene condition, not a defect in the code under test.
+	if !strings.Contains(fatal, "TROUBLE-SCRATCH-DAEMON") {
+		t.Errorf("exhaustion failure does not carry the scratch-daemon holder hint: %s", fatal)
+	}
+}
+
+// TestIsBindInUseRefusalDiscriminates pins the retry trigger against the
+// refusal's REAL wire shape — the code wrapped, the bind error `%s`-formatted
+// into the message (the errno is NOT in the unwrap chain; that shape is
+// reproduced from internal/lifecycle/bind.go verbatim). The bind-in-use
+// refusal is the ONLY TROUBLE-LIFECYCLE-003 shape the harness retries: a
+// config-shape 003 refusal (a malformed bind, no errno) stays permanent, a
+// non-003 error is no trigger, and a 003 naming a different errno (EACCES)
+// is not one either.
+func TestIsBindInUseRefusalDiscriminates(t *testing.T) {
+	bindInUse := fmt.Errorf("%w: cannot bind dashboard %q: %v (hint: ss -tlnp)",
+		types.CodeLifecycle003, "127.0.0.1:40103",
+		&net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)})
+	if !isBindInUseRefusal(bindInUse) {
+		t.Fatalf("the bind-in-use refusal is not recognized: %v", bindInUse)
+	}
+
+	// The severed chain the live refusal actually carries: same code, same
+	// platform text, errno reachable by neither errors.As nor the hint.
+	textOnly := fmt.Errorf("%w: cannot bind ingest %q: %s (hint: ss -tlnp)",
+		types.CodeLifecycle003, "127.0.0.1:40104",
+		(&net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)}).Error())
+	if !isBindInUseRefusal(textOnly) {
+		t.Fatalf("the severed-chain bind-in-use refusal is not recognized: %v", textOnly)
+	}
+
+	permanent := fmt.Errorf("%w: dashboard bind %q has invalid port", types.CodeLifecycle003, "127.0.0.1:nope")
+	if isBindInUseRefusal(permanent) {
+		t.Fatalf("a config-shape 003 refusal must NOT trigger the retry: %v", permanent)
+	}
+	otherErrno := fmt.Errorf("%w: cannot bind dashboard %q: %v (hint: ss -tlnp)",
+		types.CodeLifecycle003, "127.0.0.1:40105",
+		&net.OpError{Op: "listen", Net: "tcp", Err: os.NewSyscallError("bind", syscall.EACCES)})
+	if isBindInUseRefusal(otherErrno) {
+		t.Fatalf("a 003 refusal for a different errno must NOT trigger the retry: %v", otherErrno)
+	}
+	if isBindInUseRefusal(errors.New("config file invalid")) {
+		t.Fatalf("a non-003 error must not trigger the retry")
+	}
+	if isBindInUseRefusal(nil) {
+		t.Fatalf("nil must not trigger the retry")
 	}
 }

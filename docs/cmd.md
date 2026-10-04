@@ -19,7 +19,8 @@ joined, and `cmd/*` is where the daemon's own lifetime lives. That is the whole
 reason the graph stays acyclic: `internal/ledger` never imports `internal/ladder`
 (the `Actor` triple is injected), `internal/ladder` never imports
 `internal/registry` (the `PlayRunner` view is an interface), and neither of them
-knows that `internal/dashboard` exists.
+knows that `internal/dashboard` exists. The agent stage's LLM client,
+`internal/llm`, is documented in [docs/llm.md](llm.md).
 
 ## The daemon's argv
 

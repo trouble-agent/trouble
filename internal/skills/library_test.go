@@ -567,6 +567,9 @@ func TestLibrary_DirWritableWalkIsBoundedByTheStateRoot(t *testing.T) {
 	if err := os.Mkdir(open, 0o777); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	if err := os.Chmod(open, 0o777); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
 	if _, err := NewLibrary(libraryCfg(open), deps, &fakeRunner{}); err == nil {
 		t.Fatal("NewLibrary accepted a world-writable library dir outside the state root")
 	} else if ReasonOf(err) != ReasonDirWritable {

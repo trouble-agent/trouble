@@ -170,7 +170,7 @@ func NewLibrary(cfg types.SkillsConfig, deps Deps, runner StepRunner) (*Library,
 	if !info.IsDir() {
 		return nil, newErr(types.CodeSkills013, ReasonDirMissing, "local_dir %q is not a directory", lc.Dir)
 	}
-	if p, bad := writableDirOnPath(lc.Dir); bad {
+	if p, bad := writableDirOnPath(lc.Dir, dirWritableBound(deps.StateRoot, lc.Dir)); bad {
 		return nil, newErr(types.CodeSkills013, ReasonDirWritable,
 			"local_dir %s is writable by another user (%s): a library an attacker can replace is a capability handed to that user",
 			lc.Dir, p)
@@ -387,7 +387,14 @@ func (l *Library) loadedRecord(ctx context.Context, skills []LocalSkill, refused
 // ancestor) that another user could write to, and therefore replace the library
 // through. A sticky directory (like /tmp) is exempt: the sticky bit is what stops
 // another user from renaming or deleting a file they do not own.
-func writableDirOnPath(dir string) (string, bool) {
+//
+// stop bounds the walk: components strictly ABOVE stop are not part of the
+// library's ownership chain (SPEC-11 §2b rule 5 scopes the check to "any
+// ancestor up to the state root"; the state root's own mode is
+// TROUBLE-LIFECYCLE-005's job at boot). An empty stop (or a dir that is not
+// under it) keeps the full walk, so an operator-chosen path outside the state
+// root is checked all the way to the filesystem root.
+func writableDirOnPath(dir, stop string) (string, bool) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", false
@@ -398,6 +405,9 @@ func writableDirOnPath(dir string) (string, bool) {
 				return p, true
 			}
 		}
+		if stop != "" && p == stop {
+			break
+		}
 		parent := filepath.Dir(p)
 		if parent == p {
 			break
@@ -405,6 +415,27 @@ func writableDirOnPath(dir string) (string, bool) {
 		p = parent
 	}
 	return "", false
+}
+
+// dirWritableBound resolves the walk's stop: the state root itself when the
+// library lives under it, nothing otherwise.
+func dirWritableBound(stateRoot, dir string) string {
+	root := strings.TrimSpace(stateRoot)
+	if root == "" {
+		return ""
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return ""
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	if absDir == absRoot || strings.HasPrefix(absDir, absRoot+string(filepath.Separator)) {
+		return absRoot
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

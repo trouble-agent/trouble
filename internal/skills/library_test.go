@@ -71,12 +71,21 @@ systemctl restart payment-worker.service
 ` + "```" + `
 `
 
+// writeLibrary creates the fixture library nested under its own state root —
+// the shape production builds (`skills-local` under the state root), so the
+// §2b rule 5 walk is bounded by the fixture's own state root instead of the
+// Go temp root above t.TempDir() (QA-TROUBLE-21). The library root is returned;
+// newLibrary derives the state root from it.
 func writeLibrary(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	state := t.TempDir()
 	// The library root must not be writable by another user (§2b rule 5).
-	if err := os.Chmod(root, 0o700); err != nil {
-		t.Fatalf("chmod root: %v", err)
+	if err := os.Chmod(state, 0o700); err != nil {
+		t.Fatalf("chmod state root: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir library root: %v", err)
 	}
 	writeSkillFile(t, root, "zeta-wedge", strings.ReplaceAll(goodSkill, "%NAME%", "zeta-wedge"))
 	writeSkillFile(t, root, "alpha-wedge", strings.ReplaceAll(goodSkill, "%NAME%", "alpha-wedge"))
@@ -111,11 +120,23 @@ func newLibrary(t *testing.T, dir string, runner StepRunner, registered ...strin
 	if dir != "" {
 		cfg = libraryCfg(dir)
 	}
-	lib, err := NewLibrary(cfg, testDeps(t, led, clk, t.TempDir(), registered...), runner)
+	lib, err := NewLibrary(cfg, testDeps(t, led, clk, libraryStateRoot(dir), registered...), runner)
 	if err != nil {
 		t.Fatalf("NewLibrary: %v", err)
 	}
 	return lib, led
+}
+
+// libraryStateRoot derives the fixture's state root from a library root under
+// it: the parent of the `skills-local` component (the shape writeLibrary and
+// production build). Anything else has no derivable state root — an empty
+// string keeps the ancestor walk unbounded.
+func libraryStateRoot(dir string) string {
+	const marker = string(filepath.Separator) + "skills-local"
+	if !strings.HasSuffix(dir, marker) {
+		return ""
+	}
+	return strings.TrimSuffix(dir, marker)
 }
 
 func TestLibrary_ScanParsesTheFrontmatterSubset(t *testing.T) {
@@ -234,9 +255,13 @@ func TestLibrary_SubsetRefusalsAreLoudAndComplete(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			if err := os.Chmod(root, 0o700); err != nil {
+			state := t.TempDir()
+			if err := os.Chmod(state, 0o700); err != nil {
 				t.Fatalf("chmod: %v", err)
+			}
+			root := filepath.Join(state, "skills-local")
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatalf("mkdir: %v", err)
 			}
 			writeSkillFile(t, root, "wedge", strings.ReplaceAll(tc.body, "%NAME%", "wedge"))
 			lib, led := newLibrary(t, root, &fakeRunner{})
@@ -263,9 +288,13 @@ func TestLibrary_SubsetRefusalsAreLoudAndComplete(t *testing.T) {
 }
 
 func TestLibrary_BodyIsNeverExecuted(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Chmod(root, 0o700); err != nil {
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 	writeSkillFile(t, root, "wedge", strings.ReplaceAll(goodSkill, "%NAME%", "wedge"))
 	runner := &fakeRunner{}
@@ -293,9 +322,13 @@ func TestLibrary_BodyIsNeverExecuted(t *testing.T) {
 }
 
 func TestLibrary_RunStepCheckAndApply(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Chmod(root, 0o700); err != nil {
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 	writeSkillFile(t, root, "wedge", strings.ReplaceAll(goodSkill, "%NAME%", "wedge"))
 	runner := &fakeRunner{diff: types.Diff{Empty: false, Summary: "one change"}, result: types.Result{Changed: true}}
@@ -339,9 +372,13 @@ func TestLibrary_RunStepCheckAndApply(t *testing.T) {
 }
 
 func TestLibrary_RunStepRefusalsNeverCallTheRunner(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Chmod(root, 0o700); err != nil {
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 	writeSkillFile(t, root, "wedge", strings.ReplaceAll(goodSkill, "%NAME%", "wedge"))
 	runner := &fakeRunner{}
@@ -385,9 +422,13 @@ func TestLibrary_RunStepRefusalsNeverCallTheRunner(t *testing.T) {
 }
 
 func TestLibrary_RunnerErrorIsMirroredNotRewritten(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Chmod(root, 0o700); err != nil {
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 	writeSkillFile(t, root, "wedge", strings.ReplaceAll(goodSkill, "%NAME%", "wedge"))
 	denied := newErr(types.CodeRegistry007, "do_not_touch", "payment-worker.service is protected")
@@ -478,6 +519,56 @@ func TestLibrary_ConstructionRefusals(t *testing.T) {
 	}
 }
 
+func TestLibrary_DirWritableWalkIsBoundedByTheStateRoot(t *testing.T) {
+	// §2b rule 5 scopes the dir_writable walk to "any ancestor up to the state
+	// root": components between the state root and the filesystem root are not
+	// part of the library's ownership chain, and the state root's own mode is
+	// TROUBLE-LIFECYCLE-005's job at boot. A library nested under its state root
+	// (the production shape) must therefore construct cleanly even when a shared
+	// scratch root ABOVE the state root is group-writable and non-sticky — the
+	// shape of every GOTMPDIR-based Go temp tree (QA-TROUBLE-21).
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
+		t.Fatalf("chmod state root: %v", err)
+	}
+	nested := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	deps := testDeps(t, &fakeLedger{}, newFakeClock(), state)
+	if _, err := NewLibrary(libraryCfg(nested), deps, &fakeRunner{}); err != nil {
+		t.Fatalf("NewLibrary refused a 0700 library under its own 0700 state root: %v", err)
+	}
+
+	// The bound is a scope, not an amnesty: a group-writable ancestor INSIDE the
+	// state root is still a capability handed to that group.
+	shared := filepath.Join(state, "shared")
+	if err := os.Mkdir(shared, 0o775); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	underShared := filepath.Join(shared, "skills-local")
+	if err := os.MkdirAll(underShared, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := NewLibrary(libraryCfg(underShared), deps, &fakeRunner{}); err == nil {
+		t.Fatal("NewLibrary accepted a library under a group-writable ancestor inside the state root")
+	} else if ReasonOf(err) != ReasonDirWritable {
+		t.Errorf("reason = %q, want %q", ReasonOf(err), ReasonDirWritable)
+	}
+
+	// A library OUTSIDE the state root keeps the full ancestor walk (the bound
+	// never applies), so a world-writable dir is still refused there.
+	open := filepath.Join(t.TempDir(), "open")
+	if err := os.Mkdir(open, 0o777); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := NewLibrary(libraryCfg(open), deps, &fakeRunner{}); err == nil {
+		t.Fatal("NewLibrary accepted a world-writable library dir outside the state root")
+	} else if ReasonOf(err) != ReasonDirWritable {
+		t.Errorf("reason = %q, want %q", ReasonOf(err), ReasonDirWritable)
+	}
+}
+
 func TestLibrary_CapsAreEnforced(t *testing.T) {
 	root := writeLibrary(t)
 	clk := newFakeClock()
@@ -486,7 +577,7 @@ func TestLibrary_CapsAreEnforced(t *testing.T) {
 
 	cfg := libraryCfg(root)
 	cfg.LocalMaxSkills = 1
-	lib, err := NewLibrary(cfg, testDeps(t, led, clk, t.TempDir()), &fakeRunner{})
+	lib, err := NewLibrary(cfg, testDeps(t, led, clk, libraryStateRoot(root)), &fakeRunner{})
 	if err != nil {
 		t.Fatalf("NewLibrary: %v", err)
 	}
@@ -498,7 +589,7 @@ func TestLibrary_CapsAreEnforced(t *testing.T) {
 
 	cfg = libraryCfg(root)
 	cfg.LocalMaxSteps = 1
-	lib, err = NewLibrary(cfg, testDeps(t, led, clk, t.TempDir()), &fakeRunner{})
+	lib, err = NewLibrary(cfg, testDeps(t, led, clk, libraryStateRoot(root)), &fakeRunner{})
 	if err != nil {
 		t.Fatalf("NewLibrary: %v", err)
 	}
@@ -516,9 +607,13 @@ func TestLibrary_CapsAreEnforced(t *testing.T) {
 
 func TestLibrary_RunnerErrorsKeepTheirClass(t *testing.T) {
 	// A missing runner is a refusal, not a panic and not a silent no-op.
-	root := t.TempDir()
-	if err := os.Chmod(root, 0o700); err != nil {
+	state := t.TempDir()
+	if err := os.Chmod(state, 0o700); err != nil {
 		t.Fatalf("chmod: %v", err)
+	}
+	root := filepath.Join(state, "skills-local")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
 	}
 	writeSkillFile(t, root, "wedge", strings.ReplaceAll(goodSkill, "%NAME%", "wedge"))
 	lib, _ := newLibrary(t, root, nil)

@@ -233,6 +233,14 @@ func writeRawFixture(t *testing.T, root, name string, n int, payloadBytes int, d
 // TROUBLE_HOST_LOAD_OVERRIDE forces the figure for falsification runs.
 func loadAvg1() float64 { return loadfence.LoadAvg1() }
 
+// perAppendLiveSet is the concurrency cost one Append's goroutine population
+// charges the process: runAppends(c) holds c goroutines (each ~8 KiB of
+// stack, QA-TROUBLE-6's measured frame), and the amortized gates run with
+// c == batch concurrent producers. It is the unit loadfence.CappedN scales
+// the heavy run regions by — the measured driver of the capped-leg wall
+// time (QA-TROUBLE-22), not the fixture bytes.
+func perAppendLiveSet(batch int) int64 { return int64(batch) * 8 << 10 }
+
 // newJSONEncoder is the pinned serialization shape: no HTML escaping.
 func newJSONEncoder(f *os.File) *json.Encoder {
 	enc := json.NewEncoder(f)

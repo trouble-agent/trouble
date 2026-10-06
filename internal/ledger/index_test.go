@@ -63,13 +63,32 @@ func writeUntil(t *testing.T, root, name string, target int64, runs int) int64 {
 
 // TestRebuildBudget: a 512 MiB synthetic ledger must rebuild inside the budget,
 // the index ceiling and the scan-rate floor (SPEC-01 §3.6, §7).
+//
+// QA-TROUBLE-22: the §3.6 agreement (512 MiB ÷ 60 MiB/s ≈ 9,000 ms) makes
+// every §7 number a PER-BYTE statement — budget ∝ fixture, floor invariant —
+// so a proportionally smaller fixture under a memory cap asserts the identical
+// scaled bars (budgetMS = 9000 × scale × capped/512MiB, rateFloor = 60/scale)
+// and the same scan-rate regression catch: a slower scan misses the floor at
+// ANY fixture size, because ScanRateMiBs is per-byte too.
 func TestRebuildBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("512 MiB synthetic fixture is skipped under -short")
 	}
+	// The 500 MiB write is pure sequential encode I/O (QA-TROUBLE-6 measured
+	// the writer streaming at O(1) live set); what the ceiling inflates is its
+	// WALL TIME through the GC assist on the encode churn. The unit is 2
+	// ceiling bytes per fixture byte (the transient encode garbage plus the
+	// headroom the runtime needs to keep collecting it without thrashing), so
+	// the QA 3 GiB leg keeps the full fixture (1.5 GiB of headroom ≥ 500 MiB —
+	// measured above) and a tighter ceiling scales it down under the §3.6
+	// per-byte agreement logged below.
+	fixtureBytes := int64(budgetFixtureBytes)
+	if capped := loadfence.CappedN(t, "TestRebuildBudget", int64(budgetFixtureBytes), 2, 64<<20); capped < int64(budgetFixtureBytes) {
+		fixtureBytes = capped
+	}
 	root := testRoot(t)
 	day := testNow().Format(dayLayout)
-	size := writeUntil(t, root, day+".jsonl", budgetFixtureBytes, 5000)
+	size := writeUntil(t, root, day+".jsonl", fixtureBytes, 5000)
 	clk := newFakeClock(testNow())
 	l := testLedgerAt(t, root, clk)
 	st := l.IndexStats()
@@ -101,6 +120,16 @@ func TestRebuildBudget(t *testing.T) {
 	// 281 MiB/s from a box whose own pilots measured 71: incoherent.)
 	budgetMS := int(float64(DefaultIndexBuildBudgetMS) * scale)
 	rateFloor := 60.0 / scale
+	// QA-TROUBLE-22: the budget is PER-BYTE (512 MiB ⇔ 9,000 ms), so a
+	// cap-scaled fixture scales the TIME budget by the same factor. The
+	// scan-rate floor needs no move — a RATE is per-byte already. Both moves
+	// are logged so the capped run states what it asserted.
+	if fixtureBytes != budgetFixtureBytes {
+		frac := float64(fixtureBytes) / float64(budgetFixtureBytes)
+		budgetMS = int(float64(budgetMS) * frac)
+		t.Logf("QA-TROUBLE-22: fixture bounded to %d bytes (%.2fx of the 512 MiB §7 shape) — build budget moved to %d ms with it (per-byte contract); the %.1f MiB/s floor is per-byte and unmove",
+			fixtureBytes, frac, budgetMS, rateFloor)
+	}
 	if raceEnabled {
 		// -race decodes 5-10x slower everywhere, so the structural ceiling is
 		// asserted on fixed wide bars rather than a scaled one.

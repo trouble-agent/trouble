@@ -1099,6 +1099,25 @@ func TestBudgetDashboardRSS(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the §2.9 load row is a 60 s measurement (-short)")
 	}
+	// QA-TROUBLE-22 clean-failure contract: this gate is a fixed 120 s+ two
+	// -process measurement (parent driver + helper, the helper forcing a GC
+	// every 250 ms over the §7 fixture). Under a memory cap the helper's GC
+	// cadence turns into assist-thrash: the render p99 and the request-rate
+	// rows red for reasons the dashboard does not control, or the pair simply
+	// exceeds the package timeout and the run PANICS instead of verdicts.
+	// The fixture's live set (10k groups / 50k records + both processes'
+	// runtimes) does not leave headroom on a capped leg, so the gate SKIPs
+	// with the MEASURED cap in the verdict text before any of that starts;
+	// the §2.9 numbers stay asserted on the uncapped leg (they are retained
+	// -state and per-request figures — a cap is not a variable they admit).
+	if capBytes, source := loadfence.MemCap(); capBytes >= 0 {
+		t.Skipf("%s SKIP: the §2.9 row is a fixed-shape two-process measurement whose helper "+
+			"GC-cadence cannot be bounded the way a repeat-count can; its retained-state "+
+			"and per-request budgets are cap-invariant, so under a ceiling it reports "+
+			"host thrash, not dashboard state — %s. Quiet host remains the binding "+
+			"verification (SPEC-10 §2.9).", "TestBudgetDashboardRSS",
+			loadfence.MemCapText(capBytes, source))
+	}
 	window := budgetDuration()
 	bin, err := os.Executable()
 	if err != nil {

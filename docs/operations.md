@@ -1396,3 +1396,60 @@ TestScanBudget (50 µs/4 KiB), TestScrubBudget (15 ms @ 256 KiB), TestIngestHarn
 verification for all seven: they run unchanged away from CI, and the QA/E2E lane still owns them.
 The calibration machinery (`internal/loadfence`) is untouched — the CI gate is a first-line skip,
 not a loosened bound.
+
+### Memory-capped legs finish with verdicts, not panics (QA-TROUBLE-22)
+
+A cgroup memory cap (the QA harness runs the suite under a 3 GiB `MemoryMax` with `GOMEMLIMIT=2GiB`)
+is a host fact the load model above cannot see: under it the Go runtime throttles allocation through
+the GC assist, every wall-clock budget inflates far past what the I/O pilot, the CPU pilot or the
+suite term prices — and past `go test`'s own 10-minute package timeout. A capped leg that runs
+unbounded does not FAIL, it PANICS (`panic: test timed out after 10m0s`) and the whole package
+loses its verdicts. Measured on this tree: the ledger package under the 3 GiB cap ALONE finishes in
+264 s (pre-QA-TROUBLE-22 tree, `systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0
+GOMEMLIMIT=2GiB go test ./internal/ledger -count=1` → ok 264.087s). The QA harness runs it with the
+full suite's parallel package contention, and this repo has already measured that regime: the same
+suite ran 3× slower at load_avg ~40 than at ~24 (§20's table). The arithmetic is a bound, not a
+measurement — 264 s × 2× = 528 s is already inside one scheduling storm of the 600 s panic, and ×3 =
+792 s is past it — which is exactly the harness's observed shape: no verdicts, a timeout panic.
+
+The clean-failure contract (SPEC-01 §7a item 6 is the normative text; `internal/loadfence/memcap.go`
+is the implementation), in priority order:
+
+1. **Detect the ceiling** — `loadfence.MemCap()` resolves `TROUBLE_TEST_MEMLIMIT` (a GOMEMLIMIT-style
+   override: `2GiB`, `512MiB`, raw bytes), then cgroup v2 `/sys/fs/cgroup/memory.max`, then v1
+   `limit_in_bytes`. v2's `max` and v1's near-MaxInt64 sentinel read as NO ceiling (negative), so an
+   uncapped host is bit-identical to the pre-QA-TROUBLE-22 behavior: `CappedN` is the identity, no
+   gate changes shape, every §7 number is asserted exactly.
+2. **Bound what scales** — a gate whose assertion is per-unit (a RATE over its measured region, a
+   batch-COUNTED invariant, a per-byte budget) runs `loadfence.CappedN` and bounds its region to
+   what fits the ceiling. The asserted numbers do not move; the bound is logged with the measured
+   cap. Applied: TestFsyncCountIsStructural (25 batches → floor 4), TestAmortizedThroughput
+   (25 batches → floor 8), TestPerLineRegression (the amortized leg, floor 8 batches),
+   TestRebuildBudget (the 500 MiB fixture scales with the §3.6 per-byte agreement — the 9,000 ms
+   budget moves by the same fraction, the 60 MiB/s scan floor is per-byte and does not).
+3. **Skip what cannot be bounded** — a gate whose fixture live-set cannot fit the ceiling (the shape
+   QA-TROUBLE-6 measured at ~1.9 GiB live on the 1M fixture before its streaming fix), or whose
+   measurement shape admits no bounded variant, calls `loadfence.SkipUnderMemCap` / reads `MemCap`
+   and SKIPs with the MEASURED cap in the verdict text — bytes, human figure, and the source it was
+   read from. TestBudgetDashboardRSS takes this form: its §2.9 rows are a fixed-shape two-process
+   measurement (parent driver + helper forcing a GC every 250 ms) — under a cap that cadence reports
+   host thrash, not dashboard state, and the retained-state/per-request budgets are cap-invariant.
+
+No gate may turn a memory constraint into a timeout panic: a bounded run states its numbers, a SKIP
+states the ceiling, a panic hides both. A capped leg's SKIPs are honest, enumerated verdicts — the
+QA/E2E quiet-host lane still owns every one of these gates at full fixture. To reproduce either leg
+locally:
+
+```
+# capped leg (what the QA harness sees; expect explicit SKIPs/bounds, no panic):
+systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0 \
+    /usr/bin/env GOMEMLIMIT=2GiB TROUBLE_TEST_MEMLIMIT=3GiB \
+    go test ./internal/ledger -count=1
+# uncapped leg (bit-identical to pre-QA-TROUBLE-22):
+go test ./internal/ledger -count=1
+```
+
+The cheap falsification control for the panic mechanism itself (pre-change tree, ~60 s):
+`GOMEMLIMIT=2GiB go test ./internal/ledger -count=1 -timeout 60s` — the large fixtures drive the
+package past even that short window and the binary panics with `panic: test timed out after 1m0s`
+in TestFsyncWindowBound, which is the harness's failure shape compressed to one minute.

@@ -546,6 +546,11 @@ func TestLibrary_DirWritableWalkIsBoundedByTheStateRoot(t *testing.T) {
 	if err := os.Mkdir(shared, 0o775); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
+	// Mkdir modes are umask-filtered: on a runner with umask 022 the 0775
+	// request lands as 0755 and the group-writable premise vanishes. Force it.
+	if err := os.Chmod(shared, 0o775); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
 	underShared := filepath.Join(shared, "skills-local")
 	if err := os.MkdirAll(underShared, 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)

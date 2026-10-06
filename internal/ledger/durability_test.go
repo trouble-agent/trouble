@@ -88,6 +88,18 @@ func runAppends(t *testing.T, l *Ledger, n, c int) time.Duration {
 // enforced by TestAmortizedThroughput.
 func TestFsyncCountIsStructural(t *testing.T) {
 	const batch = 4096
+	// QA-TROUBLE-22: under a memory cap the group-commit run's wall time is
+	// what the timeout eats (25600×4096 producers × ~1050 batches of fsyncs
+	// scale with cap pressure). The invariant is batch-COUNTED, so a smaller
+	// measured region proves the identical shape; the cap bounds the region
+	// and the run logs the bound.
+	n := int64(25 * batch)
+	if raceEnabled {
+		n = 8 * batch // the invariant is structural; -race only costs time
+	}
+	if capped := loadfence.CappedN(t, "TestFsyncCountIsStructural", n, perAppendLiveSet(batch), 4*batch); capped < n {
+		n = capped
+	}
 	clk := newFakeClock(testNow())
 	l := testLedger(t, clk, func(o *Options) {
 		o.Rotation.MaxBatchRecords = batch
@@ -95,11 +107,7 @@ func TestFsyncCountIsStructural(t *testing.T) {
 	})
 	runAppends(t, l, batch, batch) // warmup: one full batch, writer idle after
 	before := l.Status()
-	n := 25 * batch
-	if raceEnabled {
-		n = 8 * batch // the invariant is structural; -race only costs time
-	}
-	el := runAppends(t, l, n, batch)
+	el := runAppends(t, l, int(n), batch)
 	after := l.Status()
 
 	deltaF := after.FsyncCalls - before.FsyncCalls
@@ -152,14 +160,22 @@ func TestAmortizedThroughput(t *testing.T) {
 		t.Skip("absolute throughput floors are measured without -race; run `go test -count=1 ./internal/ledger/...` for the regression bar")
 	}
 	const batch = DefaultMaxBatchRecords
+	// QA-TROUBLE-22: 25 batches × 4096 concurrent producers is the largest
+	// goroutine population in the package; under a memory cap its wall time
+	// inflates far past every scheduling term the calibrated floor carries.
+	// The floor is a RATE over the measured region, so a capped region asserts
+	// the identical number; the cap bounds the region and the log carries it.
+	n := int64(25 * batch)
+	if capped := loadfence.CappedN(t, "TestAmortizedThroughput", n, perAppendLiveSet(batch), 8*batch); capped < n {
+		n = capped
+	}
 	clk := newFakeClock(testNow())
 	l := testLedger(t, clk, func(o *Options) {
 		o.Rotation.MaxBatchRecords = batch
 		o.Rotation.FsyncWindowMS = DefaultFsyncWindowMS
 	})
 	runAppends(t, l, batch, batch) // warmup
-	const n = 25 * batch
-	el := runAppends(t, l, n, batch)
+	el := runAppends(t, l, int(n), batch)
 	rate := float64(n) / el.Seconds()
 	// SPEC-01 §7a: the floor is divided by the host's measured Scale() — the
 	// I/O-bound factor. A TIME budget scales up by the box's slowdown; a RATE
@@ -319,11 +335,19 @@ func TestFsyncWindowBound(t *testing.T) {
 // amortized).
 func TestPerLineRegression(t *testing.T) {
 	loadfence.SkipUnderCIIfLoadCalibrated(t, "amortized 515,000 rec/s vs per-line 512 rec/s (runner floor 73,294 rec/s at scale x1.36)")
+	// QA-TROUBLE-22: the amortized leg runs 102,400 records through 4096
+	// concurrent producers — the same population as TestAmortizedThroughput —
+	// and its wall time is the cap-sensitive half of this test. The ratio
+	// assertion is rate-per-record over the measured regions, so a bounded
+	// region proves the identical relation; the cap bounds it, logged.
+	gn := int64(102400)
+	if capped := loadfence.CappedN(t, "TestPerLineRegression", gn, perAppendLiveSet(4096), 8*4096); capped < gn {
+		gn = capped
+	}
 	clk := newFakeClock(testNow())
 	group := testLedger(t, clk, func(o *Options) { o.Rotation.MaxBatchRecords = 4096 })
-	const gn = 102400
 	runAppends(t, group, 4096, 4096) // warmup
-	gel := runAppends(t, group, gn, 4096)
+	gel := runAppends(t, group, int(gn), 4096)
 	groupRate := float64(gn) / gel.Seconds()
 	load := loadAvg1()
 

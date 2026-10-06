@@ -1135,7 +1135,7 @@ calibration. Rules the tests follow:
    runs on the same filesystem the measured run uses, so disk contention inflates the pilot the
    same way it inflates the run, while the contention half still covers a descheduled box; a
    per-line collapse (the measured 512 rec/s) fails every floor the model can produce).
-5. `TestScrubBudget` + `TestIngestHarnessThroughput` (SPEC-02/SPEC-04 §3.9, internal/scrub): the µs gates'
+5. `TestScanBudget` + `TestIngestHarnessThroughput` (SPEC-02/SPEC-04 §3.9, internal/scrub): the µs gates'
    **fixed 4× documented deviation factor** — plus its load ladder (`load ≥ 4 → 4 × (1 + load/16)`, clamped
    8×) — is the same inversion in miniature: the ladder under-allowed a quiet slower box and over-allowed a
    busy fast one, and the fixed 4× graded every host identically. The deviation ceiling is now
@@ -1160,6 +1160,31 @@ calibration. Rules the tests follow:
    relaxed. `harnessWaveForLoad`'s `{0,128}` no-loadavg row is unchanged and is
    proven reachable through `TROUBLE_HOST_LOAD_OVERRIDE=0` → `Measure().Load == 0` (the no-loadavg host
    keeps the spec wave shape).
+6. Memory-capped legs (QA-TROUBLE-22): a cgroup memory cap (the QA harness's 3 GiB) is a HOST FACT the
+   load model above cannot see — under it the runtime throttles allocation through the GC assist and
+   every wall-clock budget inflates far past what `Scale()`, `CPUScale()` or the suite term price, and
+   past `go test`'s own package timeout: the binary PANICS (`panic: test timed out`) instead of stating
+   a verdict (pre-fix capped-leg failures: TestBudgetDashboardRSS, TestFsyncCountIsStructural,
+   TestAmortizedThroughput, TestPerLineRegression, TestRebuildBudget). `internal/loadfence` gains the
+   ceiling reader (`MemCap`: `TROUBLE_TEST_MEMLIMIT` override → cgroup v2 `memory.max` → v1
+   `limit_in_bytes`; the v1 "unlimited" sentinel and v2 `max` read as no ceiling) and two clean-failure
+   forms. **Bounded region** (`CappedN`): a gate whose assertion is per-unit (a RATE over the measured
+   region, a batch-COUNTED invariant, a per-byte budget) may bound its region to what fits the ceiling —
+   the asserted numbers do not move, and the bound is logged with the measured cap. Applied:
+   TestFsyncCountIsStructural and TestAmortizedThroughput bound their measured region
+   (`batch`-producers × units), TestPerLineRegression bounds its amortized leg, TestRebuildBudget scales
+   its fixture with the §3.6 per-byte agreement (budget moves by the same fraction; the 60 MiB/s floor
+   is per-byte and does not). **Explicit SKIP** (`SkipUnderMemCap`): a gate whose fixture live-set
+   cannot fit the ceiling (the shape QA-TROUBLE-6 measured at ~1.9 GiB live before its streaming fix)
+   or whose measurement shape admits no bounded variant skips with the MEASURED cap value (bytes,
+   human figure, source) in the verdict text. TestBudgetDashboardRSS takes the SKIP form: its §2.9
+   rows are a fixed-shape two-process measurement whose helper forces a GC every 250 ms — under a cap
+   that cadence reports host thrash, not dashboard state, and the retained-state/per-request budgets
+   are cap-invariant. Priority order is normative: no gate may turn a memory constraint into a timeout
+   panic — a bounded run states its numbers, a SKIP states the ceiling, a panic hides both. Uncapped
+   legs are byte-for-byte the pre-QA-TROUBLE-22 gates: `MemCap` returns the no-ceiling sentinel when
+   no override and no cgroup limit exists, `CappedN` is the identity, and the quiet host keeps asserting
+   every §7 number exactly.
 
 No §7 number is relaxed: a reference-class host meets every original figure, and every scaled assertion
 still fails on a genuine multi-x regression regardless of which host it lands on.

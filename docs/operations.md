@@ -403,6 +403,19 @@ than rendered with a fabricated zero. (3) A malformed write body has no code of 
 (4) `internal/dashboard/integration/e2e_dashboard_test.go` is not written here: it needs the
 composition root and a mock ladder, and the composition root's own e2e is the Hermes lane's.
 
+**A missing token store refuses the dashboard, it does not serve an empty one (QA-TROUBLE-19).**
+If the file `dashboard.token_file` points at does not exist at boot, the daemon refuses the §2.1 data
+plane instead of serving an unauthenticated dashboard behind a WARN: `/health.json` keeps answering
+(watchdogs keep working) with `status:"degraded"` and a refused `dashboard` row in `subsystems[]`
+(`code:TROUBLE-LIFECYCLE-001`, reason naming the path), the ledger carries the matching
+`subsystem_not_built` record, and every other route answers `503 + TROUBLE-DASHBOARD-013` with
+`detail:dashboard_refused` — to anonymous callers and presented tokens alike, because the refusal is
+about the boot, not the caller. Nothing is regenerated: the remedy is one
+`trouble dashboard token create` and a daemon restart. A store that is PRESENT but empty stays the
+documented usable-but-fail-closed state (the boot WARN names it); a store that fails to parse or has
+a wrong mode keeps its own `TROUBLE-DASHBOARD-013`/`TROUBLE-LIFECYCLE-013` paths. SPEC-12 §3.3a-d
+pins the behavior.
+
 
 ## 13. Sentinel (SPEC-04)
 

@@ -71,6 +71,17 @@ Note on versions: no release tag is cut yet. A build from this tree is
   `docs/sentinel-compat.md`, `docs/cmd.md`, and the shipped usage skills under
   `skills/`.
 
+### Changed
+
+- **A missing dashboard token store refuses the data plane (QA-TROUBLE-19)**:
+  a boot whose `dashboard.token_file` is missing no longer serves the §2.1
+  surface behind a WARN. `/health.json` stays up with `status:"degraded"` and
+  a refused `dashboard` row (`TROUBLE-LIFECYCLE-001`) in `subsystems[]`, the
+  ledger records `subsystem_not_built` for the dashboard, and every other
+  route answers `503 + TROUBLE-DASHBOARD-013 (detail:dashboard_refused)`.
+  Nothing is regenerated; the remedy is `trouble dashboard token create` plus
+  a restart. SPEC-12 §3.3a-d.
+
 ### Notes
 
 - The repo publishes its own `guard/` connectors and a Python guard client used

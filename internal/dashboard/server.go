@@ -235,10 +235,18 @@ func Serve(ctx context.Context, cfg Config, deps Deps) error {
 	if err != nil {
 		return &dashError{Code: types.CodeLifecycle003, HTTP: 500, Message: "bind preflight refused", Detail: "bind_collision"}
 	}
+	if s.store.Refused() {
+		// Same health-only fallback as ServeOn (QA-TROUBLE-19): the data
+		// plane stays closed; /health.json keeps the watchdog fed.
+		if s.logger != nil {
+			s.logger.Info("dashboard listening (refused: token store missing; health-only)", "addr", addr, "identity", cfg.Identity, "loopback", s.loopback)
+		}
+		return serveOn(ctx, s, &refusedOnlyServer{server: s}, ln)
+	}
 	if s.logger != nil {
 		s.logger.Info("dashboard listening", "addr", addr, "identity", cfg.Identity, "loopback", s.loopback)
 	}
-	return serveOn(ctx, s, ln)
+	return serveOn(ctx, s, s, ln)
 }
 
 // newServer implements the §4.1 startup sequence up to (but not including)

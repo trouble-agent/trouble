@@ -1,0 +1,37 @@
+{
+  "tick": "trouble-foreman-2026-10-06-18-08-53",
+  "wave_budget": 10,
+  "workers": [
+    {
+      "task": "QA-TROUBLE-22",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-22",
+      "branch": "wt/QA-TROUBLE-22",
+      "base_sha": "87fab25",
+      "brief": "Chaos-resource suite panic: under the QA harness 3G cap the ledger package hits go test's own 10m timeout and PANICS (panic: test timed out after 10m0s) instead of a clean FAIL/SKIP. Add a memory/time-aware guard so the loadfence-family gates (TestBudgetDashboardRSS, TestFsyncCountIsStructural, TestAmortizedThroughput, TestPerLineRegression, TestRebuildBudget) report explicit SKIP verdicts when the environment cannot meet the budget (cgroup memory cap detection via /sys/fs/cgroup memory.max or GOMEMLIMIT, extended from the existing loadfence load-scaled SKIP). Ensure the ledger package completes under a 3G cap within the go test timeout: bound the per-test wall time (shorter fixtures or capped sub-iterations when capped) and add a package-level test timeout budget with an explicit verdict instead of relying on go test's 10m default panic. Document the clean-failure-mode contract in docs/operations.md and SPEC-01 (letter-suffix amendment only, no renumbering). python3 specs/tools/selfcheck.py MUST PASS. Do NOT delete fixtures or weaken assertions outside the documented SKIP path. ch:trace row=QA-TROUBLE-22",
+      "acceptance": [
+        "GOMEMLIMIT=2GiB and a 3G cgroup-style cap run: no 'panic: test timed out'; the ledger package exits cleanly with ok or explicit SKIPs named",
+        "the skip verdict carries the measured cap value in the test output",
+        "go build ./... and go vet ./... pass",
+        "python3 specs/tools/selfcheck.py PASS",
+        "falsification: with the guard disabled the capped run still reproduces the timeout/panic (control noted in the commit message)"
+      ]
+    },
+    {
+      "task": "QA-TROUBLE-19",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-19",
+      "branch": "wt/QA-TROUBLE-19",
+      "base_sha": "87fab25",
+      "brief": "Errorpath gap: troubled starts and serves 127.0.0.1:7644 with an EMPTY dashboard token store (WARN only) instead of failing or regenerating (chaos-errorpath missing-config arm, rc=124 timeout because the probe waits on a daemon that should have refused or regenerated). Pick ONE behavior and implement it: (a) refuse the dashboard subsystem with a named error code (TROUBLE-DASHBOARD-0xx style, /health.json shows dashboard refused) when the token store file is missing and regeneration is not explicitly configured, or (b) regenerate the token file with a named ledger notice and document it. Match the existing subsystem refusal pattern (see internal/app daemon + internal/dashboard, TROUBLE-ISSUES-003 precedent). Add SPEC-12 letter-suffix amendment, selfcheck PASS. Add a regression test that boots with a missing token store and asserts the chosen behavior end to end. ch:trace row=QA-TROUBLE-19",
+      "acceptance": [
+        "a boot with a missing dashboard token store either refuses the dashboard with a named code visible in /health.json or regenerates with a named ledger notice",
+        "regression test covers both the missing-file arm and the configured-arm",
+        "go build ./... and go vet ./... pass; focused dashboard/lifecycle/app tests pass",
+        "python3 specs/tools/selfcheck.py PASS"
+      ]
+    }
+  ],
+  "self_owned": ["QA-TROUBLE-20"],
+  "created": "2026-10-06"
+}

@@ -125,6 +125,13 @@ type tokenSet struct {
 	// empty store (no credentials yet) as opposed to a present file that holds
 	// no tokens. Both are empty; the boot WARN names which (TRBL-006 AC-3).
 	missing bool
+	// refused records that the file was missing AT BOOT: the credential
+	// substrate the dashboard authenticates against never existed, so the
+	// boot refuses to serve an unauthenticated dashboard (QA-TROUBLE-19).
+	// It is a signal, not a state: a mint+save that creates the file clears
+	// it on the next load (refresh), so the flag describes the store the
+	// BOOT saw, never a wedged-shut store.
+	refused bool
 }
 
 // TokenStore is the 0600 token store: an immutable snapshot swapped per
@@ -134,10 +141,24 @@ type TokenStore struct {
 	forbidden []string // project key plaintexts (DSN PublicKey/SecretKey)
 
 	cur           atomic.Pointer[tokenSet]
+	refused       atomic.Bool // the boot-time store was missing (QA-TROUBLE-19)
 	reloadMu      sync.Mutex
 	lastUsed      sync.Mutex
 	lastUsedWrite map[string]time.Time
 	parentOK      bool // parent dir verified 0700
+}
+
+// Refused reports that the store file was MISSING at load: the boot refused
+// to serve the dashboard without a credential substrate (QA-TROUBLE-19,
+// SPEC-12 §3.3a dashboard row). It is read once by the composition root's
+// boot gate; the health-only serve fallback keys on the same signal. A store
+// that is present-but-empty, or one that failed to parse, is NOT refused —
+// those carry their own WARN and the fail-closed 503 (013) respectively.
+func (ts *TokenStore) Refused() bool {
+	if ts == nil {
+		return false
+	}
+	return ts.refused.Load()
 }
 
 // TokenStoreInvalid is the fail-closed marker error; routes map it to 503 +
@@ -190,6 +211,14 @@ func LoadTokenStore(path string, forbidKeys []string, logger *slog.Logger) (*Tok
 		ts.cur.Store(set)
 		return ts, nil
 	}
+	if tf.missing {
+		// The credential substrate never existed (QA-TROUBLE-19): the
+		// composition root refuses the data plane on this signal (SPEC-12
+		// §3.3a dashboard row) instead of serving an unauthenticated
+		// dashboard. The WARN stays — the refusal must also be readable in
+		// the journal, not only on /health.json.
+		ts.refused.Store(true)
+	}
 	ts.cur.Store(tf)
 	if !tf.invalid && len(tf.byHash) == 0 {
 		warnEmptyTokenStore(logger, path, tf.missing)
@@ -212,6 +241,30 @@ func warnEmptyTokenStore(logger *slog.Logger, path string, missing bool) {
 	}
 	logger.Warn("dashboard token store is empty",
 		"path", path, "reason", reason)
+}
+
+// MissingTokenStore reports whether the token store file is MISSING at the
+// path cfg/deps resolve to — the same expansion and default rules
+// LoadTokenStore applies. The composition root's boot gate calls it BEFORE
+// serving so the QA-TROUBLE-19 refusal is recorded in the boot's ledger and
+// health row; ServeOn keys its health-only fallback on the same condition
+// through the store it loads. A path that cannot be expanded, or a store that
+// exists with a wrong mode or bad content, is NOT answered here: those carry
+// their own boot-error/fail-closed paths at load.
+func MissingTokenStore(cfg Config, deps Deps) bool {
+	path := cfg.TokenFile
+	if deps.TokenFile != "" {
+		path = deps.TokenFile
+	}
+	if path == "" {
+		path = DefaultConfig().TokenFile
+	}
+	expanded, err := ExpandTokenPath(path)
+	if err != nil {
+		return false
+	}
+	_, statErr := os.Stat(expanded)
+	return os.IsNotExist(statErr)
 }
 
 // readFileIntoSet loads and validates the current file content. A missing file
@@ -295,6 +348,10 @@ func (ts *TokenStore) snapshot() *tokenSet { return ts.cur.Load() }
 // refresh stats the file and re-reads on an mtime/size change (§3.2). A
 // reload failure produces a new invalid set — never the last-known-good one.
 // Concurrent requests: one re-read happens; the rest see the swapped set.
+//
+// The QA-TROUBLE-19 refusal signal clears here when the file APPEARS: it
+// describes the state of the store at load, and once the operator mints a
+// credential file the signal must stop saying "missing".
 func (ts *TokenStore) refresh(now time.Time) {
 	cur := ts.cur.Load()
 	fi, err := os.Stat(ts.path)
@@ -325,6 +382,9 @@ func (ts *TokenStore) refresh(now time.Time) {
 				return
 			}
 			ts.cur.Store(set)
+			// The file now exists and loaded: the boot-time "missing"
+			// refusal signal no longer describes the store (QA-TROUBLE-19).
+			ts.refused.Store(false)
 		}
 	}
 }
@@ -574,6 +634,10 @@ func (ts *TokenStore) rewrite(mut func(*tokenFile)) error {
 		return err
 	}
 	ts.cur.Store(set)
+	// The store file now exists: the boot-time "missing" refusal signal no
+	// longer describes the store (QA-TROUBLE-19) — a mint after a refused
+	// boot un-refuses the store without a restart.
+	ts.refused.Store(false)
 	return nil
 }
 

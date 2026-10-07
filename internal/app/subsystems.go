@@ -58,14 +58,42 @@ type Subsystems struct {
 // renders, so two surfaces can never disagree about what "all five" means.
 var subsystemNames = []string{"sentinel", "issues", "research", "flow", "skills"}
 
+// dashboardRefusal is the QA-TROUBLE-19 refusal the composition root records
+// when the dashboard's token store was missing at boot: the credential
+// substrate the data plane authenticates against never existed, so the boot
+// refuses to serve an unauthenticated dashboard (the chaos-errorpath
+// missing-config arm served 127.0.0.1:7644 with an empty store behind one
+// WARN — the error this closes). The row rides the SAME §3.3a block the five
+// late-landing subsystems report, with its own code-bearing error, and the
+// same subsystem_not_built record is the audit half (one truth per refusal).
+func dashboardRefusal(err error) types.SubsystemHealth {
+	return types.SubsystemHealth{
+		Name:    "dashboard",
+		Refused: true,
+		Code:    errorCodeOf(err),
+		Reason:  err.Error(),
+	}
+}
+
 // Report is the built/refused block of the health surface (SPEC-12 §3.3a): one
 // row per subsystem, never omitted, never re-derived from anything but this
 // struct. A nil receiver reports every subsystem as not built — the honest
 // answer for a health surface served before the subsystems land, and never a
 // claim that they are up.
+//
+// The dashboard is reported through the same block: the QA-TROUBLE-19 refusal
+// (token store missing at boot) lands in refusals["dashboard"] and rides out
+// as a sixth row with built=false refused=true, so /health.json can never
+// read "ok" while the data plane was refused at boot.
 func (s *Subsystems) Report() []types.SubsystemHealth {
-	out := make([]types.SubsystemHealth, 0, len(subsystemNames))
-	for _, name := range subsystemNames {
+	names := subsystemNames
+	if s != nil && s.refusals != nil {
+		if _, ok := s.refusals["dashboard"]; ok {
+			names = append(append([]string{}, subsystemNames...), "dashboard")
+		}
+	}
+	out := make([]types.SubsystemHealth, 0, len(names))
+	for _, name := range names {
 		if s == nil {
 			out = append(out, types.SubsystemHealth{Name: name, Reason: "subsystems not assembled yet"})
 			continue

@@ -782,6 +782,46 @@ Rules, pinned:
 - **Ordering.** Rows are ordered by the build order above, never by map iteration: two boots that refused the
   same subsystems produce byte-identical blocks.
 
+### 3.3a-d The dashboard's refusal row (QA-TROUBLE-19 amendment)
+
+The `subsystems[]` block carries one additional row, `name="dashboard"`, when the boot refused the
+dashboard's data plane. The dashboard is not a late-landing subsystem and the row does not change the
+five-row contract above: it is appended AFTER `skills`, and only when the boot recorded a refusal for
+it, so a healthy boot's block stays byte-identical to the five rows this section already pins (the
+lifecycle health tests and the AC-34 sweep are unchanged by this row's existence).
+
+- **The refused condition.** The dashboard's token store (`dashboard.token_file`, SPEC-10 §3.2) is
+  MISSING at boot. A missing store is the one credential state that cannot fail closed usefully:
+  every presented token would 401 and the §2.1 data plane would answer as an empty, unauthenticated
+  surface behind a single WARN. The boot therefore REFUSES instead of serving it — the
+  TROUBLE-ISSUES-003 / TROUBLE-SKILLS-001 precedent (an asked-for plane over a missing substrate is
+  refused by name, never defaulted away). A store that is PRESENT but empty stays the documented
+  usable-but-fail-closed state (TRBL-006, the boot WARN names it); a store that failed to parse or
+  reads a wrong mode keeps its own fail-closed/boot-error paths (SPEC-10 §3.2, TROUBLE-LIFECYCLE-013).
+  Regeneration is refused as a design: minting at boot would put a second mint path beside the CLI's
+  ("the only code path in the repository that can mint a dashboard token", SPEC-10 §3.2) and would
+  produce or persist credential plaintext the operator never asked for.
+- **The row and the record are one truth.** The refusal is recorded by the same call site that writes
+  the `lifecycle` record with `payload.stage="subsystem_not_built"`, `name="dashboard"` — the §3.3a
+  one-truth rule applies unchanged. The row carries `code=TROUBLE-LIFECYCLE-001` and a reason naming
+  the missing path and the remedy (`trouble dashboard token create`); the Status rule is unchanged:
+  a refused dashboard row degrades the response, and `status="ok"` is unreachable while the data
+  plane was refused.
+- **The serve shape while refused.** The daemon still binds its preflight dashboard listener, but the
+  §2.1 data plane never serves: every route except `GET /health.json` answers **503 +
+  TROUBLE-DASHBOARD-013** with `detail:"dashboard_refused"` BEFORE any credential evaluation — a
+  presented token gets the same refusal, because the refusal is about the boot, not the caller.
+  `GET /health.json` keeps serving through its ordinary chain (the loopback exemption still applies),
+  carrying the refused row above: the external stall checker (§3) must see a degraded-but-alive
+  daemon that names its refusal, not the TROUBLE-LIFECYCLE-008 dead-daemon misread (§6 edge 8).
+  The refusal stands until the daemon restarts with a minted store; the in-process signal clears by
+  itself when a store appears at the path, so the health-only fallback keys on the boot-time state
+  and never wedges a store shut after the operator mints.
+- **Proof.** `internal/app/missing_token_store_refused_test.go` (the real boot: health row, ledger
+  record, 503 data plane, no regenerated file) and
+  `internal/dashboard/tokens_missing_refusal_test.go` (the store-level signal, the health-only serve,
+  present-empty not refused, parse-failure still 013).
+
 ### 3.4 Version stamping
 
 Three package-level variables in `internal/lifecycle`, set at link time, never at run time:

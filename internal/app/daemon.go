@@ -509,8 +509,23 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// The preflight's listener, not a second bind: SPEC-12 §3.2 keeps the fd so
 	// the check and the serve cannot disagree (dashboard.ServeOn).
 	phase("dashboard_serve")
+	dashDeps := d.dashboardDeps(dashLn)
+	if dashboard.MissingTokenStore(d.DashConfig, dashDeps) {
+		// QA-TROUBLE-19: a missing token store is a boot refusal, not an
+		// empty dashboard. The credential substrate the §2.1 data plane
+		// authenticates against never existed, so the boot records WHY
+		// (the §3.3a row + its subsystem_not_built record — one truth per
+		// refusal) and ServeOn falls back to the health-only serve below:
+		// /health.json keeps answering so the external stall checker sees a
+		// degraded-but-alive daemon that names the refusal, and every other
+		// route answers 503 + TROUBLE-DASHBOARD-013. The refusal stands
+		// until the daemon restarts with a minted store.
+		refusal := fmt.Errorf("%s: dashboard token store missing at %s: the data plane is refused (QA-TROUBLE-19); mint a credential with `trouble dashboard token create`",
+			types.CodeLifecycle001, d.DashConfig.TokenFile)
+		recordSubsystemRefusal(d, d.Subsystems, ctx, "dashboard", refusal)
+	}
 	go func() {
-		if err := dashboard.ServeOn(ctx, d.DashConfig, d.dashboardDeps(dashLn), dashLn); err != nil && !errors.Is(err, context.Canceled) {
+		if err := dashboard.ServeOn(ctx, d.DashConfig, dashDeps, dashLn); err != nil && !errors.Is(err, context.Canceled) {
 			log.Error("dashboard", "err", err)
 		}
 	}()

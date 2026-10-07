@@ -1,0 +1,9 @@
+{
+  "tick": "trouble-foreman-2026-10-07-04-17-50",
+  "wave_budget": 8,
+  "workers": [],
+  "note": "no wave composed: 1 unmerged worker branch (QA-TROUBLE-19) harvested+merged, 2 harvest/self-owned closes (QA-TROUBLE-22, QA-TROUBLE-20). Serial recovery tick.",
+  "tasks": ["QA-TROUBLE-19", "QA-TROUBLE-22", "QA-TROUBLE-20"],
+  "created": "2026-10-07",
+  "finished_at": "2026-10-07T04:42:00Z"
+}

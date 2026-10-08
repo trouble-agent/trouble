@@ -97,10 +97,18 @@ func TestRuleEvaluationBudget256Rules(t *testing.T) {
 	// the budget relative to the 2ms reference number, never tighten it, and
 	// never tighter than the pre-calibration gate at the same load — the spec
 	// number is still asserted exactly on a quiet reference-class host. Two
-	// absolute clamps keep the gate biting: a 4ms floor (below that, 256 rule
-	// evaluations cannot be slowed 2x by scheduling alone: a real regression
-	// the loaded budget must still catch) and a 16ms ceiling (past the
-	// observed worst case: a parse-path-style regression, not the host).
+	// clamps keep the gate biting (TRBL-097: both host-relative in effect): a
+	// 4ms floor (below that, 256 rule evaluations cannot be slowed 2x by
+	// scheduling alone: a real regression the loaded budget must still catch —
+	// absolute, but it only ever RAISES a computed budget, so it can never
+	// pinch a slow host) and a ceiling at 16ms x max(1, cpuScale): past the
+	// observed worst case is a statement about the CODE (a parse-path-style
+	// regression), not about the host, and the host's own calibrated
+	// undisturbed cost is 2ms x cpuScale — so the scaled ceiling always sits
+	// below the 10x regression line 20ms x cpuScale and a synthetic 10x
+	// regression still fails on every host (QA 4-vCPU box: p99 80.47ms against
+	// a 9.33ms budget at cpuScale ~4.57 — the old absolute 16ms ceiling capped
+	// every host slower than ~x8 reference into a deterministic fail).
 	hostOnce.Do(func() { hostProf = loadfence.Measure(t.TempDir()) })
 	budget := hostBudget(hostProf.CPUScale(), hostProf.Load)
 	if p99 > budget {
@@ -129,9 +137,14 @@ var (
 // because the load curve it composes with IS that gate. A host that measures
 // exactly reference-class and runs load-free asserts the spec's 2ms directly
 // (§7a: a reference-class host meets every original figure, unchanged).
-// Every scaled branch carries the old clamps so the gate still bites: below
-// 4ms a 2x regression cannot be scheduling alone, and above 16ms (past the
-// SPEC-06a observed worst case) the host is no longer the explanation.
+// Every scaled branch carries the clamps so the gate still bites: below
+// 4ms a 2x regression cannot be scheduling alone, and a budget above the
+// ceiling — 16ms x max(1, cpuScale), the pre-calibration observed worst case
+// expressed on THIS host (TRBL-097) — is no longer the host's explanation
+// but the code's. The ceiling scales with the host so the regression line
+// it guards (a parse-path-style blow-up) stays relative to the host's own
+// cost: 16 x cpuScale < 10 x (2ms x cpuScale) always, so a synthetic 10x
+// regression still fails at every calibration.
 func hostBudget(cpuScale, load float64) time.Duration {
 	if cpuScale <= 1 && load <= 0 {
 		return 2 * time.Millisecond
@@ -142,8 +155,14 @@ func hostBudget(cpuScale, load float64) time.Duration {
 	if budget < 4*time.Millisecond {
 		budget = 4 * time.Millisecond
 	}
-	if budget > 16*time.Millisecond {
-		budget = 16 * time.Millisecond
+	// Host-relative ceiling (TRBL-097): 16ms scaled by the measured
+	// calibration. On a reference-class host this is the old absolute 16ms;
+	// on a slower host the measured undisturbed cost itself (2ms x
+	// cpuScale) grows, and the ceiling must stay above it to keep grading
+	// the code, not the box. It always stays below the 10x regression line
+	// 20ms x cpuScale.
+	if budget > time.Duration(16*time.Millisecond)*time.Duration(max(1, cpuScale)) {
+		budget = time.Duration(16*time.Millisecond) * time.Duration(max(1, cpuScale))
 	}
 	return budget
 }
@@ -151,9 +170,12 @@ func hostBudget(cpuScale, load float64) time.Duration {
 // TestHostBudgetScaling pins the calibrated budget: a quiet reference-class
 // host gets the spec's 2ms asserted directly, the SPEC-06a observed failure
 // points pass through the load curve, a slower host gets the calibration's
-// speed term even at zero load, both absolute clamps hold, the budget never
-// decreases in either host term, and a catastrophic regression (quiet p99
-// 20ms, 10x the spec) stays caught at every calibration up to the ceiling.
+// speed term even at zero load, the 4ms floor holds and the ceiling scales
+// with the host (16ms x max(1, cpuScale): slow hosts are no longer crushed
+// by the old absolute 16ms cap, TRBL-097), the budget never decreases in
+// either host term, and a catastrophic regression — a p99 at 10x the HOST's
+// own undisturbed cost (20ms x cpuScale) — stays caught at every
+// calibration.
 func TestHostBudgetScaling(t *testing.T) {
 	cases := []struct {
 		cpuScale, load float64
@@ -164,13 +186,21 @@ func TestHostBudgetScaling(t *testing.T) {
 		{1, 4, 4 * time.Millisecond},   // loaded: floor clamp
 		{1, 12, 8 * time.Millisecond},  // SPEC-06a failure point 1 (observed p99 4.7ms)
 		{1, 16, 10 * time.Millisecond}, //
-		{1, 31, 16 * time.Millisecond}, // curve gives 17.5ms, the ceiling caps it
+		{1, 31, 16 * time.Millisecond}, // curve gives 17.5ms, the reference-class ceiling caps it (16ms x 1)
 		{1, 100, 16 * time.Millisecond},
-		{2.5, 0, 5 * time.Millisecond},    // slower host at zero load: 2ms x 2.5 (the §7a speed term)
-		{6, 0, 12 * time.Millisecond},     // 2ms x 6
-		{8, 0, 16 * time.Millisecond},     // ceiling clamp begins (2ms x 8 = 16ms)
-		{31, 0, 16 * time.Millisecond},    // capped
-		{100, 0, 16 * time.Millisecond},   // the ceiling
+		{2.5, 0, 5 * time.Millisecond}, // slower host at zero load: 2ms x 2.5 (the §7a speed term)
+		{6, 0, 12 * time.Millisecond},  // 2ms x 6
+		{8, 0, 16 * time.Millisecond},  // 2ms x 8 meets the reference-class ceiling exactly
+		// TRBL-097 slow-host rows: the ceiling is 16ms x cpuScale, so the
+		// calibration's own number is the budget even past 8x reference. The
+		// 4.5 row is the QA 4-vCPU box's shape (measured ~x4.57, undisturbed
+		// p99 ~9.3ms, old budget clamped at 16ms → deterministic fail); the
+		// 8.5 row is the first integer-exact scale the old absolute ceiling
+		// would have clamped (17ms -> 16ms).
+		{4.5, 0, 9 * time.Millisecond},    // 2ms x 4.5, uncapped
+		{8.5, 0, 17 * time.Millisecond},   // past the old 16ms ceiling and NOT clamped: ceiling is 16ms x 8.5 = 136ms
+		{31, 0, 62 * time.Millisecond},    // 2ms x 31, ceiling 16ms x 31
+		{100, 0, 200 * time.Millisecond},  // the scaled ceiling's headroom: 16ms x 100
 		{0.54, 16, 10 * time.Millisecond}, // fast box under burst: curve 2ms x 5 dominates calib 1.08ms — the load curve IS the pre-calibration gate, never tighter
 	}
 	for _, c := range cases {
@@ -179,9 +209,9 @@ func TestHostBudgetScaling(t *testing.T) {
 		}
 	}
 	// The budget must never decrease as EITHER host term worsens (swept
-	// separately), and it must stay under 10x the spec at every point, so a
-	// catastrophic regression (quiet p99 20ms) fails everywhere up to the
-	// ceiling.
+	// separately), and it must stay below the 10x regression line — 10x the
+	// host's OWN undisturbed cost, 20ms x cpuScale — at every point, so a
+	// synthetic 10x regression fails on every host (TRBL-097).
 	prev := time.Duration(0)
 	for _, load := range []float64{0, 3.9, 4, 12, 16, 31, 100} {
 		if got := hostBudget(1, load); got < prev {
@@ -190,15 +220,16 @@ func TestHostBudgetScaling(t *testing.T) {
 		prev = hostBudget(1, load)
 	}
 	prev = 0
-	for _, cpuScale := range []float64{1, 1.5, 2, 2.5, 6, 8, 31, 100} {
+	for _, cpuScale := range []float64{1, 1.5, 2, 2.5, 4.5, 6, 8, 8.5, 31, 100} {
 		if got := hostBudget(cpuScale, 0); got < prev {
 			t.Errorf("hostBudget(%.2f, 0) = %s < previous %s: budget must not decrease for a slower host", cpuScale, got, prev)
 		}
 		prev = hostBudget(cpuScale, 0)
 	}
-	for _, c := range []struct{ cpuScale, load float64 }{{1, 0}, {1, 31}, {2.5, 12}, {8, 31}, {100, 100}} {
-		if hostBudget(c.cpuScale, c.load) >= 20*time.Millisecond {
-			t.Errorf("hostBudget(%.2f, %.2f) admits a 10x regression (20ms quiet p99)", c.cpuScale, c.load)
+	for _, c := range []struct{ cpuScale, load float64 }{{1, 0}, {1, 31}, {2.5, 12}, {4.5, 0}, {8, 31}, {8.5, 31}, {100, 100}} {
+		line := time.Duration(float64(20*time.Millisecond) * max(1, c.cpuScale))
+		if hostBudget(c.cpuScale, c.load) >= line {
+			t.Errorf("hostBudget(%.2f, %.2f) admits a 10x regression (p99 %s = 10x this host's undisturbed cost)", c.cpuScale, c.load, line)
 		}
 	}
 }

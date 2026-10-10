@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -76,21 +77,58 @@ func assertWalkExact(t *testing.T, seen, want []uint64) {
 // the ledger plus every event seq, newest-first. Each day is its own generation
 // file, which is what makes the walk cross files.
 //
-// The corpus is written in a loop on purpose: AC-30's acceptance is about the
-// walk's totality, not about a 10M-record fixture, and a fixture that large is
-// neither cheap nor honest to fake here.
+// The corpus is written one AppendBatch PER DAY, not record-by-record (TRBL-098):
+// a batch commits in ceil(perDay / max_batch_records) §3.5a group-commit
+// windows (the §3.5a clamp splits it at the writer cap — 320 records at the
+// fixture's cap 64 = 5 windows), instead of one durability window per record.
+// The old record-at-a-time loop paid a full window per record — ~10 s quiet for
+// the 640-record fixture — and stretched past the harness timeout under
+// full-suite load, where sibling packages' fixtures keep the shared state
+// disk's writeback queue full (measured 10.9 s → 105 s at load 22 with no
+// product change). The records, seq contiguity, sigs, and per-day file
+// boundaries are identical; only the number of durability windows changed.
+// The per-day guard below structurally pins the window count, so the fixture
+// cannot silently fall back to the per-record path and stop testing the
+// compiled walk against a realistic corpus.
 func multiGenerationLedger(t *testing.T, clk *fakeClock, days, perDay int, muts ...func(*Options)) (*Ledger, []uint64) {
 	t.Helper()
 	l := testLedger(t, clk, muts...)
 	var seqs []uint64
 	for d := 0; d < days; d++ {
+		drafts := make([]types.RecordDraft, 0, perDay)
 		for i := 0; i < perDay; i++ {
-			rec := mustAppend(t, l, eventDraft(
+			drafts = append(drafts, eventDraft(
 				"journald",
 				fmt.Sprintf("journald:sha256v1:%04d%04d", d, i),
 				fmt.Sprintf("%064x", (d*perDay+i)%7),
 				i%2,
 			))
+		}
+		fsBefore := l.Status().FsyncCalls
+		recs, err := l.AppendBatch(context.Background(), drafts)
+		if err != nil {
+			t.Fatalf("AppendBatch(day %d, %d records): %v", d, perDay, err)
+		}
+		if len(recs) != perDay {
+			t.Fatalf("AppendBatch(day %d) returned %d records, want %d", d, len(recs), perDay)
+		}
+		// Structural guard (TRBL-098): the day must commit as ceil(perDay /
+		// max_batch_records) §3.5a group-commit windows — the §3.5a clamp
+		// splits a batch larger than the writer cap, and each clamp piece is
+		// its own window (320 records at the fixture's cap 64 = exactly 5) —
+		// plus one legal §2.1 loss-window catch-up. Anything more means the
+		// corpus went back to per-record flushes, the exact load-fragile shape
+		// this fixture exists to avoid. Not a timing proxy: it pins the flush
+		// COUNT against the effective writer cap.
+		batch := l.opts.Rotation.MaxBatchRecords
+		if batch < 1 {
+			batch = 1
+		}
+		want := (perDay + batch - 1) / batch
+		if got := l.Status().FsyncCalls - fsBefore; got > int64(want)+1 {
+			t.Fatalf("day %d of %d records took %d group-commit windows (want ≤%d at max_batch_records %d, +1 §2.1 catch-up); the fixture is back to per-record flushes (TRBL-098)", d, perDay, got, want, batch)
+		}
+		for _, rec := range recs {
 			seqs = append(seqs, rec.Seq)
 		}
 		// one extra record opens the next day's file (and closes this one)
@@ -417,7 +455,12 @@ func TestAC30PageReadIsBounded(t *testing.T) {
 	clk := newFakeClock(testNow())
 	// Enough records per file that a full-file read would be obvious, without
 	// writing a corpus large enough to starve the timing-sensitive durability
-	// tests that share this package's suite.
+	// tests that share this package's suite. The corpus commits per-day as
+	// §3.5a group-commit windows (TRBL-098), pinned inside the fixture: a
+	// regression to per-record flushes — the shape that stretched this test
+	// past the harness timeout under full-suite load — fails there, before
+	// any timing can hang.
+	t.Logf("corpus: 640 records in 2 generation files, batched per day (≤6 §3.5a windows/day at max_batch_records 64); load_avg_1m=%.2f", loadfence.LoadAvg1())
 	l, _ := multiGenerationLedger(t, clk, 2, 320)
 	const size = 50
 	tok := types.PageToken{}

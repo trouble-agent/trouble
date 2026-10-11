@@ -292,6 +292,12 @@ go install github.com/trouble-agent/trouble/cmd/trouble@latest    # operator CLI
 go install github.com/trouble-agent/trouble/cmd/troubled@latest   # the daemon
 ```
 
+Each command installs one named binary: `cmd/trouble` and `cmd/troubled` are
+separate installs, not one package. An `@latest` install is unstamped by design
+(no build stamp), and `trouble install` refuses to enable the unit without
+`--force` for that unstamped posture — "Build and test" below shows the stamped
+path.
+
 ## Build and test
 
 ```

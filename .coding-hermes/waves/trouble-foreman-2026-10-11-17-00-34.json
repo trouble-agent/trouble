@@ -1,0 +1,24 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-10-11-17-00-34",
+  "wave_budget": 12,
+  "tasks": [
+    {
+      "id": "TRBL-README-1",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-README-1",
+      "branch": "wt/TRBL-README-1",
+      "base": "origin/main@5deacaf",
+      "files": ["deploy/README.md"],
+      "depends_on": []
+    },
+    {
+      "id": "TRBL-README-2",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-README-2",
+      "branch": "wt/TRBL-README-2",
+      "base": "origin/main@5deacaf",
+      "files": ["README.md"],
+      "depends_on": []
+    }
+  ],
+  "independence": "Both rows have empty depends_on and disjoint file ownership: TRBL-README-1 edits deploy/README.md only; TRBL-README-2 edits README.md only.",
+  "dispatch": "Workers are isolated worktrees, local-only branches, no push; foreman merges serially and gates each merge."
+}

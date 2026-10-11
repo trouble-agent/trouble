@@ -17,6 +17,13 @@ Prerequisites:
 - A writable local filesystem for the state root. Do not use `/tmp`, `/var/tmp`,
   or a network mount.
 
+Two boot facts worth knowing first (SPEC-12 §2.5, §3.2): the daemon's per-key
+config override spelling is `--state_root` (for example,
+`troubled --config X --state_root Y`), not `--state-root` — the dash form is
+refused as an unknown flag — and `/tmp` and `/var/tmp` state roots are
+hard-refused at boot with TROUBLE-LIFECYCLE-004, rather than merely
+discouraged.
+
 Install the Go toolchain before anything else.
 
 A bare host — a fresh container, a minimal VM, an ephemeral bunker agent — has no

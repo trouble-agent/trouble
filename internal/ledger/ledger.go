@@ -82,7 +82,10 @@ func HelpLedgerSection() string {
 
 // HealthLedgerFields is the ledger contribution to GET /health.json
 // (SPEC-10, SPEC-01 §4.4). ledger_loss_window_ms and the durable watermark are
-// read from memory at O(1) and only after fsync.
+// read from memory at O(1) and only after fsync. ledger_torn_lines and
+// ledger_corrupt_lines carry the index's torn (003) and corrupt (011) counts
+// so a torn line is a health signal, not an invisible restart artifact
+// (SPEC-01 §4.4: `/health.json` shows the gap).
 func (l *Ledger) HealthLedgerFields() map[string]any {
 	st := l.Status()
 	return map[string]any{
@@ -92,6 +95,8 @@ func (l *Ledger) HealthLedgerFields() map[string]any {
 		"ledger_bytes":          st.Bytes,
 		"ledger_loss_window_ms": st.LossWindowMS,
 		"ledger_degraded":       st.Index.Degraded,
+		"ledger_torn_lines":     st.Index.TornLines,
+		"ledger_corrupt_lines":  st.Index.CorruptLines,
 	}
 }
 

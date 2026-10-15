@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,8 +58,15 @@ func (lr *lineReader) next() (line []byte, start int64, complete bool, err error
 
 // walkLines streams a file's lines to fn with the tail flag set on the final
 // line. A final line that does not terminate in \n, or that does not parse, is
-// the torn tail of a crash (SPEC-01 §5 code 003) rather than interior
-// corruption (011) — that distinction is why the lookahead exists.
+// the tail of a crash (SPEC-01 §5 code 003) rather than interior corruption
+// (011) — that distinction is why the lookahead exists.
+//
+// An INTERIOR line with the byte shape of a torn fragment (a truncated JSON
+// value: the mark a crash leaves mid-write, §6.4 rule 4) is also code 003, not
+// interior garbage: walkLines hands it to fn with isTail=true and keeps
+// walking, so every complete line around it is delivered in file order with
+// absolute offsets and one pass sees the whole file. Interior garbage (rule 5)
+// keeps the old path: a counted, unhealed 011 line.
 func walkLines(f *os.File, fn func(line []byte, start int64, isTail bool) error) error {
 	rd := newLineReader(f)
 	var pending []byte
@@ -87,6 +95,21 @@ func walkLines(f *os.File, fn func(line []byte, start int64, isTail bool) error)
 			}
 			return fn(line, start, true)
 		}
+		if len(bytes.TrimSpace(line)) > 0 && tornShaped(line) {
+			// a fragment wherever it sits: flush the pending complete line,
+			// deliver the fragment as torn, keep walking — one continuous
+			// pass, so every offset fn sees stays absolute
+			if have {
+				if err := fn(pending, pendingStart, false); err != nil {
+					return err
+				}
+				have = false
+			}
+			if err := fn(line, start, true); err != nil {
+				return err
+			}
+			continue
+		}
 		if have {
 			if err := fn(pending, pendingStart, false); err != nil {
 				return err
@@ -94,6 +117,21 @@ func walkLines(f *os.File, fn func(line []byte, start int64, isTail bool) error)
 		}
 		pending, pendingStart, have = line, start, true
 	}
+}
+
+// tornShaped reports whether an unparsable line is a truncated JSON value —
+// the byte shape a crash leaves mid-write (SPEC-01 §6.4 rule 4) — rather than
+// complete content that never parsed (§6.4 rule 5: interior corruption).
+// json.Valid keeps the common case (a line that parses) to one allocation-free
+// scan; only invalid lines pay the streaming decoder.
+func tornShaped(line []byte) bool {
+	if json.Valid(line) {
+		return false
+	}
+	dec := json.NewDecoder(bytes.NewReader(line))
+	var v any
+	err := dec.Decode(&v)
+	return errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // acquireLock takes flock(LOCK_EX|LOCK_NB) on ledger/LOCK (SPEC-01 §3.4 rule 6).
@@ -202,16 +240,26 @@ func (l *Ledger) recover(ctx context.Context) error {
 		highest = parts[len(parts)-1]
 	}
 	// torn-line recovery: exactly one line is dropped and the file gets a \n
-	// before the next record (SPEC-01 §6.4).
+	// before the next record (SPEC-01 §6.4). A tail fragment is healed by
+	// appending the missing \n; an INTERIOR fragment (a crash mid-write, §6.4
+	// rule 4) is healed by blanking its bytes in place, so the byte layout
+	// after the fragment never moves and every recorded offset stays valid.
 	torn := 0
 	for _, p := range parts {
 		if p.Torn == 0 {
 			continue
 		}
 		torn += int(p.Torn)
-		if err := healTorn(filepath.Join(l.root, p.File)); err != nil {
-			l.idx.markDegraded(ReasonIO)
-			continue
+		if interior := p.Torn - p.TailTorn; interior > 0 {
+			if err := healInteriorTorn(filepath.Join(l.root, p.File)); err != nil {
+				l.idx.markDegraded(ReasonIO)
+			}
+		}
+		if p.TailTorn > 0 {
+			if err := healTorn(filepath.Join(l.root, p.File)); err != nil {
+				l.idx.markDegraded(ReasonIO)
+				continue
+			}
 		}
 		l.bootNotes = append(l.bootNotes, map[string]any{
 			"op":         ReasonRecoverTorn,
@@ -262,6 +310,65 @@ func healTorn(path string) error {
 		return err
 	}
 	return f.Sync()
+}
+
+// healInteriorTorn neutralizes every interior torn fragment of a file by
+// overwriting its bytes with spaces at the same offsets, so the byte layout
+// after the fragment never shifts (in-memory samples and sidecar offsets
+// stay valid) and no line after it is ever consumed. A blanked interior line
+// is the same content the tail heal leaves behind (§6.4): scanner callers skip
+// blank lines, and a later boot counts nothing and heals nothing again. A
+// healing failure leaves the fragment torn-shaped — re-detected and counted at
+// the next boot, degraded at this one: never silent.
+func healInteriorTorn(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	blanked := false
+	for {
+		start, end, found, rerr := findInteriorTorn(f)
+		if rerr != nil {
+			return rerr
+		}
+		if !found {
+			if blanked {
+				return f.Sync()
+			}
+			return nil
+		}
+		pad := make([]byte, end-start)
+		for i := range pad {
+			pad[i] = ' '
+		}
+		if _, werr := f.WriteAt(pad, start); werr != nil {
+			return werr
+		}
+		blanked = true
+	}
+}
+
+// findInteriorTorn locates the first interior torn fragment (a torn-shaped
+// line with a terminating '\n') in the file, returning its byte range
+// [start, end), or found=false when none remains.
+func findInteriorTorn(f *os.File) (start, end int64, found bool, err error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return 0, 0, false, err
+	}
+	rd := newLineReader(f)
+	for {
+		line, lstart, complete, rerr := rd.next()
+		if rerr != nil {
+			return 0, 0, false, rerr
+		}
+		if len(line) == 0 && !complete {
+			return 0, 0, false, nil
+		}
+		if complete && len(bytes.TrimSpace(line)) > 0 && tornShaped(line) {
+			return lstart, lstart + int64(len(line)) + 1, true, nil
+		}
+	}
 }
 
 // authoritativeFiles lists the authoritative part set in seq order and the

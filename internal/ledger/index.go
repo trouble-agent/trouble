@@ -56,6 +56,10 @@ type partInfo struct {
 	Samples  []seqOffset `json:"samples,omitempty"`
 	Corrupt  int64       `json:"corrupt,omitempty"`
 	Torn     int64       `json:"torn,omitempty"`
+	// TailTorn is the torn count that was the file's final line. The
+	// remainder (Torn - TailTorn) sits interior: it is healed by blanking
+	// (healInteriorTorn), never by appending a '\n' to the file's end.
+	TailTorn int64 `json:"tail_torn,omitempty"`
 }
 
 // dayEntry is one indexed day: its authoritative part set plus totals.
@@ -587,6 +591,9 @@ func (ix *index) build(files []*partInfo) error {
 
 // scanFile indexes one part. full=false uses the projection decode (header
 // fields only, payload bytes skipped); skipEvents drops event/canary lines.
+// p.Torn counts every torn fragment (interior + tail); p.TailTorn counts the
+// file's final line only — the boot heal blanks the interior remainder and
+// appends the tail's missing '\n'.
 func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lines int64, torn, corrupt, skipped int, err error) {
 	path := filepath.Join(ix.rootDir, p.File)
 	f, ferr := os.Open(path)
@@ -599,6 +606,7 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 		bytesScanned = fi.Size()
 	}
 	var lineNo int64
+	var tailTorn int64
 	werr := walkLines(f, func(line []byte, start int64, isTail bool) error {
 		if len(bytes.TrimSpace(line)) == 0 {
 			// a healed torn tail leaves one blank line behind (§6.4)
@@ -609,11 +617,15 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 		if derr != nil || rec == nil {
 			if isTail {
 				torn++
+				// the walk is ordered: a fragment is the file's tail only
+				// while no line is delivered after it
+				tailTorn = 1
 			} else {
 				corrupt++
 			}
 			return nil
 		}
+		tailTorn = 0
 		if rec.SchemaVersion > ix.maxSchema {
 			skipped++
 			return nil
@@ -647,6 +659,7 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 	}
 	p.Torn = int64(torn)
 	p.Corrupt = int64(corrupt)
+	p.TailTorn = tailTorn
 	return bytesScanned, lines, torn, corrupt, skipped, nil
 }
 

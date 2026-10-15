@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -117,6 +118,130 @@ func TestTornLastLine(t *testing.T) {
 	} else if rep.CorruptLines+rep.TornLines != 1 {
 		t.Errorf("Verify flagged %d corrupt + %d torn lines, want exactly 1 lost line",
 			rep.CorruptLines, rep.TornLines)
+	}
+}
+
+// writeFileBytes concatenates raw byte fragments into one ledger file.
+func writeFileBytes(t *testing.T, root, name string, parts ...[]byte) {
+	t.Helper()
+	var buf []byte
+	for _, p := range parts {
+		buf = append(buf, p...)
+	}
+	if err := os.WriteFile(filepath.Join(root, name), buf, 0o600); err != nil {
+		t.Fatalf("write %s: %v", name, err)
+	}
+	if err := os.Chmod(filepath.Join(root, name), 0o600); err != nil {
+		t.Fatalf("chmod %s: %v", name, err)
+	}
+}
+
+// TestMidFileTornFragmentDetectedAndHealed: a torn fragment injected MID-FILE
+// (complete records before and after it) is a crash mid-write (SPEC-01 §6.4
+// rule 4), not interior corruption: it is classified torn (003), counted in
+// IndexStats.TornLines and on /health.json, healed at boot (the fragment's
+// bytes are neutralized without shifting any byte after it), recorded as
+// lifecycle{op:recover_torn} exactly once, and a restart reads the file clean
+// with no re-heal. The seq allocator never reissues the fragment's seq.
+func TestMidFileTornFragmentDetectedAndHealed(t *testing.T) {
+	root := testRoot(t)
+	day := testNow()
+	name := day.Format(dayLayout) + ".jsonl"
+	r1 := magicRecord(t, 1, day)
+	frag := magicRecord(t, 2, day)
+	frag = frag[:len(frag)/2] // a valid JSON prefix: the shape a crash leaves
+	r3 := magicRecord(t, 3, day)
+	writeFileBytes(t, root, name, r1, []byte("\n"), frag, []byte("\n"), r3, []byte("\n"))
+
+	clk := newFakeClock(day)
+	l := testLedgerAt(t, root, clk)
+
+	// detection: torn (003), not corrupt (011)
+	st := l.IndexStats()
+	if st.TornLines != 1 {
+		t.Errorf("TornLines = %d, want 1 (a mid-file JSON prefix is torn, not garbage)", st.TornLines)
+	}
+	if st.CorruptLines != 0 {
+		t.Errorf("CorruptLines = %d, want 0 (the fragment never parsed as complete content)", st.CorruptLines)
+	}
+	if v, ok := l.HealthLedgerFields()["ledger_torn_lines"].(int); !ok || v != 1 {
+		t.Errorf("health ledger_torn_lines = %v, want 1", l.HealthLedgerFields()["ledger_torn_lines"])
+	}
+
+	// heal: the fragment's bytes are gone, the complete records are intact
+	if err := l.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, frag) {
+		t.Errorf("the torn fragment is still in the file: the boot heal did not run")
+	}
+	if !bytes.Contains(body, r1) || !bytes.Contains(body, r3) {
+		t.Errorf("the heal damaged complete records")
+	}
+	if n := bytes.Count(body, []byte("recover_torn")); n != 1 {
+		t.Errorf("recover_torn notes = %d, want exactly 1", n)
+	}
+
+	// restart: the healed file reads clean and nothing re-heals
+	l2 := testLedgerAt(t, root, clk)
+	st2 := l2.IndexStats()
+	if st2.TornLines != 0 || st2.CorruptLines != 0 {
+		t.Errorf("after heal: TornLines = %d, CorruptLines = %d, want 0/0", st2.TornLines, st2.CorruptLines)
+	}
+	rep, err := l2.Verify(context.Background(), day.Format(dayLayout))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.TornLines != 0 || rep.CorruptLines != 0 {
+		t.Errorf("Verify after heal: torn = %d, corrupt = %d, want 0/0", rep.TornLines, rep.CorruptLines)
+	}
+	// the allocator never reissues the fragment's seq
+	rec := mustAppend(t, l2, eventDraft("psi", "psi:sha256v1:after-midtorn", "e9", 0))
+	if rec.Seq <= 3 {
+		t.Errorf("next seq = %d, want > 3", rec.Seq)
+	}
+	body2, _ := os.ReadFile(filepath.Join(root, name))
+	if n := bytes.Count(body2, []byte("recover_torn")); n != 1 {
+		t.Errorf("recover_torn notes after restart = %d, want 1 (no re-heal loop)", n)
+	}
+}
+
+// TestMidFileCorruptLineReportedNotHealed: interior garbage that was complete
+// on the wire (a syntax error, not a prefix) stays 011: counted, skipped,
+// reported — and never rewritten by the heal (SPEC-01 §6.4 rule 5).
+func TestMidFileCorruptLineReportedNotHealed(t *testing.T) {
+	root := testRoot(t)
+	day := testNow()
+	name := day.Format(dayLayout) + ".jsonl"
+	garbage := []byte("{this is not json at all")
+	writeLines(t, root, name, [][]byte{
+		magicRecord(t, 1, day), garbage, magicRecord(t, 3, day),
+	})
+	clk := newFakeClock(day)
+	l := testLedgerAt(t, root, clk)
+	st := l.IndexStats()
+	if st.CorruptLines != 1 {
+		t.Errorf("CorruptLines = %d, want 1", st.CorruptLines)
+	}
+	if st.TornLines != 0 {
+		t.Errorf("TornLines = %d, want 0 (garbage is complete content, not a torn prefix)", st.TornLines)
+	}
+	if err := l.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(root, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, garbage) {
+		t.Errorf("011 corruption is reported, never rewritten (§6.4 rule 5)")
+	}
+	if n := bytes.Count(body, []byte("recover_torn")); n != 0 {
+		t.Errorf("recover_torn notes = %d, want 0: a corrupt line is not a torn line", n)
 	}
 }
 

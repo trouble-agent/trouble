@@ -35,11 +35,45 @@ import (
 // answers 503 + TROUBLE-DASHBOARD-013 (no last-known-good fallback: a broken
 // credential file must not silently keep a rotated-away token alive). In-flight
 // requests keep the set they loaded.
+//
+// Scope of the fail-closed rule (TRBL-103): it covers the FILE — unreadable,
+// unstatable, wrong-typed envelope, unparsable JSON. One malformed ENTRY (bad
+// hash shape, empty id, unknown scope, wrong-typed field) is quarantined
+// instead: the entry is skipped with a WARN naming it, never enters the
+// lookup (it can never authenticate), and is preserved on disk by Save, while
+// every valid token keeps working.
 
-// tokenFile is the on-disk wrapper (§3.1).
+// tokenFile is the on-disk wrapper (§3.1). Tokens is the typed form used by
+// writers; Raw carries the verbatim JSON of quarantined entries so Save can
+// write back exactly what it loaded. MarshalJSON emits Raw entries first
+// (preserving the file order the loader read them in) followed by the typed
+// tokens.
 type tokenFile struct {
 	Version int           `json:"version"`
 	Tokens  []types.Token `json:"tokens"`
+	// Raw is the verbatim JSON of entries that failed entry validation
+	// (TRBL-103 quarantine). Never decoded back into types.Token by the
+	// writer; the loader re-validates them on every read.
+	Raw []json.RawMessage `json:"-"`
+}
+
+// MarshalJSON writes version, then the quarantined raw entries, then the
+// typed tokens — so a Save never drops an entry the operator has not fixed
+// yet.
+func (f tokenFile) MarshalJSON() ([]byte, error) {
+	all := make([]json.RawMessage, 0, len(f.Raw)+len(f.Tokens))
+	all = append(all, f.Raw...)
+	for _, t := range f.Tokens {
+		b, err := json.Marshal(t)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, b)
+	}
+	return json.Marshal(struct {
+		Version int               `json:"version"`
+		Tokens  []json.RawMessage `json:"tokens"`
+	}{Version: f.Version, Tokens: all})
 }
 
 // tokenGrammar is the plaintext form: `tdt_` + 43 base64url chars (SPEC-10
@@ -121,6 +155,11 @@ type tokenSet struct {
 	invalidErr error
 	modTime    time.Time
 	size       int64
+	// skipped carries the verbatim JSON of entries that failed per-entry
+	// validation (TRBL-103): quarantined from authentication, preserved so
+	// Save can write the operator's malformed line back verbatim instead of
+	// silently deleting it.
+	skipped []json.RawMessage
 	// missing records that the file did not exist when it was read — a valid
 	// empty store (no credentials yet) as opposed to a present file that holds
 	// no tokens. Both are empty; the boot WARN names which (TRBL-006 AC-3).
@@ -139,6 +178,7 @@ type tokenSet struct {
 type TokenStore struct {
 	path      string
 	forbidden []string // project key plaintexts (DSN PublicKey/SecretKey)
+	logger    *slog.Logger
 
 	cur           atomic.Pointer[tokenSet]
 	refused       atomic.Bool // the boot-time store was missing (QA-TROUBLE-19)
@@ -198,6 +238,7 @@ func LoadTokenStore(path string, forbidKeys []string, logger *slog.Logger) (*Tok
 	ts := &TokenStore{
 		path:          path,
 		forbidden:     forbidKeys,
+		logger:        logger,
 		lastUsedWrite: map[string]time.Time{},
 	}
 	tf, err := ts.readFileIntoSet()
@@ -294,8 +335,18 @@ func (ts *TokenStore) readFileIntoSet() (*tokenSet, error) {
 		set.invalidErr = fmt.Errorf("token store read: %w", err)
 		return set, nil
 	}
-	var tf tokenFile
-	if err := json.Unmarshal(b, &tf); err != nil {
+	// Two-stage decode (TRBL-103). The ENVELOPE is the file-level contract:
+	// a syntax error, a non-object document, a wrongly-typed version field
+	// or a `tokens` value that is not an array fails the whole file
+	// (fail-closed 013, §3.2). The entries are then decoded element-wise:
+	// one malformed entry (wrong-typed field, bad hash shape, empty id,
+	// unknown scope) is quarantined — skipped with a WARN naming it, never
+	// entering the lookup — while every valid token keeps working.
+	var envelope struct {
+		Version int               `json:"version"`
+		Tokens  []json.RawMessage `json:"tokens"`
+	}
+	if err := json.Unmarshal(b, &envelope); err != nil {
 		set.invalid = true
 		set.invalidErr = fmt.Errorf("token store parse: %w", err)
 		return set, nil
@@ -303,18 +354,23 @@ func (ts *TokenStore) readFileIntoSet() (*tokenSet, error) {
 	set.modTime = fi.ModTime()
 	set.size = fi.Size()
 
-	for i := range tf.Tokens {
-		t := tf.Tokens[i]
+	for i, raw := range envelope.Tokens {
+		var t types.Token
+		if err := json.Unmarshal(raw, &t); err != nil {
+			warnQuarantinedTokenEntry(ts.logger, ts.path, i, t.ID, "decode", err)
+			set.skipped = append(set.skipped, raw)
+			continue
+		}
 		scopes, err := expandScopes(t.Scopes)
 		if err != nil {
-			set.invalid = true
-			set.invalidErr = fmt.Errorf("token %q: %w", t.ID, err)
-			return set, nil
+			warnQuarantinedTokenEntry(ts.logger, ts.path, i, t.ID, err.Error(), nil)
+			set.skipped = append(set.skipped, raw)
+			continue
 		}
 		if t.ID == "" || !isHexHash(t.Hash) {
-			set.invalid = true
-			set.invalidErr = fmt.Errorf("token %q: malformed entry", t.ID)
-			return set, nil
+			warnQuarantinedTokenEntry(ts.logger, ts.path, i, t.ID, "malformed entry (empty id or bad hash shape)", nil)
+			set.skipped = append(set.skipped, raw)
+			continue
 		}
 		for _, key := range ts.forbidden {
 			if t.Hash == hashOf(key) {
@@ -326,6 +382,26 @@ func (ts *TokenStore) readFileIntoSet() (*tokenSet, error) {
 		set.byID[t.ID] = entry
 	}
 	return set, nil
+}
+
+// warnQuarantinedTokenEntry logs the per-entry WARN (TRBL-103): the entry at
+// `index` was skipped, named by its index, id (when decodable) and reason, so
+// the operator can fix the line while the store keeps serving the valid
+// tokens. No token material (hash or plaintext) is ever logged.
+func warnQuarantinedTokenEntry(logger *slog.Logger, path string, index int, id, reason string, decErr error) {
+	if logger == nil {
+		return
+	}
+	args := []any{
+		"path", path,
+		"index", index,
+		"id", id,
+		"reason", reason,
+	}
+	if decErr != nil {
+		args = append(args, "err", decErr.Error())
+	}
+	logger.Warn("dashboard token store: skipping malformed token entry", args...)
 }
 
 func isHexHash(s string) bool {
@@ -459,7 +535,7 @@ func (ts *TokenStore) markUsed(label string, now time.Time) {
 		return
 	}
 	// Copy-on-write the snapshot so in-flight requests keep the old set.
-	next := &tokenSet{modTime: cur.modTime, size: cur.size}
+	next := &tokenSet{modTime: cur.modTime, size: cur.size, skipped: cur.skipped}
 	next.byID = make(map[string]tokenEntry, len(cur.byID))
 	for id, e := range cur.byID {
 		if id == label {
@@ -592,7 +668,10 @@ func (ts *TokenStore) add(tok types.Token) error {
 }
 
 // Save re-serializes the current snapshot to disk (temp + fsync + rename, mode
-// 0600, §3.2) — used after LastUsedTS updates and by the CLI.
+// 0600, §3.2) — used after LastUsedTS updates and by the CLI. Skipped
+// (quarantined) entries are written back VERBATIM (their raw JSON): the skip
+// is in-memory quarantine, not deletion — an operator still fixing the line
+// must not lose it because a valid token's LastUsedTS landed in between.
 func (ts *TokenStore) Save() error {
 	set := ts.cur.Load()
 	if set.invalid {
@@ -602,11 +681,23 @@ func (ts *TokenStore) Save() error {
 	for _, e := range set.byID {
 		tf.Tokens = append(tf.Tokens, e.Token)
 	}
-	return ts.writeFile(&tf)
+	tf.Raw = set.skipped
+	if err := ts.writeFile(&tf); err != nil {
+		return err
+	}
+	// Re-read so the snapshot matches the bytes on disk (sortTokens order).
+	set2, err := ts.readFileIntoSet()
+	if err != nil {
+		return err
+	}
+	ts.cur.Store(set2)
+	return nil
 }
 
 // rewrite applies a mutation to the on-disk file and then reloads the in-memory
-// snapshot so the CLI and the daemon observe the same bytes.
+// snapshot so the CLI and the daemon observe the same bytes. Quarantined
+// (malformed) entries are carried through verbatim: a mint/rotate/revoke
+// never silently deletes an entry the operator has not fixed yet (TRBL-103).
 func (ts *TokenStore) rewrite(mut func(*tokenFile)) error {
 	var tf tokenFile
 	b, err := os.ReadFile(ts.path)
@@ -614,8 +705,25 @@ func (ts *TokenStore) rewrite(mut func(*tokenFile)) error {
 		return fmt.Errorf("token store read: %w", err)
 	}
 	if len(b) > 0 {
-		if err := json.Unmarshal(b, &tf); err != nil {
+		var envelope struct {
+			Version int               `json:"version"`
+			Tokens  []json.RawMessage `json:"tokens"`
+		}
+		if err := json.Unmarshal(b, &envelope); err != nil {
 			return fmt.Errorf("token store parse: %w", err)
+		}
+		tf.Version = envelope.Version
+		for _, raw := range envelope.Tokens {
+			var t types.Token
+			if err := json.Unmarshal(raw, &t); err != nil {
+				tf.Raw = append(tf.Raw, raw)
+				continue
+			}
+			if t.ID == "" || !isHexHash(t.Hash) {
+				tf.Raw = append(tf.Raw, raw)
+				continue
+			}
+			tf.Tokens = append(tf.Tokens, t)
 		}
 	}
 	if tf.Version == 0 {

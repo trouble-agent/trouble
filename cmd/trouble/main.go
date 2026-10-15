@@ -44,6 +44,9 @@ usage:
   trouble dashboard token revoke --label LABEL [--token-file PATH]
   trouble dashboard token list [--json] [--token-file PATH]
   trouble hub status [--json]
+  trouble ledger status [--json]
+  trouble ledger verify [--day YYYY-MM-DD] [--json]
+  trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]
   trouble hub archive [--dry-run] [--file FILE] [--force]
   trouble hub dedup --key KEY [--json]
   trouble hub drain [--timeout DURATION]
@@ -102,6 +105,8 @@ func run(args []string) int {
 		return cmdDashboard(args[1:])
 	case "hub":
 		return cmdHub(args[1:])
+	case "ledger":
+		return cmdLedger(args[1:])
 	case "sensors":
 		return cmdSensors(args[1:])
 	default:

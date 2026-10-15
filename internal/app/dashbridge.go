@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -185,7 +186,7 @@ func NewActions(lb *ladder.Ladder, store *Store) Actions {
 func (a Actions) Ack(ctx context.Context, inc string, actor types.Actor, reason string, until types.Duration) error {
 	cur, err := a.Ladder.Incident(ctx, inc)
 	if err != nil {
-		return err
+		return adaptSeam(err)
 	}
 	ctx = WithActor(ctx, actor)
 	payload := map[string]any{
@@ -195,25 +196,29 @@ func (a Actions) Ack(ctx context.Context, inc string, actor types.Actor, reason 
 		"via":        "dashboard",
 	}
 	if _, err := a.Store.Append(ctx, types.KIncident, cur.Sig, inc, payload); err != nil {
-		return err
+		return adaptSeam(err)
 	}
 	if until != "" && until.Std() > 0 {
 		if _, err := a.Ladder.Suppress(ctx, cur.Sig, until, reason); err != nil {
-			return err
+			return adaptSeam(err)
 		}
 	}
 	return nil
 }
 
 // Close resolves the incident through the ladder's own edge and records the
-// resolution. An incident with no legal edge into `resolved` is refused: the
-// state machine is data and the composition root does not widen it.
+// resolution. An incident with no legal edge into `resolved` is refused up
+// front: the state machine is data and the composition root does not widen it.
+// The pre-check is the close trigger, not RefuseFor alone — a state with
+// neither a trigger nor a refusal rule (recorded, detected, …) would otherwise
+// fall into Advance, which records the click as an illegal transition
+// (quarantining the incident on the third one) instead of refusing it.
 func (a Actions) Close(ctx context.Context, inc string, actor types.Actor, reason, resolution string) error {
 	cur, err := a.Ladder.Incident(ctx, inc)
 	if err != nil {
 		return err
 	}
-	if _, ok := ladder.RefuseFor(cur.State, types.StResolved); ok {
+	if closeTrigger(cur.State) == "" {
 		return errNoCloseEdge(cur.State)
 	}
 	tr := ladder.Transition{
@@ -224,7 +229,7 @@ func (a Actions) Close(ctx context.Context, inc string, actor types.Actor, reaso
 	}
 	ctx = WithActor(ctx, actor)
 	if _, err := a.Ladder.Advance(ctx, inc, tr); err != nil {
-		return err
+		return adaptSeam(err)
 	}
 	_, err = a.Store.Append(ctx, types.KIncident, cur.Sig, inc, map[string]any{
 		"transition": "closed",
@@ -232,7 +237,7 @@ func (a Actions) Close(ctx context.Context, inc string, actor types.Actor, reaso
 		"resolution": resolution,
 		"via":        "dashboard",
 	})
-	return err
+	return adaptSeam(err)
 }
 
 func (a Actions) seq() uint64 {
@@ -243,12 +248,15 @@ func (a Actions) seq() uint64 {
 }
 
 // closeTrigger names the ladder's own edge for the state the incident is in.
+// Transition.Trigger carries the edge ID — FindEdge resolves by ID, not by the
+// trigger's display name — so a verifying close walks T38 and a suppressed
+// close walks T45.
 func closeTrigger(st types.LadderState) string {
 	switch st {
 	case types.StVerifying:
-		return "window_passed" // T38
+		return "T38" // window_passed
 	case types.StSuppressed:
-		return "quiet_close" // T45
+		return "T45" // quiet_close
 	default:
 		return ""
 	}
@@ -306,9 +314,13 @@ var (
 	_ dashboard.AutonomyWriter  = Autonomy{}
 )
 
-// errNoCloseEdge is the refusal a human close gets when the incident is not in a
-// state the frozen state machine can leave for `resolved`. It names both states
-// so the UI can say why instead of "failed".
+// errNoCloseEdge is the refusal a human close gets when the incident is not in
+// a state the frozen state machine can leave for `resolved`. It names both
+// states so the UI can say why instead of "failed", and it carries the seam
+// shape the dashboard maps to the wire: the ladder's TROUBLE-LADDER-012 as the
+// owning code, no_close_edge as the machine-readable detail, the human reason
+// as the message, and the refused-transition mark that makes the API answer
+// 409 Conflict instead of a blanket 500 (SPEC-10 §5/§7.6).
 func errNoCloseEdge(st types.LadderState) error {
 	return &noCloseEdge{state: st}
 }
@@ -318,4 +330,68 @@ type noCloseEdge struct{ state types.LadderState }
 func (e *noCloseEdge) Error() string {
 	return "TROUBLE-LADDER-012: incident state " + string(e.state) +
 		" has no legal edge to resolved; a human close is defined from verifying (T38) or suppressed (T45)"
+}
+
+// ErrorCode is the seam code: TROUBLE-LADDER-012 is the ladder's permanent
+// code for an identity/state the index cannot resolve the close through, and
+// the dashboard surfaces it verbatim (SPEC-INDEX §5 rule 2).
+func (e *noCloseEdge) ErrorCode() types.ErrorCode { return types.CodeLadder012 }
+
+func (e *noCloseEdge) ErrorDetail() string { return "no_close_edge" }
+
+func (e *noCloseEdge) ErrorReason() string {
+	return "incident state " + string(e.state) + " has no legal edge to resolved"
+}
+
+func (e *noCloseEdge) RefusedTransition() bool { return true }
+
+// ladderSeamError adapts the ladder's own *ladder.Error onto the seam shape
+// the dashboard maps (SPEC-INDEX §5 rule 2): the ladder's code, class and
+// reason travel to the wire instead of collapsing into the generic 500
+// action_failed. A guard refusal that REJECTED a write the human asked for
+// (e.g. LADDER-018 quiet-window-not-quiet on a close, LADDER-006 canary) is
+// marked as a refused transition so it answers 409 with its reason; a
+// transient class keeps its 503.
+type ladderSeamError struct{ e *ladder.Error }
+
+func (a ladderSeamError) Error() string { return a.e.Error() }
+
+// Unwrap exposes the wrapped *ladder.Error so errors.As finds the seam shape
+// through the adapter (and any further wrapping).
+func (a ladderSeamError) Unwrap() error { return a.e }
+
+func (a ladderSeamError) ErrorCode() types.ErrorCode { return a.e.Code }
+
+func (a ladderSeamError) ErrorDetail() string {
+	if a.e.Detail != "" {
+		return "ladder_" + strings.ToLower(strings.TrimPrefix(string(a.e.Code), "TROUBLE-LADDER-"))
+	}
+	return ""
+}
+
+func (a ladderSeamError) ErrorReason() string {
+	if a.e.Reason != "" {
+		return a.e.Reason
+	}
+	// Guard refusals carry the human cause in Detail (newErr's format string).
+	return a.e.Detail
+}
+
+func (a ladderSeamError) RefusedTransition() bool {
+	return types.CodeClass[a.e.Code] == types.ErrClassPermanent
+}
+
+// adaptSeam wraps a write-seam error from the owning subsystem onto the shape
+// the dashboard's error mapping consumes; an error with no ladder shape (a
+// store fault, a context cancel) is returned unchanged so it stays the
+// generic 500 action_failed.
+func adaptSeam(err error) error {
+	if err == nil {
+		return nil
+	}
+	var le *ladder.Error
+	if errors.As(err, &le) {
+		return ladderSeamError{e: le}
+	}
+	return err
 }

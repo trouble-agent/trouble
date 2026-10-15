@@ -759,8 +759,27 @@ type actionError interface {
 	ErrorCode() types.ErrorCode
 }
 
+// actionDetail is the optional machine-readable variant a write-seam refusal
+// may carry: the detail names the failed check and the reason the human
+// cause, both surfaced on the wire (SPEC-10 §5, §7.6).
+type actionDetail interface {
+	ErrorDetail() string
+	ErrorReason() string
+}
+
+// actionRefusal marks a seam error as a refused state transition: the state
+// the click was rendered from no longer permits it, so the API answers
+// 409 Conflict — never a blanket 500, which is reserved for genuinely
+// unexpected errors.
+type actionRefusal interface {
+	RefusedTransition() bool
+}
+
 // mapActionError converts a seam failure into a dashError, preserving the
-// subsystem's code when it is exposed.
+// subsystem's code (and, when exposed, its machine-readable detail and
+// reason). A refusal the seam marks as a refused state transition is 409; a
+// transient code is 503; everything else with a code is 400; an error with no
+// seam shape at all stays the generic 500 action_failed.
 func (s *server) mapActionError(err error) *dashError {
 	if err == nil {
 		return nil
@@ -772,7 +791,21 @@ func (s *server) mapActionError(err error) *dashError {
 		if types.CodeClass[code] == types.ErrClassTransient {
 			status = http.StatusServiceUnavailable
 		}
-		return &dashError{Code: code, HTTP: status, Message: "action refused", Detail: "subsystem_refused"}
+		var rd actionRefusal
+		if errors.As(err, &rd) && rd.RefusedTransition() {
+			status = http.StatusConflict
+		}
+		de := &dashError{Code: code, HTTP: status, Message: "action refused", Detail: "subsystem_refused"}
+		var ad actionDetail
+		if errors.As(err, &ad) {
+			if d := ad.ErrorDetail(); d != "" {
+				de.Detail = d
+			}
+			if reason := ad.ErrorReason(); reason != "" {
+				de.Message = reason
+			}
+		}
+		return de
 	}
 	return &dashError{Code: types.CodeDashboard013, HTTP: 500, Message: "action failed", Detail: "action_failed"}
 }

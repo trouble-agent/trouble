@@ -29,7 +29,8 @@
     "task": "TRBL-110",
     "tier1_verdict": ".gitreins/history/2026-10-16/8e28c71d/verdict.json (id 44f0f553) - FAIL",
     "tier1_attribution": "TRBL-014 BASELINE, not this change: secrets = harness state excluded from gitleaks scope (.gitreins/**); the same verdict's tests stage also names a PRE-EXISTING red (TestLedgerVerifyExitCodesSpec01Section24) reproduced identically at pre-change 4823cdc",
-    "tier2_async_job": "job-5c4ac2bbfa644ab496ad1073aa67ad7d (poll: gitreins judge --status job-5c4ac2bbfa644ab496ad1073aa67ad7d)"
+    "tier2_async_job": "job-5c4ac2bbfa644ab496ad1073aa67ad7d (poll: gitreins judge --status job-5c4ac2bbfa644ab496ad1073aa67ad7d)",
+    "tier2_verdict": ".gitreins/history/2026-10-16/61669dc0/verdict.json - tier2 COMPLETE, criterion SATISFIED (line-level evidence); aggregate Result=FAIL because tier1 FAIL is the TRBL-014 structural baseline"
   },
   "independence": "n/a (serial)",
   "ci": {

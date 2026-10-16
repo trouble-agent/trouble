@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.2.0
+version: 1.3.0
 category: software-development
 ---
 
@@ -215,6 +215,26 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
 * **The `<day>.jsonl.idx` sidecar is advisory only** (TRBL-108): its
   records/first_seq/last_seq can contradict the file after heals; rebuild the
   truth from the JSONL itself.
+* **The quickstart's key placeholder is a trap — patch the key you SEE, not
+  the one the README names** (TRBL-109, dogfood 2026-10-16 run 2):
+  deploy/README.md says to replace `replace-with-a-new-32-lowercase-hex-character-key`,
+  but examples/config.toml ships `public_key = "0123456789abcdef0123456789abcdef"`.
+  Follow the README verbatim and your first event 401s `unknown_key` — the sed
+  no-op'd and the daemon booted with the stock placeholder. Always derive the
+  key from the config file itself (`grep public_key` after your edits) before
+  posting.
+* **The seq allocator seeds from the HEAD hint** (TRBL-110, run 2): a stale or
+  high HEAD (crash between HEAD refresh and fsync, or a restore of an old
+  HEAD) makes the next Append allocate from the hint, seeding a REAL verify-
+  visible seq hole — SPEC-01 §3.4 rule 7's "HEAD is never a source of truth"
+  does not hold at HEAD 6bf0ade. After any restore/repair, rewrite HEAD to the
+  file's true max seq BEFORE booting.
+* **The ledger verbs fall back to the DEFAULT root when config resolution
+  fails, and every invocation writes a boot note there** (TRBL-111, run 2):
+  a `--config` path that does not resolve does not refuse — the verb opens
+  `~/.local/state/trouble/ledger` and appends into it. Always pass an
+  existing config path, and budget one `lifecycle{op:"boot"}` record per
+  invocation when auditing any trail the verbs have touched.
 
 ## Where the knowledge lives
 

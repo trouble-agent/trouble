@@ -99,8 +99,8 @@ func bootCloseDashboard(t *testing.T) (base, token, incID string) {
 			}
 			return dashboard.Story{}
 		},
-		Health:   func(ctx context.Context) types.HealthResponse { return types.HealthResponse{} },
-		Actions:  NewActions(lb, s),
+		Health:    func(ctx context.Context) types.HealthResponse { return types.HealthResponse{} },
+		Actions:   NewActions(lb, s),
 		TokenFile: tokenPath,
 	}
 

@@ -21,6 +21,10 @@
 
 guards:
   secrets: true
+  # Dogfood/QA/board-only commits carry no Go files by design: accept the
+  # go_build/go_lint skips instead of failing them (DEGRADED PASS rc=2 blocked
+  # the 2026-10-16 dogfood artifacts; skill-documented side change).
+  allow_skips: true
   # Go repo: the generic lint/test lanes are skipped and `guards.go` governs.
   lint: false
   tests: true

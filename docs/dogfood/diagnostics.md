@@ -424,3 +424,51 @@ never seen it.
   permanent — mint interactively or capture with a strict full-line regex.
 - Verify token auth with `tok_len` + one immediately-following authed request in
   the SAME ssh session; cross-session env assumptions cost three false 401s here.
+
+## 2026-10-16 — why the ledger CLI verbs disagree with their docs (TRBL-104..108)
+
+The 2026-10-13 dogfood found the promised `trouble ledger` verbs missing
+(DF-LEDGER-1); TRBL-100 wired them on 10-15 and the 10-16 re-proof confirms they
+work and honor the SPEC-01 §2.4 exit contract. Real use of the new surface then
+exposed WHY the docs and the verbs disagree — two design facts worth recording:
+
+1. **Writer-mode Open is the only Open.** Every ledger entry point — daemon,
+   `hub drain`, and now the CLI verbs — calls `ledger.Open` with a writer actor
+   and takes `flock(LOCK_EX|LOCK_NB)`. There is no read-only constructor in this
+   build. Consequences: the CLI verbs cannot run against a live daemon
+   (TROUBLE-LEDGER-005, correct per SPEC-01 §3.4 rule 6, but it makes ops.md §2's
+   "verify opens no lock" promise unimplementable as written), and even a
+   "read-only" status boot writes records (its own `boot` lifecycle op, HEAD
+   refresh, sidecar rewrite) because recovery is part of Open. TRBL-104/105 file
+   the user-visible half; the fix direction is a true read-only walk entry
+   point, not doc polish alone.
+
+2. **Two canonical forms of one payload.** The writer serializes payloads from
+   Go structs (field order preserved: `"key","value","source",...`); verify
+   re-parses the stored bytes into `map[string]any` and re-marshals, and Go
+   sorts map keys (`"key","redacted","source",...`). `payload_sha256` is
+   computed over the first form and checked against the second, so any
+   struct-ordered payload (config snapshots, lifecycle records — the audit
+   spine) fails the hash check deterministically: 1000 re-marshals of a real
+   seq-2 config payload produced zero byte-identical forms. Events with
+   map-shaped payloads agree, which is why the false positive stays rare
+   (~1 record per boot) and looks like noise. TRBL-106; fix is to hash/verify
+   the raw stored bytes (or canonicalize both sides through the same path).
+
+3. **Crash shape that beats the torn classifier.** A torn fragment followed
+   immediately by an intact record with no newline between them (two batches,
+   crash between their writes) reads as ONE line whose JSON decode succeeds on
+   the first value; `tornShaped` (which requires io.ErrUnexpectedEOF) then
+   returns false and the line is filed as 011 corrupt — the intact record
+   sharing the line is swallowed. Proven by injecting exactly that shape
+   (Go probe on the real bytes, tornShaped=false) and watching the boot heal
+   skip it. TRBL-107; the classifier needs the decode-OK-with-trailing-bytes
+   branch and a cut-at-first-value recovery.
+
+Fresh-machine leg (bunker-mvp agent 9dee92cf, evidence
+/tmp/bunker-qa-evidence-20261016T115442Z-2269145.jsonl): fresh-install OK,
+chaos-corruption OK, ci-pass/chaos-resource FAIL on the known load-budget class
+(TestLoadIngestThroughput / TestArtifactParseBudget / TestBudgetDashboardRSS)
+plus TRBL-100's own TestLedgerVerifyExitCodesSpec01Section24 joining it under
+the 3G cap — the new surface shipped with a test that is load-sensitive on
+4-vCPU agents, same lineage as QA-TROUBLE-17.

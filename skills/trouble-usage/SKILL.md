@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.1.0
+version: 1.2.0
 category: software-development
 ---
 
@@ -27,7 +27,7 @@ hand on 2026-09-17 (`c363daf`, go1.26.5). See
 | surface | how | notes |
 |---|---|---|
 | daemon | `bin/troubled --config <file>` | boots, serves dashboard (+ ingest when projects are configured) |
-| operator CLI | `bin/trouble …` | `--version`, `config explain`, `topology`, `check-stall`, `install`, `upgrade`, `escalate`, `dashboard token …` |
+| operator CLI | `bin/trouble …` | `--version`, `config explain`, `topology`, `check-stall`, `install`, `upgrade`, `escalate`, `dashboard token …`, `ledger status/verify/compact` (SPEC-01 §2.4) |
 | dashboard | `http://127.0.0.1:7644` | token auth; `/health.json` is loopback-exempt |
 | ingest | `http://127.0.0.1:7643/api/{project_id}/event/` | **only binds if projects are configured — see trap 3** |
 | ledger | `<state_root>/ledger/YYYY-MM-DD.jsonl` | plain JSONL, `jq`-able, `seq`/`rec_id`/`kind`/`sig`/`inc`/`payload` |
@@ -192,6 +192,29 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   session noise → 20+ incidents in seconds → `rule:dbus_unit_failed` open, see
   TRBL-094). Do not treat an open breaker on a brand-new install as a fault;
   look for the real signal under it.
+* **`trouble ledger status` is not read-only** (TRBL-104, dogfood 2026-10-16):
+  it takes the writer flock, appends a `lifecycle{op:"boot"}` record as
+  `trouble-ledger-cli`, rewrites HEAD/`.idx`, and reports its own pid as
+  `writer_pid` when no daemon is up. Budget for those records when auditing a
+  trail, and never point the CLI verbs at a ledger whose history you are
+  proving byte-for-byte.
+* **The ledger verbs refuse while the daemon holds LOCK** (TRBL-105): with the
+  daemon up, status exits 1 / verify exits 2 / compact exits 1 with a
+  `degraded_reason` naming the LOCK — despite ops.md §2's older "verify is
+  always safe against a live ledger" wording. Run the verbs after a clean
+  shutdown, or read `health.json` while it runs.
+* **Expect `payload hash mismatch` rows on config/lifecycle records** (TRBL-106):
+  verify re-canonicalizes struct-ordered payloads through a sorted map, so the
+  stored hash never reproduces — a false positive on the audit spine, not data
+  damage. Treat hash-mismatch errors as noise until TRBL-106 lands; holes,
+  torn/corrupt counts and ts continuity remain trustworthy.
+* **A torn write glued to the next record (no newline) classifies as one 011
+  corrupt line** (TRBL-107): the intact record sharing the line is
+  unrecoverable. If verify reports corrupt_lines on a ledger that crashed
+  mid-write, inspect the flagged line by hand before writing it off.
+* **The `<day>.jsonl.idx` sidecar is advisory only** (TRBL-108): its
+  records/first_seq/last_seq can contradict the file after heals; rebuild the
+  truth from the JSONL itself.
 
 ## Where the knowledge lives
 

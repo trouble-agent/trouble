@@ -129,6 +129,13 @@ func newWriter(l *Ledger) *writer {
 	w.st.lastTS = l.recovered.lastTS
 	w.lastSeq.Store(l.recovered.lastSeq)
 	w.pendingSeq.Store(l.recovered.lastSeq)
+	// A recovery-created seq gap (HEAD hint above file max, §3.4 rule 7 max
+	// rule) is registered exactly like a failed batch's: beforeBatch drains the
+	// queue into one lifecycle{op:"hole", from, to} record with the next
+	// successful batch (§3.5: every hole appears in the audit trail).
+	if l.recovered.recoverHole != nil {
+		w.holes = append(w.holes, *l.recovered.recoverHole)
+	}
 	return w
 }
 

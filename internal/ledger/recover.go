@@ -25,6 +25,14 @@ type recoveredState struct {
 	records int64
 	lastSeq uint64
 	lastTS  string
+	// recoverHole is the seq gap the §3.4 rule 7 max rule seeds at boot: when
+	// HEAD.last_seq exceeds the highest seq in the authoritative files,
+	// allocation resumes at HEAD.last_seq+1 and (file_max, HEAD.last_seq] is
+	// permanently skipped. It rides the recovered state into the writer's hole
+	// queue so the trail receives one lifecycle{op:"hole"} record with the next
+	// successful batch (§3.5: every hole appears in the audit trail).
+	// Allocation semantics are untouched — the gap is recorded, never healed.
+	recoverHole *holeRange
 }
 
 // lineReader yields \n-terminated lines without buffering the whole file, and
@@ -235,6 +243,23 @@ func (l *Ledger) recover(ctx context.Context) error {
 		l.bootNotes = append(l.bootNotes, map[string]any{
 			"op": "seq_recovered", "head_last_seq": head.LastSeq, "file_max_seq": maxSeq,
 		})
+		// The max rule (§3.4 rule 7) resumes allocation at HEAD.last_seq+1, so
+		// (file_max, HEAD.last_seq] is a real, permanent gap. Register it as a
+		// hole like any failed batch's (§3.5): beforeBatch drains it into one
+		// lifecycle{op:"hole", from, to} record with the next successful batch.
+		// A stale/high HEAD used to leave this gap invisible in the trail.
+		//
+		// Gated on a clean, full scan: maxSeq is only proven to be the real
+		// file maximum when the index build did not degrade (io error, budget
+		// mode skipping event seqs, skipped newer schema all understate it),
+		// and a hole is permanent in the trail — a fabricated one would never
+		// come out. The seq_recovered note above still fires regardless.
+		l.idx.mu.Lock()
+		clean := !l.idx.buildStats.Degraded
+		l.idx.mu.Unlock()
+		if clean {
+			st.recoverHole = &holeRange{from: maxSeq + 1, to: head.LastSeq}
+		}
 	}
 	if len(parts) > 0 {
 		highest = parts[len(parts)-1]

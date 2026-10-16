@@ -1,0 +1,43 @@
+{
+  "tick": "trouble-foreman-2026-10-16-12-58-22",
+  "wave_budget": 1,
+  "mode": "serial",
+  "serial_reason": "WAVE_BUDGET=1 (hard ceiling = 1 concurrent worker); a wave requires >=2 independent workers per the foreman skill, so the serial path applies. 10 pending rows existed but only one worker may run this tick.",
+  "checkout": "/home/kara/trouble",
+  "base_sha": "0e5f646",
+  "workers": [
+    {
+      "task_id": "TRBL-110",
+      "worktree": "/home/kara/trouble",
+      "branch": "main",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/trouble-foreman-2026-10-16-12-58-22-TRBL-110.txt",
+      "log": "/tmp/trouble-foreman-2026-10-16-12-58-22-TRBL-110.log",
+      "pid": 146138,
+      "commit": "6ce84db",
+      "worker_self_report": "RED-proved + gates green; go test ./internal/ledger/ -count=1 ok (361s); TestSeqRecoveryFromHeadHint unchanged PASS",
+      "foreman_verification": "INDEPENDENT: commit author totalwindupflightsystems (no co-author trailer), ch:trace footer, diff = exactly the 3 owned files (165 insertions, no board/harness pollution); go build ./... && go vet ./... OK; focused TestRecoveryHighHeadRecordsHoleInTrail + TestRecoveryNoFalseHoleWhenHeadMatchesFiles + TestSeqRecoveryFromHeadHint (3/3) PASS on the merged tree",
+      "outcome": "landed"
+    }
+  ],
+  "foreman_commits": [
+    {"task_id": "INT-CI-1", "commit": "535d65b", "desc": "gofmt internal/app/dashbridge_close_refusal_test.go - restores the CI Check gofmt step"},
+    {"task_id": "board-closeout", "commit": "PENDING_THIS_COMMIT", "desc": "board rows TRBL-110 complete, INT-CI-1 create+complete, INT-CI-2 create; dispatch event; this manifest"}
+  ],
+  "gitreins": {
+    "task": "TRBL-110",
+    "tier1_verdict": ".gitreins/history/2026-10-16/8e28c71d/verdict.json (id 44f0f553) - FAIL",
+    "tier1_attribution": "TRBL-014 BASELINE, not this change: secrets = harness state excluded from gitleaks scope (.gitreins/**); the same verdict's tests stage also names a PRE-EXISTING red (TestLedgerVerifyExitCodesSpec01Section24) reproduced identically at pre-change 4823cdc",
+    "tier2_async_job": "job-5c4ac2bbfa644ab496ad1073aa67ad7d (poll: gitreins judge --status job-5c4ac2bbfa644ab496ad1073aa67ad7d)"
+  },
+  "independence": "n/a (serial)",
+  "ci": {
+    "before": "main RED since 2026-10-15T16:31 at Check gofmt (internal/app/dashbridge_close_refusal_test.go unformatted)",
+    "after_exact_head": "run on 535d65b: Check gofmt SUCCESS, Build SUCCESS, Vet SUCCESS, Test (short mode) FAILURE -> pre-existing red unmasked by the gofmt fix, filed as INT-CI-2"
+  },
+  "pushes": {"origin_main_before": "4823cdc", "origin_main_after": "535d65b", "parity_origin_main_head": 0, "parity_head_origin_main": 0},
+  "shared_checkout": "a sibling dogfood lane advanced main mid-tick (f6e1141, 4823cdc - docs/dogfood evidence archives); disjoint from the worker's files, no conflict",
+  "started_at": "2026-10-16T13:10:00Z",
+  "finished_at": "2026-10-16T13:58:00Z"
+}

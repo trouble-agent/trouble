@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Hint-repro procedure archive (TRBL-110).
+
+Provenance note: the evidence run executed 2026-10-16 ~07:52 (-05) with output
+"clean restored, max seq = 394 / HEAD hint = 628 / new seqs: min/max/count =
+(629, 644, 16) / VERDICT: SEEDED FROM HEAD HINT" (tick transcript). The /tmp
+copies of the script and inputs were lost to the host's 2026-10-16 writeback
+starvation wave; this file is the verbatim procedure, re-created from the
+transcript. Re-running it requires a scratch trouble root (config at
+~/.config/trouble-df1016/config.toml) and the HEAD-stamped binaries.
+
+Proves TRBL-110: with file max seq 394 and HEAD hint 628, the first post-boot
+allocation continues from the HINT (629), violating SPEC-01 §3.4 rule 7.
+"""
+import subprocess, time, json, os, sys
+
+LED = os.path.expanduser('~/.local/state/trouble-df1016/ledger/2026-10-16.jsonl')
+HEAD = os.path.expanduser('~/.local/state/trouble-df1016/ledger/HEAD')
+CFG = os.path.expanduser('~/.config/trouble-df1016/config.toml')
+BIN = '/tmp/df1016-troubled'
+
+def live_pids():
+    r = subprocess.run(['pgrep', '-f', 'df1016-troubled'], capture_output=True, text=True)
+    out = []
+    for p in r.stdout.split():
+        try:
+            if ') Z' not in open(f'/proc/{p}/stat').read():
+                out.append(p)
+        except Exception:
+            pass
+    return out
+
+lp = live_pids()
+if lp:
+    print('LIVE DAEMON PRESENT:', lp); sys.exit(1)
+
+clean = open('/tmp/df1016-led-clean.jsonl').readlines()
+open(LED, 'w').writelines(clean)
+maxseq = 0
+for l in clean:
+    try:
+        s = json.loads(l)['seq']
+        if isinstance(s, int) and s > maxseq:
+            maxseq = s
+    except Exception:
+        pass
+print('clean restored, max seq =', maxseq)
+
+hint = maxseq + 234
+head = json.load(open(HEAD))
+head['last_seq'] = hint
+open(HEAD, 'w').write(json.dumps(head))
+print('HEAD hint =', hint)
+
+with open(LED, 'a') as f:
+    f.write('{"seq":123,"rec_id":"ev_tornprobeX","ts":"2026-10-16T13:00:00.000Z","kind":"event",\n')
+
+log = open('/tmp/df1016-boot4.log', 'w')
+proc = subprocess.Popen([BIN, '--config', CFG], stdout=log, stderr=log)
+saw = None
+deadline = time.time() + 60
+while time.time() < deadline:
+    time.sleep(2)
+    seqs = []
+    for l in open(LED):
+        try:
+            s = json.loads(l).get('seq')
+            if isinstance(s, int):
+                seqs.append(s)
+        except Exception:
+            pass
+    new = [s for s in seqs if s > maxseq]
+    if new:
+        saw = (min(new), max(new), len(new))
+        break
+print('new seqs: min/max/count =', saw, '| file max pre-boot was', maxseq, '| hint was', hint)
+if saw:
+    first_new = saw[0]
+    print('VERDICT:', 'SEEDED FROM HEAD HINT' if first_new > maxseq + 1 else 'CONTINUED FROM FILE')
+else:
+    print('no new records in 60s (quiet box); check HEAD drift instead')
+    print('HEAD now:', open(HEAD).read().strip()[:120])
+
+proc.terminate()
+try:
+    proc.wait(timeout=10)
+except Exception:
+    proc.kill()
+time.sleep(1)
+open(LED, 'w').writelines(clean)
+print('clean restored; live daemons now:', live_pids())

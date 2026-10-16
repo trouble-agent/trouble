@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Hash-decide probe archive (TRBL-106 root cause).
+
+Provenance note: first executed 2026-10-16 ~07:36 on the scratch ledger's seq-2
+config record (stored eaa9299b583a0212; struct-order recomputation matched it
+exactly, verifier rehash d1206f7e6b52e380 did not). The /tmp input was lost to
+the host's writeback wave; the probe was RE-EXECUTED 2026-10-16 ~08:12 on an
+independent record (default-root seq 803, from 2026-10-02.jsonl, stored
+d6e4a0ab58fc52d2) with the same verdict: struct-order matches the stored hash,
+the verifier's re-canonicalization does not. Reproduce with any >=4096B config
+record: the seq-2 record must be written to /tmp/df1016-seq2.json as one JSON
+object (a generator snippet is in the tick transcript; the re-extraction used
+the first >=4096B kind=config record in the default root's day files).
+"""
+import json, hashlib
+
+raw = open('/tmp/df1016-seq2.json').read()
+rec = json.loads(raw)
+payload = rec['payload']
+stored = payload.get('payload_sha256')
+
+def h(b):
+    return hashlib.sha256(b).hexdigest()[:16]
+
+DECLARED = ['key', 'value', 'source', 'source_ref', 'redacted']
+
+def verifier_bytes():
+    p2 = json.loads(json.dumps(payload))
+    p2.pop('payload_sha256', None)
+    return json.dumps(p2, separators=(',', ':'), sort_keys=True, ensure_ascii=False).encode()
+
+def writer_bytes():
+    p2 = json.loads(json.dumps(payload))
+    p2.pop('payload_sha256', None)
+    out_vals = []
+    for v in p2.get('values', []):
+        od = {k: v.get(k) for k in DECLARED}
+        out_vals.append(od)
+    p2['values'] = out_vals
+    parts = []
+    for k in sorted(p2.keys()):
+        if k == 'values':
+            items = []
+            for od in out_vals:
+                items.append('{' + ','.join(json.dumps(kk, ensure_ascii=False) + ':' + json.dumps(od[kk], separators=(',', ':'), ensure_ascii=False) for kk in DECLARED) + '}')
+            parts.append(json.dumps(k) + ':[' + ','.join(items) + ']')
+        else:
+            parts.append(json.dumps(k) + ':' + json.dumps(p2[k], separators=(',', ':'), ensure_ascii=False))
+    return ('{' + ','.join(parts) + '}').encode()
+
+hv = h(verifier_bytes())
+hw = h(writer_bytes())
+print('stored hash:     ', stored)
+print('verifier rehash: ', hv, '(match:', hv == stored, ')  <- what verify recomputes')
+print('struct-order:    ', hw, '(match:', hw == stored, ')  <- what the writer hashed')

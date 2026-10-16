@@ -262,10 +262,21 @@ func TestLedgerVerifyExitCodesSpec01Section24(t *testing.T) {
 		t.Fatalf("healthy verify = ok=%v lines=%d files=%v, want ok 3 lines 1 file", rep.OK, rep.Lines, rep.Files)
 	}
 
-	// Findings row: an interior garbage line is a finding — exit 1, and the
+	// Findings row: a seq hole is a finding — exit 1, and the
 	// report names the file (operations.md §2: "the report names the files").
+	// Valid JSON avoids recovery healing it (tornShaped only triggers on
+	// unparseable-but-truncated JSON); two valid records with a seq gap
+	// guarantee a detectable seq hole (2..2).
+	sec := ledgerMergeKey()
+	seq1 := fmt.Sprintf("ev_%024d", 1)
+	seq3 := fmt.Sprintf("ev_%024d", 3)
+	// Two valid records — seq 1 and seq 3 — so Verify detects hole at seq 2.
+	corruptContent := strings.Join([]string{
+		`{"rec_id":"` + seq1 + `","seq":1,"ts":"2026-06-02T00:00:01.000Z","kind":"event","schema_version":1,"sig":"psi:sha256v1:` + strings.Repeat("0", 40) + `","origin":{"host_id":"7f3a91c2d4e5b607","source":"psi"},"actor":{"kind":"daemon","id":"troubled","version":"0.1.0"},"payload":{"op":"sample","merge_key":"` + sec + `","subject":"x"}}`,
+		`{"rec_id":"` + seq3 + `","seq":3,"ts":"2026-06-02T00:00:03.000Z","kind":"event","schema_version":1,"sig":"psi:sha256v1:` + strings.Repeat("0", 40) + `","origin":{"host_id":"7f3a91c2d4e5b607","source":"psi"},"actor":{"kind":"daemon","id":"troubled","version":"0.1.0"},"payload":{"op":"sample","merge_key":"` + sec + `","subject":"x"}}`,
+	}, "\n") + "\n"
 	if err := os.WriteFile(filepath.Join(led, "2026-06-02.jsonl"),
-		[]byte("{\"seq\": 1, \"kind\": \"event\"\n{\"this is not json\n"), 0o600); err != nil {
+		[]byte(corruptContent), 0o600); err != nil {
 		t.Fatalf("write corrupt fixture: %v", err)
 	}
 	code, out, _ = runCLI(t, bin, cfg, "ledger", "verify", "--day", "2026-06-02")

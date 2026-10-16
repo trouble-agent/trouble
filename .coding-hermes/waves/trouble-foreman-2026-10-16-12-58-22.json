@@ -23,7 +23,7 @@
   ],
   "foreman_commits": [
     {"task_id": "INT-CI-1", "commit": "535d65b", "desc": "gofmt internal/app/dashbridge_close_refusal_test.go - restores the CI Check gofmt step"},
-    {"task_id": "board-closeout", "commit": "PENDING_THIS_COMMIT", "desc": "board rows TRBL-110 complete, INT-CI-1 create+complete, INT-CI-2 create; dispatch event; this manifest"}
+    {"task_id": "board-closeout", "commit": "127ce6a", "desc": "board rows TRBL-110 complete, INT-CI-1 create+complete, INT-CI-2 create; dispatch event; this manifest"}
   ],
   "gitreins": {
     "task": "TRBL-110",

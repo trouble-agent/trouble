@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"syscall"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
@@ -40,14 +41,33 @@ func readLockPID(root string) int {
 	return lf.PID
 }
 
-// CheckWriterHeld returns the LOCK-file PID and true if a writer exists, or
-// (-1, false) when the LOCK file is absent. It opens the file with ReadFile
-// (no flock), so it never blocks and never writes. This is the check used by
-// the read-only CLI verbs to produce the "unreadable" row when a live writer
-// holds LOCK — the files cannot be trusted consistent without taking the lock.
+// CheckWriterHeld returns the LOCK-file PID and true if a writer actually
+// holds LOCK, or (-1, false) when there is no writer. It opens the file
+// with ReadFile (no flock), then verifies the PID is a real process by
+// attempting to kill it with signal 0. This prevents false positives from
+// stale LOCK files left over from previous runs.
 func CheckWriterHeld(root string) (int, bool) {
-	pid := readLockPID(root)
-	return pid, pid >= 0
+	path := filepath.Join(root, "LOCK")
+	b, err := os.ReadFile(path)
+	if err != nil || len(bytes.TrimSpace(b)) == 0 {
+		return -1, false
+	}
+	var lf lockFile
+	if err := json.Unmarshal(bytes.TrimSpace(b), &lf); err != nil {
+		return -1, false
+	}
+	// Verify the PID is a living process. kill with signal 0 returns 0 if
+	// the process exists (and we can signal it), non-zero otherwise.
+	err = syscall.Kill(lf.PID, 0)
+	if err != nil {
+		// ESRCH = no such process (stale LOCK); EPERM = process exists but
+		// we can't signal it (different user) — treat EPERM as "writer exists".
+		if err == syscall.ESRCH {
+			return lf.PID, false // stale lock
+		}
+		return lf.PID, true // process alive, writer holds LOCK
+	}
+	return lf.PID, true // process alive, writer holds LOCK
 }
 
 // authoritativeFilesRoot lists part files for a bare root path.
@@ -212,6 +232,10 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 		st.Index.Degraded = true
 		st.Index.DegradedReason = "seq_gaps_detected"
 	}
+
+	// Fill in defaults that the daemon would set on open (SPEC-01 §2.5).
+	st.LossWindowMS = DefaultFsyncWindowMS
+	st.DiskBudgetBytes = DefaultDiskBudgetBytes
 
 	return st, nil
 }

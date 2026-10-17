@@ -152,6 +152,21 @@ func cmdLedgerStatus(args []string) int {
 	}
 	// SPEC-01 §2.4: status is read-only. Use the read-only path that opens
 	// no locks, writes nothing, and reports the actual LOCK-file PID (not self).
+	// If a writer holds LOCK, the daemon's counters are unreadable, so produce
+	// the degraded row per §2.4.
+	pid, held := ledger.CheckWriterHeld(lc.root)
+	if held {
+		// Writer holds LOCK — the CLI cannot read queue/fsync counters that
+		// only the writer tracks. Produce the degraded row per §2.4.
+		_ = pid // only used to satisfy the return value of CheckWriterHeld
+		if *asJSON {
+			_, _ = fmt.Fprintf(os.Stdout, "{\"degraded\":true,\"degraded_reason\":\"another writer holds %s\"}\n", filepath.Join(lc.root, "LOCK"))
+			return 1
+		} else {
+			_, _ = fmt.Fprintf(os.Stdout, "ledger status: another writer holds %s (the daemon is live)\n", filepath.Join(lc.root, "LOCK"))
+			return 1
+		}
+	}
 	st, err := ledger.ReadStatus(lc.root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ledger status: %v\n", err)

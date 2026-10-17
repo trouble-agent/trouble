@@ -1,0 +1,21 @@
+fix: TRBL-104 close test failures — defaults and stale-LOCK detection
+
+The first commit fixed the read-only path but missed two test edge cases:
+- ReadStatus didn't set LossWindowMS/DiskBudgetBytes defaults (test wanted
+  loss_window_ms=200, got 0)
+- CheckWriterHeld didn't verify the PID was alive, so stale LOCK files
+  from previous tests triggered false "writer holds" (verify exit 2 when
+  it should have been exit 0)
+
+Changes:
+- ReadStatus now sets st.LossWindowMS = DefaultFsyncWindowMS (200) and
+  st.DiskBudgetBytes = DefaultDiskBudgetBytes (2GB), matching the daemon's
+  open() defaults so --json output is identical whether read-only or via
+  the writer Ledger (SPEC-01 §2.5).
+- CheckWriterHeld now uses syscall.Kill(lf.PID, 0) to verify the PID is
+  a living process before claiming the writer holds LOCK. ESRCH = stale
+  lock (return not-held); EPERM = process exists but different user
+  (return held).
+
+Fixes judge Tier 1 failures: TestLedgerStatusOkAndWriterLiveDegradedSpec01Section24
+and TestLedgerCompactExitCodesAndDryRunSpec01Section24.

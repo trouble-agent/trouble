@@ -356,4 +356,3 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 
 	return rep, nil
 }
-

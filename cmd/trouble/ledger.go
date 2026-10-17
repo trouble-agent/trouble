@@ -150,20 +150,13 @@ func cmdLedgerStatus(args []string) int {
 	if code != 0 {
 		return code
 	}
-	led, held, err := openLedger(lc)
-	if held {
-		// The daemon owns the writer seat, so this process cannot read the
-		// writer-side counters (queue depth, fsync totals) its Status would
-		// zero-fill. The honest degraded row names that instead.
-		printWriterHeld(os.Stdout, "ledger status", lc, *asJSON)
-		return 1
-	}
+	// SPEC-01 §2.4: status is read-only. Use the read-only path that opens
+	// no locks, writes nothing, and reports the actual LOCK-file PID (not self).
+	st, err := ledger.ReadStatus(lc.root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ledger status: %v\n", err)
 		return 13
 	}
-	defer func() { _ = led.Close(context.Background()) }()
-	st := led.Status()
 	if *asJSON {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
@@ -222,29 +215,29 @@ func cmdLedgerVerify(args []string) int {
 	if code != 0 {
 		return code
 	}
-	led, held, err := openLedger(lc)
-	if held {
-		// The walk itself opens no lock, but reaching it needs a *Ledger, and
-		// there is no read-only entry point for it in this build — the open is
-		// refused by the live writer's LOCK. The §2.4 "unreadable" row is the
-		// honest answer: the files are there, the CLI cannot walk them now.
-		printWriterHeld(os.Stdout, "ledger verify", lc, *asJSON)
-		return 2
+	// Check if a writer holds the LOCK. The read-only path walks files
+	// without locking, but when a writer is live the §2.4 "unreadable" row
+	// is the correct answer — the lock file exists and the CLI cannot
+	// guarantee the files are consistent while the daemon writes.
+	if lc.root != "" {
+		_, held := ledger.CheckWriterHeld(lc.root)
+		if held {
+			if *asJSON {
+				_, _ = fmt.Fprintf(os.Stdout, "{\"detail\":\"another writer holds %s\"}\n", filepath.Join(lc.root, "LOCK"))
+			} else {
+				_, _ = fmt.Fprintf(os.Stdout, "ledger verify: another writer holds %s (the daemon is live; run this verb after it stops or on its host)\n", filepath.Join(lc.root, "LOCK"))
+			}
+			return 2
+		}
 	}
+	// SPEC-01 §2.4: verify is read-only — opens no lock. Use the read-only
+	// path that walks files directly.
+	rep, err := ledger.ReadVerify(lc.root, *day)
 	if err != nil {
-		// A ledger dir that fails its §3.9 mode/validation gate (012) is
-		// exactly the "unreadable" row; anything else is this CLI's failure to
-		// act (13).
 		fmt.Fprintf(os.Stderr, "ledger verify: %v\n", err)
 		if ledger.CodeOf(err) == types.CodeLedger012 {
 			return 2
 		}
-		return 13
-	}
-	defer func() { _ = led.Close(context.Background()) }()
-	rep, err := led.Verify(context.Background(), *day)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ledger verify: %v\n", err)
 		return 13
 	}
 	if *asJSON {

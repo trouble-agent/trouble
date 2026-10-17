@@ -1,0 +1,43 @@
+TRBL-104 Worker Brief
+=====================
+
+Problem: `trouble ledger status` and `trouble ledger verify` are NOT read-only.
+They take LOCK_EX, write lifecycle{op:boot} records, rewrite .HEAD and .idx, and report
+the CLI process as writer_pid. This contradicts SPEC-01 §2.4 which states
+"status/verify are read-only; verify's walk opens no lock."
+
+Root cause (internal/ledger):
+- ledger.Open() always calls acquireLock() at line 341 and writes boot records (lines 366-382)
+- cmdLedgerStatus/cmdLedgerVerify call openLedgerForReading() which passes Writer field to ledger.Open()
+- This is wrong: read-only verbs should NOT open the writer ledger
+
+Fix approach (in-memory read-only path):
+1. Create a new function `ReadStatus(root string, opts ReadOptions) (types.LedgerStatus, error)` 
+   that reads day.jsonl files directly (no lock, no writer) and computes LedgerStatus
+2. Create `ReadVerify(root string, opts ReadOptions) (*VerifyResult, error)` similarly
+3. Refactor cmdLedgerStatus/cmdLedgerVerify to use these read-only paths
+4. `openLedgerForReading()` keeps existing writer-path behavior for compact (which IS write)
+5. `printWriterHeld()` stays as the path when LOCK is held by another process
+
+Key structs involved:
+- types.LedgerStatus has: Records, FirstSeq, LastSeq, Writer, Index(Health/Degraded), QueueDepth, FsyncTotal, etc.
+- ReadStatus only needs file reads + index scan (walk the day file, count records, check seq monotonicity)
+
+Files to modify:
+- internal/ledger/ledger.go — add ReadStatus(), add ReadVerify() or wire into existing walk
+- cmd/trouble/ledger.go — refactor cmdLedgerStatus/cmdLedgerVerify to use read-only paths
+- cmd/trouble/ledger_cli_test.go — add tests verifying zero writes during status/verify
+
+Acceptance Criteria for Worker:
+1. `troubled ledger status` on a LIVE daemon does NOT take LOCK_EX (strace shows no flock)
+2. `troubled ledger status` does NOT append lifecycle{op:boot} records
+3. `troubled ledger status` does NOT rewrite .HEAD or .idx
+4. writer_pid in status output = LOCK-file PID (or empty if no LOCK held), NOT the CLI PID
+5. `troubled ledger verify` is also read-only (no lock, no writes)
+6. All existing tests pass (-count=1)
+7. `troubled --help` still shows "status/verify are read-only" in ledger help
+8. go build ./... go vet ./... gofmt -d reports no changes
+
+SPEC: SPEC-01 section 2.4 says status/verify are read-only.
+
+Trace marker: ch:trace TRBL-104 SPEC-01

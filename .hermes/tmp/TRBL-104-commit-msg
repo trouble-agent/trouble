@@ -1,0 +1,26 @@
+fix: TRBL-104 ledger status/verify now truly read-only
+
+SPEC-01 §2.4 mandates that `status` and `verify` are read-only operations
+that must not take LOCK_EX, write lifecycle records, rewrite .HEAD/.idx,
+or report the caller as writer_pid. Previously these CLI verbs called
+`openLedgerForReading()` which passed a `Writer` to `ledger.Open()`, causing
+it to take an exclusive lock, write boot lifecycle records, and report itself
+as the writer.
+
+Changes:
+- Add `ReadStatus(root)` — walks day files without locking, reads LOCK file
+  (no flock) for the actual writer PID, returns LedgerStatus with correct
+  writer identity
+- Add `ReadVerify(root, day)` — walks day files without locking, checks seq
+  monotonicity, validates torn/corrupt lines, verifies payload hashes
+- Add `CheckWriterHeld(root)` — reads LOCK file (no flock) to check if a
+  writer exists; used to produce "unreadable" row when daemon is live
+- Refactor `cmdLedgerStatus` and `cmdLedgerVerify` to use read-only paths
+- `cmdLedgerCompact` remains unchanged (it IS a write operation)
+
+Before: `troubled ledger status --json` on a live daemon would take LOCK_EX,
+append lifecycle{op:boot}, and report writer_pid=the CLI process PID.
+After: status reads LOCK file without flock, reports the real writer PID,
+writes nothing to the ledger.
+
+Addresses TRBL-104.

@@ -535,14 +535,15 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 			}
 			prev = rec.Seq
 			if h, ok := rec.Payload["payload_sha256"].(string); ok && h != "" {
-				cp := map[string]any{}
-				for k, v := range rec.Payload {
-					if k == "payload_sha256" {
-						continue
-					}
-					cp[k] = v
-				}
-				if payloadHash(cp) != h {
+				got, herr := verifyPayloadHashLine(line)
+				switch {
+				case herr != nil:
+					// The line parsed (decodeRecord succeeded) but its payload
+					// could not be re-read for the hash: never silently skipped.
+					rep.PayloadHashMismatches++
+					rep.Errors = append(rep.Errors,
+						fmt.Sprintf("seq %d: payload hash unverifiable: %v", rec.Seq, herr))
+				case got != h:
 					rep.PayloadHashMismatches++
 					rep.Errors = append(rep.Errors, fmt.Sprintf("seq %d: payload hash mismatch", rec.Seq))
 				}
@@ -593,6 +594,60 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 	rep.OK = rep.TornLines == 0 && rep.CorruptLines == 0 && len(rep.SeqHoles) == 0 &&
 		rep.PayloadHashMismatches == 0 && rep.TombstoneMismatches == 0 && len(rep.Errors) == 0
 	return rep, nil
+}
+
+// verifyPayloadHashLine recomputes one stored line's payload hash the way the
+// write boundary computed it when it stamped payload_sha256 (SPEC-01 §3.1:
+// one JSON object per line, struct field order, `hex(sha256)[:16]` over the
+// canonical payload JSON).
+//
+// It hashes the payload BYTES AS STORED, minus the reserved payload_sha256
+// member. That is the only form the two sides can agree on: the writer stamps
+// the hash over the payload its emitter built — a `map[string]any` whose nested
+// values may be typed Go structs, so the bytes carry struct FIELD order
+// (`{"key":…,"value":…,"source":…,"source_ref":…,"redacted":…}` for a config
+// snapshot's `values`). A verifier that decoded the line into `map[string]any`
+// and re-marshaled it got Go's map ordering instead (alphabetical:
+// `{"key":…,"redacted":…,"source":…}`) and so reported a deterministic mismatch
+// for every struct-ordered record — the audit spine's config snapshots and
+// lifecycle records (TRBL-106: 1000 re-marshals of one such stored payload
+// produced zero byte-identical forms). Nested member values are kept verbatim
+// here, so struct order survives; only the top-level map order is the encoder's,
+// which is the order the stamped hash was computed over.
+func verifyPayloadHashLine(line []byte) (string, error) {
+	var probe struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(line, &probe); err != nil {
+		return "", err
+	}
+	body, err := payloadBytesWithoutHash(probe.Payload)
+	if err != nil {
+		return "", err
+	}
+	return types.DigestShort(types.SigDigest(body)), nil
+}
+
+// payloadBytesWithoutHash returns a stored payload object minus the reserved
+// payload_sha256 envelope member, in the write boundary's canonical byte form:
+// top-level members in the encoder's (sorted) key order, every member value
+// byte-for-byte as stored — so a struct-ordered nested value stays
+// struct-ordered. A nested member that happens to be named payload_sha256 is
+// not the reserved envelope key and is preserved.
+//
+// It is the read-side counterpart of payloadHash (writer.go): for a line the
+// writer produced, payloadBytesWithoutHash(stored payload) is byte-identical to
+// canonicalPayloadJSON(payload) as hashed before the sha member was stamped in.
+func payloadBytesWithoutHash(payload json.RawMessage) ([]byte, error) {
+	if len(payload) == 0 {
+		return []byte("{}"), nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &members); err != nil {
+		return nil, err
+	}
+	delete(members, "payload_sha256")
+	return marshalJSON(members)
 }
 
 func numOf(v any) float64 {

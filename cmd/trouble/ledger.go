@@ -58,10 +58,10 @@ const ledgerUsage = `usage:
   trouble ledger verify [--day YYYY-MM-DD] [--json]
   trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]
 
-SPEC-01 §2.4. status/verify are read-only; verify's walk opens no lock.
+SPEC-01 §2.4. status/verify are read-only and open no lock; they walk files directly even when a writer is live.
 compact rewrites one day into a new generation and is never in place — pass
 --dry-run to print the CompactionResult (byte deltas, ToFile) and write nothing.
-All three refuse to open a ledger a live writer holds (TROUBLE-LEDGER-005).
+compact must not race a live writer and refuses when LOCK is held.
 `
 
 // ledgerContext is what every ledger verb resolves before it acts: the resolved
@@ -152,21 +152,7 @@ func cmdLedgerStatus(args []string) int {
 	}
 	// SPEC-01 §2.4: status is read-only. Use the read-only path that opens
 	// no locks, writes nothing, and reports the actual LOCK-file PID (not self).
-	// If a writer holds LOCK, the daemon's counters are unreadable, so produce
-	// the degraded row per §2.4.
-	pid, held := ledger.CheckWriterHeld(lc.root)
-	if held {
-		// Writer holds LOCK — the CLI cannot read queue/fsync counters that
-		// only the writer tracks. Produce the degraded row per §2.4.
-		_ = pid // only used to satisfy the return value of CheckWriterHeld
-		if *asJSON {
-			_, _ = fmt.Fprintf(os.Stdout, "{\"degraded\":true,\"degraded_reason\":\"another writer holds %s\"}\n", filepath.Join(lc.root, "LOCK"))
-			return 1
-		} else {
-			_, _ = fmt.Fprintf(os.Stdout, "ledger status: another writer holds %s (the daemon is live)\n", filepath.Join(lc.root, "LOCK"))
-			return 1
-		}
-	}
+	// ReadStatus walks files directly — it never takes the writer seat.
 	st, err := ledger.ReadStatus(lc.root)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ledger status: %v\n", err)
@@ -230,23 +216,8 @@ func cmdLedgerVerify(args []string) int {
 	if code != 0 {
 		return code
 	}
-	// Check if a writer holds the LOCK. The read-only path walks files
-	// without locking, but when a writer is live the §2.4 "unreadable" row
-	// is the correct answer — the lock file exists and the CLI cannot
-	// guarantee the files are consistent while the daemon writes.
-	if lc.root != "" {
-		_, held := ledger.CheckWriterHeld(lc.root)
-		if held {
-			if *asJSON {
-				_, _ = fmt.Fprintf(os.Stdout, "{\"detail\":\"another writer holds %s\"}\n", filepath.Join(lc.root, "LOCK"))
-			} else {
-				_, _ = fmt.Fprintf(os.Stdout, "ledger verify: another writer holds %s (the daemon is live; run this verb after it stops or on its host)\n", filepath.Join(lc.root, "LOCK"))
-			}
-			return 2
-		}
-	}
 	// SPEC-01 §2.4: verify is read-only — opens no lock. Use the read-only
-	// path that walks files directly.
+	// path that walks files directly. This never takes the writer seat.
 	rep, err := ledger.ReadVerify(lc.root, *day)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ledger verify: %v\n", err)

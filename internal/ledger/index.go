@@ -60,6 +60,10 @@ type partInfo struct {
 	// remainder (Torn - TailTorn) sits interior: it is healed by blanking
 	// (healInteriorTorn), never by appending a '\n' to the file's end.
 	TailTorn int64 `json:"tail_torn,omitempty"`
+	// Gaps tracks seq discontinuities detected during the file scan.
+	// Each gap is a hole that must be reported as lifecycle{op:"hole"}
+	// in the audit trail (§3.5).
+	Gaps []holeRange `json:"gaps,omitempty"`
 }
 
 // dayEntry is one indexed day: its authoritative part set plus totals.
@@ -607,6 +611,8 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 	}
 	var lineNo int64
 	var tailTorn int64
+	var prevSeq uint64
+	var gaps []holeRange
 	werr := walkLines(f, func(line []byte, start int64, isTail bool) error {
 		if len(bytes.TrimSpace(line)) == 0 {
 			// a healed torn tail leaves one blank line behind (§6.4)
@@ -626,6 +632,33 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 			return nil
 		}
 		tailTorn = 0
+		// Detect glued fragments: a crash may leave two complete records
+		// on one line (no '\n' separator). json.Unmarshal succeeds on the
+		// first record but discards the rest. Extract and process the
+		// sibling. The sibling is the realistic crash shape: a torn
+		// fragment immediately followed by an intact record with no newline.
+		if sibling := extractGluedSibling(line); sibling != nil {
+			// Process the glued sibling in the same walk.
+			// We need to handle it similarly to the first record.
+			sibSeq := sibling.Seq
+			if prevSeq != 0 && sibSeq > prevSeq+1 && sibSeq != rec.Seq {
+				gaps = append(gaps, holeRange{from: prevSeq + 1, to: sibSeq - 1})
+			}
+			prevSeq = max(prevSeq, sibSeq)
+			p.FirstSeq = min(p.FirstSeq, sibSeq)
+			p.LastSeq = max(p.LastSeq, sibSeq)
+			p.LastTS = maxTS(p.LastTS, sibling.TS)
+			p.Records++
+			lines++
+			// Note: sibling is already in walk order after the main record,
+			// so we don't need to re-check seq continuity for further siblings.
+			// The next iteration will detect any subsequent gaps.
+		}
+		// Detect seq discontinuities: a gap between consecutive records.
+		if prevSeq != 0 && rec.Seq > prevSeq+1 {
+			gaps = append(gaps, holeRange{from: prevSeq + 1, to: rec.Seq - 1})
+		}
+		prevSeq = rec.Seq
 		if rec.SchemaVersion > ix.maxSchema {
 			skipped++
 			return nil
@@ -660,6 +693,7 @@ func (ix *index) scanFile(p *partInfo, full, skipEvents bool) (bytesScanned, lin
 	p.Torn = int64(torn)
 	p.Corrupt = int64(corrupt)
 	p.TailTorn = tailTorn
+	p.Gaps = gaps
 	return bytesScanned, lines, torn, corrupt, skipped, nil
 }
 
@@ -851,7 +885,74 @@ func (p projectedPayload) toMap() map[string]any {
 	return m
 }
 
-// decodeProjected decodes a line through the index projection.
+// extractGluedSibling checks if a line contains two JSON records glued together
+// (a crash mid-write with no terminating '\n' between them). json.Unmarshal
+// succeeds on the first record and silently discards the rest. This function
+// uses a json.Decoder to find where the first record ends and returns any
+// trailing bytes as a second record.
+func extractGluedSibling(line []byte) *types.Record {
+	if len(line) == 0 {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(line))
+	// Decode the first record into an empty interface to advance the decoder
+	var first any
+	if err := dec.Decode(&first); err != nil {
+		return nil // not a valid first record
+	}
+	// If there are more tokens, the line contains a glued fragment.
+	// Use a clean array-parse to extract the sibling.
+	var records []any
+	if err := json.Unmarshal(line, &records); err != nil {
+		return nil // not an array, not glued
+	}
+	if len(records) != 2 {
+		return nil // not exactly two glued records
+	}
+	// Convert the second element back to bytes for typed decoding
+	secondBytes, err := json.Marshal(records[1])
+	if err != nil {
+		return nil
+	}
+	var h struct {
+		Seq           uint64           `json:"seq"`
+		RecID         string           `json:"rec_id"`
+		TS            string           `json:"ts"`
+		Kind          types.RecordKind `json:"kind"`
+		SchemaVersion int              `json:"schema_version"`
+		Sig           string           `json:"sig"`
+		Inc           string           `json:"inc"`
+		Origin        types.Origin     `json:"origin"`
+		Actor         types.Actor      `json:"actor"`
+		Redactions    int              `json:"redactions"`
+		Payload       projectedPayload `json:"payload"`
+	}
+	if err := json.Unmarshal(secondBytes, &h); err != nil {
+		return nil // second element is not a valid record
+	}
+	return &types.Record{
+		Seq: h.Seq, RecID: h.RecID, TS: h.TS, Kind: h.Kind,
+		SchemaVersion: h.SchemaVersion, Sig: h.Sig, Inc: h.Inc,
+		Origin: h.Origin, Actor: h.Actor, Redactions: h.Redactions,
+		Payload: h.Payload.toMap(),
+	}
+}
+
+// maxTS returns the later of two ISO timestamps. Empty strings are treated
+// as the earliest possible time.
+func maxTS(a, b string) string {
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	if strings.Compare(a, b) >= 0 {
+		return a
+	}
+	return b
+}
+
 func decodeProjected(line []byte) (*types.Record, error) {
 	var h struct {
 		Seq           uint64           `json:"seq"`

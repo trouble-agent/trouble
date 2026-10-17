@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -158,7 +159,7 @@ func TestCanonicalDeployQuickstartContract(t *testing.T) {
 		"config_path = \"/home/you/.config/trouble/config.toml\"",
 		"environment_file = \"/home/you/.config/trouble/trouble.env\"",
 		"advertised_host = \"trouble.your-domain.example\"",
-		"public_key = \"replace-with-a-new-32-lowercase-hex-character-key\"",
+		"public_key = \"0123456789abcdef0123456789abcdef\"",
 		"ingest.bind = \"127.0.0.1:7643\"",
 		"dashboard.bind = \"127.0.0.1:7644\"",
 		"make bin",
@@ -183,6 +184,51 @@ func TestCanonicalDeployQuickstartContract(t *testing.T) {
 	} {
 		if strings.Contains(deploy, stale) || strings.Contains(readme, stale) {
 			t.Errorf("README/deploy quickstart retains stale first-run command %q", stale)
+		}
+	}
+}
+
+// quickstartPublicKeyAssignment matches a TOML-level public_key assignment as
+// shown in the quickstart snippet. It is ANCHORED to the start of a line so the
+// shell line that reads the key back out of the config — which also spells
+// `public_key *= *"..."` inside a grep pattern — is not mistaken for a
+// declaration.
+var quickstartPublicKeyAssignment = regexp.MustCompile(`(?m)^[[:space:]]*public_key[[:space:]]*=[[:space:]]*"([^"]*)"`)
+
+// quickstartKeysShaped32Hex matches a SPEC-12 §3.1a project key: exactly 32
+// lowercase hexadecimal characters, nothing else.
+var quickstartKeysShaped32Hex = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+// TestDeployQuickstartKeyPlaceholderExistsInShippedExample is the TRBL-109
+// gate. The quickstart teaches operators to replace the project key BY VALUE,
+// so every public_key the quickstart shows must be a string the shipped
+// examples/config.toml actually carries — otherwise "replacing the placeholder"
+// is a no-op, the daemon boots with whatever the file ships, and the first event
+// 401s `unknown_key` (the live failure on a virgin bunker install: first event
+// 401, key patched to the value read from the config, 200 in 1s).
+//
+// It also pins the SHAPE, because the pre-TRBL-109 text taught a placeholder
+// ("replace-with-a-new-32-lowercase-hex-character-key") that is not 32 lowercase
+// hex at all and so could never be a bootable key: a doc that names an
+// impossible value is the same class of defect as a doc that names a missing one.
+func TestDeployQuickstartKeyPlaceholderExistsInShippedExample(t *testing.T) {
+	root := repositoryRootFromThisTest(t)
+	deploy := readRepositoryDocument(t, root, filepath.Join("deploy", "README.md"))
+	example := readRepositoryDocument(t, root, filepath.Join("examples", "config.toml"))
+
+	assignments := quickstartPublicKeyAssignment.FindAllStringSubmatch(deploy, -1)
+	if len(assignments) == 0 {
+		t.Fatalf("deploy/README.md shows no public_key assignment: the quickstart must show the project key it asks the operator to replace")
+	}
+
+	for _, m := range assignments {
+		key := m[1]
+		if !quickstartKeysShaped32Hex.MatchString(key) {
+			t.Errorf("deploy/README.md quickstart names public_key %q, which is not exactly 32 lowercase hex (SPEC-12 §3.1a): a boot would refuse it with TROUBLE-LIFECYCLE-001 and no listener would open", key)
+			continue
+		}
+		if !strings.Contains(example, `public_key = "`+key+`"`) {
+			t.Errorf("deploy/README.md quickstart tells the operator to replace public_key %q, but examples/config.toml does not carry that value: the edit is a no-op, the daemon boots with the shipped key, and the first event 401s unknown_key (TRBL-109)", key)
 		}
 	}
 }

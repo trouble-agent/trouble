@@ -68,8 +68,16 @@ advertised_host = "trouble.your-domain.example"
 
 [[projects]]
 id = "1"
-public_key = "replace-with-a-new-32-lowercase-hex-character-key"
+public_key = "0123456789abcdef0123456789abcdef"
 ```
+
+The `public_key` line above is the placeholder `examples/config.toml` ships —
+exactly that 32-lowercase-hex string, no other. It is valid in shape so the
+copied file boots, and useless as a credential. Replace it with your own 32
+lowercase hex characters (any other length or an uppercase/dash spelling is
+refused at boot: `public_key ... must be exactly 32 lowercase hex`, SPEC-12
+§3.1a), or leave it for this loopback proof — the first-event command below
+reads the key back out of the file, so the two cannot disagree.
 
 Keep `ingest.bind = "127.0.0.1:7643"`, `dashboard.bind = "127.0.0.1:7644"`,
 and `ingest.auth.loopback_dsn = true` for this local first run. Do not use an IP
@@ -131,14 +139,17 @@ explicit `GIT_SHA` reports `[stamped]` and installs without `--force`. The
 covered in `docs/operations.md` §19.
 
 In a second terminal, verify both listener contracts and send the first event.
-Replace `PUBLIC_KEY` with the 32-character lowercase hexadecimal `public_key`
-you placed in the config; this is the documented loopback `sentry_key` auth form,
-not a dashboard token.
+`PUBLIC_KEY` is read straight back out of the config file you just edited — the
+shipped placeholder unless you replaced it — so the key you post with is the key
+the daemon loaded, never a retyped copy of it; this is the documented loopback
+`sentry_key` auth form, not a dashboard token.
 
 ```sh
 curl -fsS http://127.0.0.1:7644/health.json | jq '{status, ledger_last_seq, subsystems}'
 
-PUBLIC_KEY='replace-with-the-project-public-key'
+CONFIG_PATH="$HOME/.config/trouble/config.toml"
+PUBLIC_KEY="$(grep -oE 'public_key *= *"[0-9a-f]{32}"' "$CONFIG_PATH" | grep -oE '[0-9a-f]{32}')"
+test -n "$PUBLIC_KEY" || { echo "no public_key found in $CONFIG_PATH — finish step 1 first"; exit 1; }
 curl -fsS -X POST "http://127.0.0.1:7643/api/1/event/?sentry_key=$PUBLIC_KEY" \
   -H 'Content-Type: application/json' \
   --data '{"message":"first trouble event","level":"error","release":"0.1.0"}'

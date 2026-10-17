@@ -133,9 +133,9 @@ func newWriter(l *Ledger) *writer {
 	// rule) is registered exactly like a failed batch's: beforeBatch drains the
 	// queue into one lifecycle{op:"hole", from, to} record with the next
 	// successful batch (§3.5: every hole appears in the audit trail).
-	if l.recovered.recoverHole != nil {
-		w.holes = append(w.holes, *l.recovered.recoverHole)
-	}
+	// RecoveredState.recoverHoles now carries gaps from both the HEAD-max rule
+	// AND internal seq jumps detected during the scan.
+	w.holes = append(w.holes, l.recovered.recoverHoles...)
 	return w
 }
 

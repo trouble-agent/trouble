@@ -24,6 +24,15 @@ const sidecarSuffix = ".idx"
 // sidecarState records why a sidecar had to be rebuilt. The sidecar is derived
 // state: its loss is a latency event, never a correctness event (§3.7a, §5), so
 // no state here is an error — it is accounting.
+//
+// CONTRACT: the sidecar's Bytes and Sha256 fields are validated against the file
+// on load (sidecarMatches). However, the internal metadata (Records, FirstSeq,
+// LastSeq, MinTS, MaxTS) is ADVISORY ONLY — it reflects the file's state when
+// the sidecar was written, and may be stale if the file was modified afterward
+// (e.g., by healing) in a way that preserves size/hash. Any consumer that needs
+// authoritative record counts or sequence ranges MUST re-derive from the file
+// itself, not trust the sidecar's metadata. The sidecar is an accelerator for
+// byte-offset lookups, not a source of truth for record-level metadata.
 type sidecarState string
 
 const (

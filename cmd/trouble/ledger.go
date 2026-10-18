@@ -78,7 +78,18 @@ type ledgerContext struct {
 // check cannot bless is a refusable condition here too: every ledger verb names
 // files under it, and guessing a different root would report on a ledger the
 // daemon does not own.
+//
+// TRBL-111: if --config was given explicitly but the file does not exist, refuse
+// instead of silently falling back to defaults. A reporting verb that cannot
+// find its config must not open the default state root and write boot notes
+// into a ledger the operator did not point it at.
 func resolveLedgerContext(args []string) (ledgerContext, int) {
+	if cfgPathOverride != "" {
+		if _, err := os.Stat(cfgPathOverride); err != nil {
+			fmt.Fprintf(os.Stderr, "ledger: config not found: %s\n", cfgPathOverride)
+			return ledgerContext{}, 13
+		}
+	}
 	res, code := resolve(args)
 	if code != 0 {
 		return ledgerContext{}, code

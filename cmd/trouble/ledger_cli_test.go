@@ -24,8 +24,10 @@ import (
 //     every state root lives under ~/.local/state/trouble-test.
 //   - A live writer is simulated by holding the ledger open IN THIS TEST
 //     PROCESS (ledger.Open's flock on ledger/LOCK — the same §3.4 rule-6 guard
-//     the daemon takes), then running the built binary, whose open must be
-//     refused with TROUBLE-LEDGER-005.
+//     the daemon takes). Only a verb that must take the writer seat (compact)
+//     is refused with TROUBLE-LEDGER-005; status and verify are read-only and
+//     open no lock (SPEC-01 §2.4, docs/operations.md §2), so they must keep
+//     answering while that writer is live.
 func ledgerTestRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp(troubleTestBase(t), "t100-")
@@ -69,6 +71,40 @@ func writeDayFixture(t *testing.T, led, day string, n int) {
 			"rec_id":         fmt.Sprintf("ev_%024d", i),
 			"seq":            i,
 			"ts":             fmt.Sprintf("%sT00:00:%02d.000Z", day, i),
+			"kind":           "event",
+			"schema_version": ledger.SchemaVersionV1,
+			"sig":            "psi:sha256v1:" + strings.Repeat("0", 40),
+			"origin":         map[string]any{"host_id": "7f3a91c2d4e5b607", "source": "psi"},
+			"actor":          map[string]any{"kind": "daemon", "id": "troubled", "version": "0.1.0"},
+			"payload": map[string]any{
+				"op":        "sample",
+				"merge_key": ledgerMergeKey(),
+				"subject":   "x",
+			},
+		}
+		b, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal fixture: %v", err)
+		}
+		buf.Write(b)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(filepath.Join(led, day+".jsonl"), []byte(buf.String()), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+}
+
+// writeDayFixtureSeqs writes one closed-day part file carrying exactly the given
+// seqs — so a fixture can hold a real seq hole — in the wire shape decodeRecord
+// reads (same record shape as writeDayFixture).
+func writeDayFixtureSeqs(t *testing.T, led, day string, seqs ...int) {
+	t.Helper()
+	var buf strings.Builder
+	for _, seq := range seqs {
+		rec := map[string]any{
+			"rec_id":         fmt.Sprintf("ev_%024d", seq),
+			"seq":            seq,
+			"ts":             fmt.Sprintf("%sT00:00:%02d.000Z", day, seq),
 			"kind":           "event",
 			"schema_version": ledger.SchemaVersionV1,
 			"sig":            "psi:sha256v1:" + strings.Repeat("0", 40),
@@ -176,10 +212,13 @@ func TestLedgerVerbsRegisteredAndUsageSpec01Section24(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // SPEC-01 §2.4 row 1 — status: 0 ok (--json is a LedgerStatus with the §3.10
-// field names), 1 degraded when a live writer holds LOCK.
+// field names), 1 degraded when the INDEX is degraded (docs/operations.md §2's
+// daily checks: `index.degraded=true` with a reason). Status opens no lock, so
+// a live writer never turns it into a refusal: it answers with real numbers and
+// the REAL writer pid read from ledger/LOCK, never its own pid (TRBL-104).
 // ---------------------------------------------------------------------------
 
-func TestLedgerStatusOkAndWriterLiveDegradedSpec01Section24(t *testing.T) {
+func TestLedgerStatusOkDegradedAndLiveWriterSpec01Section24(t *testing.T) {
 	bin := buildTrouble(t)
 	base := ledgerTestRoot(t)
 	cfg, stateRoot := writeLedgerConfig(t, base)
@@ -209,34 +248,59 @@ func TestLedgerStatusOkAndWriterLiveDegradedSpec01Section24(t *testing.T) {
 		t.Fatalf("disk_budget_bytes = %d, want the §2.5 default %d", st.DiskBudgetBytes, ledger.DefaultDiskBudgetBytes)
 	}
 
-	// Degraded row: a live writer (this process holds the seat) must produce
-	// exit 1 with degraded:true — never a zero-filled healthy read.
+	// Live-writer row: this process holds the writer seat. status opens no
+	// lock (SPEC-01 §2.4), so it must still answer — exit 0, REAL numbers, and
+	// writer_pid equal to the actual holder's pid, never the CLI's own.
 	holdLedgerOpen(t, led)
-	code, out, _ = runCLI(t, bin, cfg, "ledger", "status", "--json")
-	if code != 1 {
-		t.Fatalf("status with live writer exit = %d, want 1 (SPEC-01 §2.4 degraded)", code)
+	code, out, errOut = runCLI(t, bin, cfg, "ledger", "status", "--json")
+	if code != 0 {
+		t.Fatalf("status with a live writer exit = %d, want 0 (SPEC-01 §2.4: status opens no lock)\nstdout=%s\nstderr=%s", code, out, errOut)
 	}
-	var dg struct {
-		Degraded       bool   `json:"degraded"`
-		DegradedReason string `json:"degraded_reason"`
+	var live types.LedgerStatus
+	if err := json.Unmarshal([]byte(out), &live); err != nil {
+		t.Fatalf("writer-live stanza is not LedgerStatus JSON: %v\n%s", err, out)
 	}
-	if err := json.Unmarshal([]byte(out), &dg); err != nil {
-		t.Fatalf("writer-live stanza is not JSON: %v\n%s", err, out)
+	if live.WriterPID != os.Getpid() {
+		t.Errorf("writer_pid = %d, want the REAL holder pid %d (the CLI must not report itself)", live.WriterPID, os.Getpid())
 	}
-	if !dg.Degraded || !strings.Contains(dg.DegradedReason, "another writer holds") {
-		t.Fatalf("writer-live stanza must name the LOCK: %+v", dg)
+	if live.LastSeq < 2 {
+		t.Errorf("writer-live status must report the real watermark: last_seq=%d, want >= 2", live.LastSeq)
 	}
-	// The text form names the degradation too.
+	// The text form answers the same way, naming the real writer pid.
 	tCode, textOut, tErr := runCLI(t, bin, cfg, "ledger", "status")
-	if tCode != 1 || !strings.Contains(textOut, "another writer holds") {
-		t.Fatalf("text status with live writer = %d, must name the held LOCK: %s (stderr: %s)", tCode, textOut, tErr)
+	if tCode != 0 || !strings.Contains(textOut, fmt.Sprintf("writer: pid=%d", os.Getpid())) {
+		t.Fatalf("text status with a live writer = %d, must name writer pid %d: %s (stderr: %s)",
+			tCode, os.Getpid(), textOut, tErr)
+	}
+
+	// Degraded row: §2.4's exit 1 is the INDEX-degraded condition, not a live
+	// writer. A fresh root whose day file carries a real seq hole (1 then 3)
+	// makes ReadStatus report index.degraded / "seq_gaps_detected".
+	base2 := ledgerTestRoot(t)
+	cfg2, stateRoot2 := writeLedgerConfig(t, base2)
+	led2 := filepath.Join(stateRoot2, "ledger")
+	if err := os.MkdirAll(led2, 0o700); err != nil {
+		t.Fatalf("ledger root: %v", err)
+	}
+	writeDayFixtureSeqs(t, led2, "2026-06-05", 1, 3)
+	code, out, _ = runCLI(t, bin, cfg2, "ledger", "status", "--json")
+	if code != 1 {
+		t.Fatalf("status on a holed ledger exit = %d, want 1 (SPEC-01 §2.4 degraded)\nstdout=%s", code, out)
+	}
+	var dg types.LedgerStatus
+	if err := json.Unmarshal([]byte(out), &dg); err != nil {
+		t.Fatalf("degraded stanza is not LedgerStatus JSON: %v\n%s", err, out)
+	}
+	if !dg.Index.Degraded || dg.Index.DegradedReason != "seq_gaps_detected" {
+		t.Fatalf("degraded stanza must report index.degraded=true reason=seq_gaps_detected: %+v", dg.Index)
 	}
 }
 
 // ---------------------------------------------------------------------------
 // SPEC-01 §2.4 row 2 — verify: 0 ok, 1 findings (a corrupt interior line is a
-// finding; the report names the file), 2 unreadable when a live writer holds
-// LOCK (the walk opens no lock, but reaching it needs the writer seat here).
+// finding; the report names the file), 2 unreadable when the ledger ITSELF is
+// unreadable (TROUBLE-LEDGER-012). The walk opens no lock, so a LIVE WRITER is
+// not an unreadable ledger: verify still walks and reports (docs §2).
 // ---------------------------------------------------------------------------
 
 func TestLedgerVerifyExitCodesSpec01Section24(t *testing.T) {
@@ -287,15 +351,34 @@ func TestLedgerVerifyExitCodesSpec01Section24(t *testing.T) {
 		t.Fatalf("findings report must name the file: %s", out)
 	}
 
-	// Unreadable row: a live writer makes the day unwalkable from a second
-	// process — exit 2 with the LOCK named.
+	// Live-writer row: SPEC-01 §2.4 defines verify as a read-only walk that
+	// opens **no** lock, and docs/operations.md §2 promises it "is always safe
+	// to run against a live ledger". A writer holding LOCK must therefore NOT
+	// become a refusal: the walk still runs, and the seq hole in the
+	// 2026-06-02 fixture is still the honest answer (findings, exit 1).
 	holdLedgerOpen(t, led)
-	code, out, _ = runCLI(t, bin, cfg, "ledger", "verify", "--json")
-	if code != 2 {
-		t.Fatalf("verify with live writer exit = %d, want 2 (SPEC-01 §2.4 unreadable)\nstdout=%s", code, out)
+	code, out, liveErr := runCLI(t, bin, cfg, "ledger", "verify", "--json")
+	if strings.Contains(out, "another writer holds") || strings.Contains(liveErr, "another writer holds") {
+		t.Fatalf("verify refused on LOCK; §2.4 says the walk opens no lock: stdout=%s stderr=%s", out, liveErr)
 	}
-	if !strings.Contains(out, "another writer holds") {
-		t.Fatalf("unreadable stanza must name the LOCK: %s", out)
+	if code == 2 {
+		t.Fatalf("verify with a live writer = 2 (unreadable); a live writer is not an unreadable ledger. stderr=%s", liveErr)
+	}
+	if code != 1 {
+		t.Fatalf("verify with a live writer exit = %d, want 1 (the 2026-06-02 hole is still a finding)\nstdout=%s", code, out)
+	}
+
+	// Unreadable row: §2.4's exit 2 is a ledger the walk genuinely cannot read
+	// (TROUBLE-LEDGER-012), never a live writer. A fresh root whose ledger/
+	// directory does not exist is the deterministic form.
+	base2 := ledgerTestRoot(t)
+	cfg2, _ := writeLedgerConfig(t, base2)
+	code, out, unreadErr := runCLI(t, bin, cfg2, "ledger", "verify")
+	if code != 2 {
+		t.Fatalf("verify on an unreadable ledger exit = %d, want 2 (SPEC-01 §2.4 unreadable)\nstdout=%s\nstderr=%s", code, out, unreadErr)
+	}
+	if !strings.Contains(unreadErr, "TROUBLE-LEDGER-012") {
+		t.Fatalf("unreadable stanza must name TROUBLE-LEDGER-012: %s", unreadErr)
 	}
 }
 

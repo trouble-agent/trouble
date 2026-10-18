@@ -298,8 +298,23 @@ func TestInteriorCorruption(t *testing.T) {
 	if st.CorruptLines != 1 {
 		t.Errorf("CorruptLines = %d, want 1", st.CorruptLines)
 	}
-	if got := l.IndexStats().Entries; got != 5 {
-		t.Errorf("Entries = %d, want 5: records after the garbage still index", got)
+	// Entries counts every record the scan indexed: the fixture's four
+	// well-formed records (seqs 1, 2, 4, 5), plus the two records recovery
+	// writes into the trail — one lifecycle{op:"hole",from:3,to:3} for the seq
+	// the unparsable line left behind (docs/operations.md §3: the next
+	// successful batch writes the hole into the trail) and one
+	// lifecycle{op:"boot"}. The unparsable line itself is not a record.
+	if got := l.IndexStats().Entries; got != 6 {
+		t.Errorf("Entries = %d, want 6: 4 fixture records + the §3 hole record + the boot record", got)
+	}
+	// The hole must be auditable from the trail alone, not only by running
+	// verify: exactly one lifecycle{op:"hole"} record (ops.md §3's hole leg).
+	trail, rerr := os.ReadFile(filepath.Join(root, name))
+	if rerr != nil {
+		t.Fatalf("read %s: %v", name, rerr)
+	}
+	if got := bytes.Count(trail, []byte(`"op":"hole"`)); got != 1 {
+		t.Errorf("lifecycle{op:hole} records in the trail = %d, want 1 (ops.md §3); trail:\n%s", got, trail)
 	}
 	rep, err := l.Verify(context.Background(), day.Format(dayLayout))
 	if err != nil {

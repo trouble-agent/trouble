@@ -226,7 +226,7 @@ make bin       # the two binaries, version-stamped (SPEC-12 §3.4 ldflags) into 
 make test      # the full suite
 make check     # the suite's self-consistency loop + schema + vet + internal tests
 make smoke     # version, config explain, topology against the real binaries
-make smoke-e2e # the live operator smoke: 24 assertions against bin/trouble + bin/troubled
+make smoke-e2e # the live operator smoke: 60 assertions against bin/trouble + bin/troubled
 make ac-matrix # every AC in the SPEC-INDEX matrix against the evidence in the tree
 ```
 

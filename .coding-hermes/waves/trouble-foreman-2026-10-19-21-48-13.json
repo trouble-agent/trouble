@@ -1,0 +1,17 @@
+{
+  "tick": "trouble-foreman-2026-10-19-21-48-13",
+  "project": "trouble",
+  "base": "43e78bae9e0128e60b530f057d0e1f2ffbc5711d",
+  "budget": 12,
+  "mode": "wave",
+  "block": "DOC-16",
+  "tasks": [
+    {"id":"DOC-11","worktree":"/home/kara/worktrees/trouble-DOC-11","branch":"wt/DOC-11","base":"43e78bae9e0128e60b530f057d0e1f2ffbc5711d","scope":["CHANGELOG.md"]},
+    {"id":"DOC-12","worktree":"/home/kara/worktrees/trouble-DOC-12","branch":"wt/DOC-12","base":"43e78bae9e0128e60b530f057d0e1f2ffbc5711d","scope":["README.md"]},
+    {"id":"DOC-13","worktree":"/home/kara/worktrees/trouble-DOC-13","branch":"wt/DOC-13","base":"43e78bae9e0128e60b530f057d0e1f2ffbc5711d","scope":["skills/trouble-light-hub-usage/SKILL.md","skills/trouble-usage/SKILL.md"]},
+    {"id":"DOC-16","worktree":"/home/kara/worktrees/trouble-DOC-16","branch":"wt/DOC-16","base":"43e78bae9e0128e60b530f057d0e1f2ffbc5711d","scope":["specs/","specs/tools/selfcheck.py"]}
+  ],
+  "independence": "All four rows have empty depends_on and disjoint owned files; DOC-16 is spec/documentation-only and does not edit the other workers' files.",
+  "manifest_written_before_dispatch": true,
+  "status": "open"
+}

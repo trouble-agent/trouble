@@ -2269,7 +2269,9 @@ different signature spaces and are never merged (they are linked as "related" on
 
 ## 7. Testing
 
-1. `internal/types/types_test.go`: JSON round-trip (marshal → unmarshal → deep-equal) for every type in
+1. `internal/types/id_test.go` + `internal/types/origin_route_test.go`: the id property/layout tests
+   and the `Origin.Route` JSON presence/absence contract; the full §3 sweep (marshal → unmarshal →
+   deep-equal for every type, JSON examples verbatim) remains **planned, not landed** as a single file.
    §3, using the JSON examples in this file verbatim as fixtures.
 2. `NewID`/`ParseID` property test: 100k ids monotonic, prefix-correct, and parseable.
 3. `Sig.String()`/`ParseSig()` round-trip + the SPEC-01 test vectors.

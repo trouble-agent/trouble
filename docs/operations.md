@@ -424,20 +424,33 @@ Sentry is `docs/sentinel-compat.md`; this section is the operating half.
 
 ### The compat document's provenance
 
-`docs/sentinel-compat.md` is **hand-maintained**: this repository ships no build
-layer (there is no `Makefile` anywhere in the tree), so §7's "regenerated from the
-same tables by `make compat-matrix`" names a target that cannot run here. What
+`docs/sentinel-compat.md` is **hand-maintained**: there is no generator for it in
+the tree, so SPEC-04 §7's "regenerated from the same tables by
+`make compat-matrix`" names a target that cannot run here — no `compat-matrix`
+target exists, and none of the root `Makefile`'s targets renders the document.
+(An earlier revision of both records claimed there was no `Makefile` in the tree
+and that the build layer did not exist; that claim is withdrawn — the root
+`Makefile` exists, see below.) What
 keeps the document honest is the drift-check test set instead —
 `TestCompatMatrixRoutes`, `TestCompatMatrixItemTypes`,
 `TestCompatMatrixEncodings`, `TestCompatMatrixAuthForms` and
 `TestCompatMatrixDivergences` each render their table's values from the same
 tables the server uses and fail CI when the document and the code disagree.
-`TestCompatDocProvenance` pins this paragraph, that header and the absence of a
-root `Makefile` against each other, so the claim "there is no generator" cannot
-outlive a `Makefile` that appears; compat §5 records the divergence. The missing
-build layer is repo-wide (SPEC-06's `make conformance` / `make schema`, SPEC-12's
-`Makefile` `build` target) and is not this package's to invent: it is flagged for
-the v0.1 `SPEC-INDEX` review together with §7's numeric load thresholds below.
+`TestCompatDocProvenance` pins this paragraph, that header and the five drift
+checks together with the filesystem: it requires the root `Makefile` the record
+describes to exist, so a record that outlives the tree fails instead of drifting.
+The `Makefile` itself (SPEC-INDEX §7) is the repo's build layer: `build` compiles
+every package, `bin` links the two version-stamped binaries
+(`bin/troubled`, `bin/trouble`), `release` produces the four-target
+cross-platform matrix with a checksum `dist/manifest.json`, and the gate ladder
+is `test` / `race` / `vet` / `fmt` / `schema` + `schema-check` / `conformance` /
+`check` (the v0.1 exit gate: `selfcheck.py`, schema freshness, vet, the
+`./internal/...` suite, host-measured gates) / `check-host` / `smoke` /
+`smoke-e2e` / `upgrade-cross-version` / `ac-matrix` / `clean`, with `all` an
+alias of `build`. None of these
+targets regenerates the compat document, and the missing generator is not this
+package's to invent: it stays flagged for the v0.1 `SPEC-INDEX` review together
+with §7's numeric load thresholds.
 
 ### What to watch
 

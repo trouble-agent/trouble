@@ -227,14 +227,19 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   high HEAD (crash between HEAD refresh and fsync, or a restore of an old
   HEAD) makes the next Append allocate from the hint, seeding a REAL verify-
   visible seq hole — SPEC-01 §3.4 rule 7's "HEAD is never a source of truth"
-  does not hold at HEAD 6bf0ade. After any restore/repair, rewrite HEAD to the
-  file's true max seq BEFORE booting.
-* **The ledger verbs fall back to the DEFAULT root when config resolution
-  fails, and every invocation writes a boot note there** (TRBL-111, run 2):
-  a `--config` path that does not resolve does not refuse — the verb opens
-  `~/.local/state/trouble/ledger` and appends into it. Always pass an
-  existing config path, and budget one `lifecycle{op:"boot"}` record per
-  invocation when auditing any trail the verbs have touched.
+  does not hold (still true at HEAD 43e78ba: TRBL-110's fix 6ce84db adds only
+  the audit-trail hole record; the allocation semantics are unchanged). After
+  any restore/repair, rewrite HEAD to the file's true max seq BEFORE booting.
+* **A missing `--config` now refuses — it used to fall back to the DEFAULT
+  root and write boot notes there** (TRBL-111, run 2; FIXED by f59b30e,
+  2026-10-17): a `--config` path that does not exist exits 13 with
+  `ledger: config not found: <path>` and creates nothing (verified at HEAD
+  43e78ba; the scratch HOME stayed empty). Pre-f59b30e binaries still fall
+  back, so on an older build always pass an existing config path. Also:
+  `status`/`verify` are read-only since TRBL-104 (7e2a176) and write nothing,
+  but `compact` still opens the ledger for write and every open appends one
+  `lifecycle{op:"boot"}` record — budget for it when auditing any trail
+  `compact` has touched.
 
 ## Where the knowledge lives
 

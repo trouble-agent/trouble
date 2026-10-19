@@ -126,6 +126,10 @@ carried), so `dedup_hits` stays 0 for that dialect.
 
 ## Known gaps at this revision
 
-SPEC-13 §2.2's four operator verbs (`trouble hub status|archive|dedup|drain`) are NOT mounted — the
-CLI answers `unknown command "hub"` (TRBL-065), so a pre-migration drain has no supported path.
-`docs/operations.md` §19 still describes the hub runtime as unbuilt (TRBL-064).
+The early-revision gaps are closed: the hub runtime is built (TRBL-029) and `docs/operations.md`
+§19 describes it as built (TRBL-064, fix 9f35480). SPEC-13 §2.2's four operator verbs
+(`trouble hub status|archive|dedup|drain`) are mounted (TRBL-065, fix 64a1611, merged 84fb1b9):
+`trouble hub status` runs and exits 0 on a standalone boot — verified at HEAD `43e78ba`, it prints
+the disabled stanza (`profile: standalone (enabled=false)`) with `redis: ... state=cold`, the §2.3
+observable. `docs/cmd.md` documents the verbs, and the pre-migration drain has a supported path
+(`trouble hub drain --timeout D`).

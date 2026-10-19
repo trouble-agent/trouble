@@ -249,6 +249,24 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
 * `specs/SPEC-13-server-profiles.md` — server profiles: standalone | light-hub.
 * `specs/SPEC-TYPES.md` — every shared type and the canonical error-code catalog.
 
+## Documentation
+
+* [docs/cmd.md](docs/cmd.md) — the composition root: `cmd/troubled` (the daemon),
+  `cmd/trouble` (the operator CLI) and `internal/app`, the adapter layer where
+  separately designed contracts are joined (the operator-facing complement to
+  SPEC-12 §2 and §4).
+* [docs/llm.md](docs/llm.md) — `internal/llm`, the ladder's budgeted, buffered
+  LLM client for the agent stage: the ordered OpenAI-compatible fallback chain,
+  enforced budgets and the context-compaction hook (SPEC-05 §4.3a/§3.7a).
+* [docs/operations.md](docs/operations.md) — the operator runbook: durability
+  and recovery, daily checks, scrubbing, sensors, ladder, registry, dashboard,
+  sentinel, research, flow, issues, skills and lifecycle — what to look at when
+  a subsystem misbehaves.
+* [docs/sentinel-compat.md](docs/sentinel-compat.md) — the Sentry-SDK
+  compatibility matrix: routes, item types, encodings, size caps, auth forms
+  and every deliberate divergence from upstream Sentry or the SPEC-04 text,
+  enforced by the `TestCompatMatrix*` drift checks.
+
 ## Getting the source
 
 Install the Go toolchain first. **Go 1.26.0 or newer is required** (`go.mod`

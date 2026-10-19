@@ -63,6 +63,14 @@ Note on versions: no release tag is cut yet. A build from this tree is
   `config explain`, `topology`, `check-stall`, `escalate`, `dashboard token`,
   `hub status|archive|dedup|drain`, `--version`) and `cmd/troubled` (the
   daemon).
+- **Ledger CLI verbs (TRBL-100)**: `trouble ledger status|verify|compact`
+  wire the SPEC-01 §2.4 operator surface — the library machinery existed but
+  the verbs answered `unknown command "ledger"`. Each verb takes a per-verb
+  FlagSet with a `--json` machine form plus a human stanza, follows the
+  documented exit-code contract (ok / degraded / findings / refusable
+  section-5 codes such as `TROUBLE-LEDGER-007` no files and
+  `TROUBLE-LEDGER-009` retention blocked), and `compact` supports `--dry-run`
+  reporting the generation file and byte deltas without writing anything.
 - **Packaging and deployment**: the `make release` multi-platform matrix
   (linux/amd64, linux/arm64, darwin/arm64, windows/amd64) with a stamped
   `dist/manifest.json`, a multi-stage `Dockerfile` (static, CGO disabled), a
@@ -81,6 +89,55 @@ Note on versions: no release tag is cut yet. A build from this tree is
   route answers `503 + TROUBLE-DASHBOARD-013 (detail:dashboard_refused)`.
   Nothing is regenerated; the remedy is `trouble dashboard token create` plus
   a restart. SPEC-12 §3.3a-d.
+
+### Fixed
+
+- **Ledger `status`/`verify` are read-only (TRBL-104, TRBL-105)**: the verbs
+  previously opened the ledger through the `Writer` path, taking the
+  exclusive lock, appending a `lifecycle{op:boot}` record and reporting the
+  CLI process itself as `writer_pid` — a "read-only" inspection that
+  mutated the audited surface it inspected, and one that bailed with exit
+  1/2 instead of reading at all when a live writer held the LOCK. Both
+  verbs now walk the day files without locking (the LOCK file is read, not
+  flocked): real writer identity, correct writer-held rows, no writes.
+  `compact` remains a write operation and is unchanged.
+- **Ledger hole / audit-trail fixes (TRBL-107, TRBL-110)**: every seq
+  discontinuity found by the index scan is now queued and drained into
+  `lifecycle{op:"hole"}` records by the next successful batch, torn-line
+  recovery boot notes carry `from_seq`/`to_seq`, and a crash-glued pair of
+  complete records on one line is extracted and indexed instead of being
+  silently swallowed. Recovery-created gaps — a `HEAD` hint above the
+  files' highest seq permanently skipped the in-between range with no
+  trail record — are now registered as a hole and written to the audit
+  trail on the next batch (recorded, never healed: seqs below a high HEAD
+  are never reissued); registration is gated on a non-degraded index so
+  degraded boots fabricate no holes.
+- **Ledger verbs refuse a missing `--config` file (TRBL-111)**: pointing
+  `trouble ledger ... --config` at a nonexistent path silently fell back
+  to the default state root and wrote boot notes into a ledger the
+  operator did not point at; it now answers `ledger: config not found:`
+  and exits 13.
+- **Token store quarantine instead of store-wide fail-closed (TRBL-103)**:
+  one malformed entry in `dashboard-tokens.json` marked the entire token
+  set invalid, so every valid token answered `503 +
+  TROUBLE-DASHBOARD-013 (token_store_invalid)` until the line was fixed by
+  hand. Fail-closed stays scoped to the file (unreadable, unstatable,
+  wrong envelope, unparsable JSON): a malformed *entry* is now quarantined
+  — skipped with a WARN naming path, index, id and reason (never token
+  material), never enters the lookup maps so it can never authenticate,
+  and is preserved verbatim on rewrite so a later save never deletes it.
+  Unknown tokens still answer `401 + TROUBLE-DASHBOARD-002`.
+- **Dashboard close refusals are surfaced, not masked (TRBL-REVIEW-CLOSE-ERR)**:
+  a human close of a non-closable incident answered the generic
+  `500 + action_failed`, losing the refusal reason. The bridge's close
+  refusal now carries the seam shape, so the API answers
+  `409 + TROUBLE-LADDER-012 (detail: no_close_edge)` with the human
+  reason; `RefusedTransition` errors map to 409 and plain coded errors to
+  400, while truly unknown errors keep the generic 500. Along the way the
+  close pre-check refuses states with neither a close trigger nor a
+  refusal rule (previously recorded as illegal transitions, quarantining
+  the incident on the third) and edges resolve by ID, so legitimate
+  closes through the dashboard no longer fail with `unknown transition`.
 
 ### Notes
 

@@ -445,7 +445,7 @@ carries no local review):
 
 | Step | Trigger | Written | Rules |
 |---|---|---|---|
-| `drafted` | an incident whose rung ③ agent fix passed its verify window (SPEC-05: evidence tuple, `canary_seen=true`, `sources_missing=[]`) | ledger `skill` record, `phase=candidate_drafted`, `sig=<incident sig>`; `SkillCandidate{ID: sk_…, Name, Version, Sig, Inc, Play, ResearchID, State:"drafted", CreatedTS}` + `examples/skills/<name>/SKILL.toml` draft on disk under `skills-local/candidates/<sk_id>/` | TROUBLE-SKILLS-008 if `provenance.incidents` would be empty or the research link is missing while the research rung returned. The candidate's `Play.Source = "skill:<sk_id>"` and the play must be check_mode-clean (`play_run` records with `mode=check_mode`) |
+| `drafted` | an incident whose rung ③ agent fix passed its verify window (SPEC-05: evidence tuple, `canary_seen=true`, `sources_missing=[]`) | ledger `skill` record, `phase=candidate_drafted`, `sig=<incident sig>`; `SkillCandidate{ID: sk_…, Name, Version, Sig, Inc, Play, ResearchID, State:"drafted", CreatedTS}` + `SKILL.toml` draft on disk under `skills-local/candidates/<sk_id>/` | TROUBLE-SKILLS-008 if `provenance.incidents` would be empty or the research link is missing while the research rung returned. The candidate's `Play.Source = "skill:<sk_id>"` and the play must be check_mode-clean (`play_run` records with `mode=check_mode`) |
 | `reviewed` | review decision | ledger `phase=candidate_reviewed`, `ReviewActor` = `Actor.ID` of the reviewer | Default reviewer is **human** in `shadow` and `assisted`. In `autonomy=full` only, auto-accept applies (§4.6) and the reviewer actor is `troubled` with `auto_accept=true` in the payload |
 | `promoted` | promote step | ledger `phase=promoted`; the artifact is signed with the local key and written to `skills-local/installed/<name>/<version>/` | The promoted version is usable for recurrences on **this** host only. Cross-host distribution requires the release channel; the promotion step's hand-off seam to that channel is `(v1.0 hand-off)` — the candidate path ends at the local artifact in v0.1 and the CLI prints the artifact path plus the `SkillCandidate.BranchOrPR` field left empty |
 | `rejected` | review `reject` | ledger `phase=candidate_reviewed`, `error_code=TROUBLE-SKILLS-009` | The play is not deleted locally (audit), but its content hash is recorded as rejected and no promotion may reuse it |
@@ -815,7 +815,7 @@ numbered list is the gate obligations, not the test roster — QA-TROUBLE-5 disa
 9. `authorizer_test.go` — allowlist subset enforced at install (005) and at authorize (005); `source="skill:<sk_id>"` for an unknown id is refused; a registry-side call with `source="rule:<name>"` is unaffected (the hook only constrains skill sources); no artifact key can express a shell (a `shell` key → 001).
 10. `stats_test.go` — increments, flush within 5 s, atomic rename, 014 on a read-only directory with the play still succeeding; an artifact containing `[stats]` is rejected so stats can never round-trip into the channel.
 11. `boot_reverify_test.go` — a tampered installed artifact is quarantined at boot (002 + refusal record) and never applied; the process stays green on `/health` while `SkillsStatus.degraded` reports skills.
-12. Integration (`test/skills_e2e_test.go`) — 200-artifact pull: install ≤ 2 s wall (excluding the fetch), RSS delta ≤ 8 MiB (steady RSS budget ≤ 80 MB per SPEC-TYPES §6.1), ledger records appended through the group-commit writer with no per-record fsync (regression: 512 rec/s per-line vs ≈ 515k rec/s amortized), and `pulled` count equals `installed + pending_review + refused` exactly.
+12. Integration — a 200-artifact bulk pull with install ≤ 2 s wall (excluding the fetch) and RSS delta ≤ 8 MiB (**planned gate: the dedicated harness named test/skills_e2e_test.go was never landed**). Landed coverage: the pull/install contract in `dist_test.go` (tag selection, offline set retention, size cap → 010, per-artifact isolation, rollback when the ledger refuses) and the **AC-24** promote cycle in `promote_test.go`; the ledger group-commit amortization (512 rec/s per-line vs ≈ 515k rec/s amortized) is regression-tested in `internal/ledger/appendcost_test.go` + `internal/ledger/batchappend_test.go`.
 13. `library_test.go` (§2b / §4.7a, v0.1.1b) — a fixture library under `t.TempDir()` with two valid skills and one malformed file:
     - the valid pair parses to their frontmatter values (name, description, version) and their steps in order; `Plays` returns them in name order with `source = "skill-local:<name>@<version>"` and one task per step;
     - the malformed file is refused with the file, line and reason while the other two still load (per-file isolation), and the refusal is one `library_refused` record;
@@ -839,8 +839,8 @@ Packages/files created (all new, `github.com/trouble-agent/trouble`):
 | `internal/skills/authorize.go` | `authorizer` — the registry hook, implementing SPEC-06's `Authorizer` seam |
 | `internal/skills/store.go` | `localIndex`, `installRow`, `canaryRecord`, `Stats`, `Status`, atomic persistence |
 | `internal/skills/library.go` | `Library` (§2b), `LibraryConfig`, `LocalSkill`, `SkillStep`, `StepRunner`, the frontmatter subset parser, `Plays`, `RunStep` |
-| `cmd/trouble/skills.go` | the `trouble skills …` CLI |
-| `test/skills_e2e_test.go` | AC-24 / AC-26 end-to-end fixtures |
+| cmd/trouble/skills.go — **planned, not landed** (v0.1 ships no `skills` CLI verb; `Puller`/`Promoter`/`Resolver` are wired at the composition root in internal/app/subsystems.go) | the `trouble skills …` CLI |
+| test/skills_e2e_test.go — **planned, not landed** | AC-24 / AC-26 fixtures live in `internal/skills`: `promote_test.go` (AC-24) and `dist_test.go` |
 
 Fan-out (imports): `internal/types` (Skill, Play, Candidate, Record, Actor…), `internal/ledger` (append one
 `skill` record per state change, group-committed), `internal/registry` (descriptor name lookup for the
@@ -851,6 +851,7 @@ interface and never imports this package; `internal/dashboard` reads `skill` rec
 No package imports `internal/skills` from `internal/types` (one-way dependency), so no cycle exists.
 
 Blast radius: greenfield repo `~/trouble`; no fleet repository, board, unit, or path is referenced, and
-every path/interval/host id in this spec is configuration with the default `examples/skills/*` treated as
+every path/interval/host id in this spec is configuration with every bundled example tree treated as
 examples (non-negotiable #1). The only host-visible new surfaces are the `skills-local/` subtree under the state
-root, one `git` subprocess on a configured schedule, and the `trouble skills` CLI.
+root, one `git` subprocess on a configured schedule, and the `trouble skills` CLI (planned, not landed in v0.1;
+see the §8 file table).

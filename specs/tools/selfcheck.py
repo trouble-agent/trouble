@@ -84,25 +84,11 @@ HANDOFF_MARKERS = ["v1.0", "1.0 hand-off", "1.0 handoff", "deferred", "defers", 
 # ---------------------------------------------------------------------------
 EVIDENCE_SECTION_RE = re.compile(r"^### 6\.1 .*(reconciliation|honest table)", re.I)
 KNOWN_ROTTED: dict[str, str] = {
-    "cmd/trouble/issues.go": "SPEC-09 §8: design table — CLI verb never split into its own file",
-    "cmd/trouble/skills.go": "SPEC-11 §8: design table — CLI verb never split into its own file",
-    "examples/skills": "SPEC-11 §4: named directory never created in the cut line",
-    "integration/e2e_dashboard_test.go": "SPEC-10 §7: dashboard e2e lives in internal/app, never under integration/",
-    "internal/hub/profile_invariance_test.go": "SPEC-13 §8: coverage exists in lifecycle/hub batteries, file never created",
-    "internal/hub/status_test.go": "SPEC-13 §8: coverage exists in lifecycle/hub batteries, file never created",
-    "internal/registry/defaults.go": "SPEC-06 §4: defaults live in modules_config.go, file never created",
-    "internal/registry/modules/register.go": "SPEC-06 §3: no registration site; modules_*.go self-register in package init",
-    "internal/research/codeplane_test.go": "SPEC-07 §8: codeplane coverage lives in issues/ladder codeplane tests",
-    "internal/sentinel/routespool_test.go": "SPEC-04 §8: route/pool coverage lives in collectors_test.go",
-    "internal/types/types_test.go": "SPEC-TYPES §7: type round-trip tests live in per-package batteries",
-    "test/skills_e2e_test.go": "SPEC-11 §8: top-level test/ dir never existed",
-    "tests/e2e/ac14_ac18_remote_matrix.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
-    "tests/e2e/ac25_forward_spool.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
-    "tests/e2e/ac26_lifecycle_visibility.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
-    "tests/e2e/ac28_route_spool.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
-    "tests/e2e/ac29_light_hub.sh": "SPEC-13 §8: e2e script named in the design table, never landed",
-    "tests/e2e/escalation.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
-    "tests/e2e/unit_sandbox.sh": "SPEC-12 §8: e2e script named in the design table, never landed",
+    # DOC-16 (2026-10-19): the last 20 entries were deleted — every path they
+    # exempted was either retargeted to the file that really carries the
+    # coverage or marked "planned, not landed" in prose, so the citations now
+    # resolve (missing: 0). New entries MUST name an existing rotted citation
+    # and a reason; a stale entry fails this gate.
 }
 # path token shapes that are not file citations even when they look like paths
 NON_CITE_TOKEN_RE = re.compile(

@@ -206,7 +206,7 @@ The three mandatory obligations, exactly as AC-23 words them:
    unchanged.
 
 **The negative modules.** Two deliberate defects ship as test-only packages, never registered and never
-linked into the daemon binary (`internal/registry/modules/register.go` is the only registration site):
+linked into the daemon binary (`internal/registry/register.go` — `shippedModules` — is the only registration site):
 
 - `internal/registry/testkit/badmodule/nonidempotent.go` — declares `Idempotency = convergent` and
   `CheckMode = true`, then appends a byte to a counter file on *every* `Apply`. `testkit.Run` must fail it
@@ -416,7 +416,7 @@ scopes = ["service:stop", "config:delete", "file:exec"]
 
 Resolution order and the floor:
 
-1. `internal/registry/defaults.go` holds the compiled-in floor — the list above with `paths`/`units`/
+1. `internal/registry/donottouch.go` (`FloorDoNotTouch`) holds the compiled-in floor — the list above with `paths`/`units`/
    `scopes` as shown (`<state_root>` resolved at boot). The floor is **always** applied.
 2. `registry.do_not_touch_file` (default `/etc/trouble/do-not-touch.toml` when uid 0, otherwise
    `$XDG_CONFIG_HOME/trouble/do-not-touch.toml`) is merged **additively**. A file that sets
@@ -885,7 +885,7 @@ Packages and files created (greenfield repo `~/trouble`; no fleet repository is 
 | `internal/registry/registry.go` | registry | types, ledger | ladder, cmd, dashboard (read-only via `List`) |
 | `internal/registry/authorize.go` | registry | types | — |
 | `internal/registry/donottouch.go` | registry | types | — |
-| `internal/registry/defaults.go` | registry | — | (floor of the do-not-touch set) |
+| `internal/registry/donottouch.go` | registry | — | (floor of the do-not-touch set) |
 | `internal/registry/play.go` | registry | types, SPEC-03 condition engine (read-only use), ledger | skills (loads `play_ref`) |
 | `internal/registry/schemagen/` | registry/schemagen | stdlib `reflect`, `encoding/json` | registry (build + boot) |
 | `internal/registry/validate/` | registry/validate | stdlib only | registry (validate stage) |

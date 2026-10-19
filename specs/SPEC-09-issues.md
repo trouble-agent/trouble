@@ -963,13 +963,13 @@ Packages and files created (greenfield repo `~/trouble`):
 | `internal/issues/link.go` | sig linkage with SPEC-07/SPEC-08 |
 | `internal/issues/config.go` | `IssueDeskConfig` load, clamps, token-file mode checks |
 | `internal/issues/*_test.go` | the battery in §7 |
-| `cmd/trouble/issues.go` | the `issues` CLI verbs (thin wrapper over `Desk`) |
+| cmd/trouble/issues.go — **planned, not landed** (v0.1 ships no `issues` CLI verb; the desk is wired at the composition root in internal/app/subsystems.go) | the `issues` CLI verbs (thin wrapper over `Desk`) |
 
 Fan-out (what this package imports): `internal/types` (highest fan-in node in the repo), `internal/ledger`
 (writer interface only), `internal/scrub` (pre-call scrubbing), `internal/lifecycle` (config precedence +
 version stamping). Fan-in (what imports it): `internal/ladder` (outlet rung), `internal/dashboard` (health +
 cap counters + ledger reads), `internal/registry` (the `flow.file_issue` module implementation, SPEC-08/SPEC-06),
-`cmd/trouble`. hilo graph edges added: `issues → {types, ledger, scrub, lifecycle}` and
+`cmd/trouble` (the CLI verbs of §8 are planned, not landed — the v0.1 import lives in the composition root). hilo graph edges added: `issues → {types, ledger, scrub, lifecycle}` and
 `{ladder, dashboard, registry, cmd} → issues`; no cycle is possible because the ladder's dependency on issues
 is through a function call with `internal/types` values only.
 

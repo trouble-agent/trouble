@@ -171,7 +171,7 @@ in full, including every ack/close/autonomy control — the controls render `dis
 `data-requires="write"` or `"autonomy"` and an inline reason, never hidden (a hidden control reads as "this
 feature does not exist"). UI state is presentation only: the server re-checks the scope on every POST and
 returns **403** + TROUBLE-DASHBOARD-003 even when a client forges the request. That is the assertion the
-`integration/e2e_dashboard_test.go` case in §7 makes.
+`auth_test.go` scope matrix in §7 makes.
 
 ### 2.3 CSRF — every POST
 
@@ -700,7 +700,7 @@ own kind's `payload.error_code`; the dashboard's own refusals are counted and lo
 
 ## 7. Testing
 
-All tests are `internal/dashboard` package tests plus one end-to-end test that starts the real daemon
+All tests are `internal/dashboard` package tests
 (`go test -race -count=1 ./internal/dashboard/...`). Numeric thresholds are pass/fail, not advisory.
 
 | Test file | Cases | Pass thresholds |
@@ -712,7 +712,7 @@ All tests are `internal/dashboard` package tests plus one end-to-end test that s
 | `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML; first-paint budget: the server-rendered panel's `incidents open`/`groups open` equal the page's own header counters and its byte/rate/version rows equal what `/partials/budget` serves; the footer stamp on all seven pages equals the `version`/`git_sha` **`/health.json` reports** | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates; 0 zero-valued first-paint rows; footer stamp identical to the health surface |
 | `live_test.go` | **AC-19 timing**: trigger a fixture incident, poll `/partials/incidents?since=` at the real intervals, record `ts_response − ts_trigger` of the first fragment containing the ID; 20 iterations; assert p100 ≤2000 ms and p50 ≤1100 ms; assert the strip-accelerator-off variant still passes p95 ≤2000 ms; assert the stall banner appears when the writer is paused ≥`stall_alert_s` | p100 ≤2000 ms (**AC-19**), p95 ≤2000 ms without the accelerator |
 | `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; retained heap (`HeapAlloc` after a forced GC, GC percent pinned) sampled every 250 ms and batched into a steady-state slope (§2.9a); a control handler driven at the same rate in the same process; the 100-concurrent-render burst measured against a post-collection baseline with no collection in flight; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB, §2.9a), p99 render ≤20 ms **× `CPUScale()`** and the 100 rps row's driver-side floor 0.9 × 100 **÷ `CPUScale()`** (host calibration per SPEC-01 §7a, TRBL-053: the render p99 is a template render measured inside the helper — CPU speed + scheduling, no disk — so both wall-clock rows follow the §7a profile, measured once per process; a rate is a floor and moves down with the host's slowdown. §2.9's byte ceilings are retained state at a fixed request count and stay unscaled. The 40 ms p99 ceiling and the 40 rps floor clamp stay — past them the host is no longer the explanation), 0 ledger file opens |
-| `integration/e2e_dashboard_test.go` | start the daemon, ack/close/autonomy against the mock ladder + lifecycle, assert the recorded `Actor{kind:human, id:<token label>}` and the ledger record kind; `read`-scope token can hit every GET and partial and gets 003 on all three POSTs; `/health.json` parsed into `HealthResponse` with `ledger_last_seq` advancing | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |
+| `auth_test.go` scope matrix + `TestHumanActorOnWrites` (§2.2; the planned daemon-start e2e named integration/e2e_dashboard_test.go was never landed) | a `read`-scope token POSTs ack/close/autonomy over the live mux: every POST is refused 403 + 003 with the required scope named; a granted write records `Actor{kind:human, id:<token label>}` carrying the build fields | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |
 | `pagination_test.go` | **AC-30** (dashboard half): `/incidents` and `/groups` walked with `page_token` + `page_size` over a 10,000-incident fixture index — page-size stability, no row repeated, no row skipped, `next_page_token` empty exactly at the end; a token minted before a simulated generation drop renders the reset banner with **200**; every render opens 0 ledger files (§2.9) | every row exactly once per walk; the drop case is 200 + banner, never 500; 0 file opens |
 
 ## 8. hilo impact

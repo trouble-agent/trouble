@@ -2,14 +2,26 @@
 
 The ingestion surface of `internal/sentinel` (SPEC-04), what it accepts, and
 every place where it deliberately differs from upstream Sentry or from the SPEC-04
-text. The document is **hand-maintained**: this repository ships no build layer, so
-there is no `make compat-matrix` target to regenerate it (divergence 15 in §5,
-recorded for operators in `docs/operations.md` §13). It is enforced by the drift
+text. The document is **hand-maintained**: there is no `make compat-matrix` target
+to regenerate it (divergence 15 in §5, recorded for operators in
+`docs/operations.md` §13) — SPEC-04 §7's "regenerated from the same tables by
+`make compat-matrix`" names a target that does not exist. The build layer such a
+target would live in does exist: the root `Makefile` (SPEC-INDEX §7) provides
+`build` (compile every package), `bin` (the stamped `bin/troubled` and
+`bin/trouble`), `release` (the four-target cross-platform matrix plus a
+`dist/manifest.json` checksum manifest), `test`, `race`, `vet`, `fmt`, `schema`,
+`schema-check`, `conformance`, `check`, `check-host`, `smoke`, `smoke-e2e`,
+`upgrade-cross-version`, `ac-matrix`, `clean`, plus `all` (an alias of `build`).
+None of those targets renders
+this document, and none is planned to: it is enforced by the drift
 checks `TestCompatMatrixRoutes`, `TestCompatMatrixItemTypes`,
 `TestCompatMatrixEncodings`, `TestCompatMatrixAuthForms` and
 `TestCompatMatrixDivergences` (`compat_test.go`), each of which renders its table
 from the same values the server uses and fails CI when this document drifts from
-them. `TestCompatDocProvenance` pins this header.
+them. `TestCompatDocProvenance` pins this header — the five drift-check names,
+the absent target and the existence of the root `Makefile` this provenance
+describes are all asserted against the tree, so the record cannot go stale
+silently in either direction.
 
 ## 1. Routes (listener `sentinel.bind`, default `127.0.0.1:7643`)
 
@@ -171,12 +183,16 @@ literally, with the reason. Every one of them is asserted by a test.
     declared alongside them because SPEC-04 produces it and SPEC-10 consumes it;
     it must not be redeclared.
 15. **This document is hand-maintained, not generated.** §7 names
-    `make compat-matrix` as its regeneration path; no `Makefile` exists anywhere in
-    this repository (the build layer is repo-wide and deferred with SPEC-06's
-    `make conformance` / `make schema` and SPEC-12's `Makefile` `build` target), so
-    the drift checks listed in the header enforce the document instead of a
-    generator. Pinned by `TestCompatDocProvenance`, which also fails if a root
-    `Makefile` appears while `docs/operations.md` §13 still says there is none.
+    `make compat-matrix` as its regeneration path; that target does not exist —
+    the root `Makefile` (SPEC-INDEX §7) carries the build layer (`build`, `bin`,
+    `release`, `test`, `race`, `vet`, `fmt`, `schema`, `schema-check`,
+    `conformance`, `check`, `check-host`, `smoke`, `smoke-e2e`,
+    `upgrade-cross-version`, `ac-matrix`, `clean`) but no target renders this
+    document, so the drift checks listed in the header enforce it instead of a
+    generator. Pinned by `TestCompatDocProvenance`, which asserts the five
+    drift-check names and the absence of a `compat-matrix` target in both this
+    document and `docs/operations.md` §13, and which fails if the root
+    `Makefile` this record describes is missing.
 
 ## 6. Ledger payload schema
 

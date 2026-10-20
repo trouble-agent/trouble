@@ -158,6 +158,9 @@ trouble hub status [--json]             the light-hub profile: stream, dedup and
 trouble hub archive [--dry-run] [--file FILE] [--force]   export closed generations to DuckBrain
 trouble hub dedup --key KEY [--json]    probe the dedup gate for one idempotency key
 trouble hub drain [--timeout DURATION]  consume the stream into the ledger, then stop
+trouble ledger status [--json]          the LedgerStatus stanza: writer, index, disk, loss window
+trouble ledger verify [--day YYYY-MM-DD] [--json]   hole/torn/corrupt/hash walk of the files
+trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]   rewrite one day into a new generation
 ```
 
 `trouble upgrade --to` names the PATH of the binary to stage, which is copied over
@@ -217,6 +220,28 @@ regular file whose mode is exactly 0600 (`env file <path> mode is 0644, want
 refusal comes after the token itself is stored, so a 0644 ENVFILE costs a
 rotation, not a lost token. Omitting the flag (the default) keeps the v0.1
 contract: stdout only, the operator places the line.
+
+### The `trouble ledger` verbs
+
+The three `ledger` verbs are SPEC-01 §2.4's operator surface: they talk to the
+files under `<state_root>/ledger` the way the daemon does, and each carries its
+own exit codes rather than the suite-wide ones above.
+
+| Verb | Meaning | Exit codes |
+|---|---|---|
+| `trouble ledger status [--json]` | the `LedgerStatus` stanza: the writer (pid/version, or absent), seq and age, the index (records, recent ring, `degraded` + reason), disk bytes against `disk_budget_bytes`, and the loss window | `0` ok, `1` index degraded, `2` usage, `13` refused or unreadable |
+| `trouble ledger verify [--day YYYY-MM-DD] [--json]` | the read-only walk of every authoritative file (or one `--day`): seq holes, torn/corrupt lines, newer-schema/hash/tombstone mismatches; the report names the files it walked | `0` ok, `1` findings, `2` usage or unreadable ledger, `13` refused |
+| `trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]` | rewrite one day into a NEW generation (`D.N.gen.jsonl`), never in place; `--dry-run` prints the `CompactionResult` (byte deltas, `ToFile`) and writes nothing | `0` ok, `1` refused (writer `LOCK` held; `007` no files / writer's day; `009` retention would sacrifice counts), `2` usage (missing `--day`), `13` refused |
+
+`status` and `verify` are read-only and lock-free: they open no lock, write
+nothing, and walk the files directly, so both are always safe to run against a
+live ledger — a running writer neither blocks them nor is blocked by them.
+`compact` is different: it needs the writer seat and must never race the
+daemon's appender, so when the `LOCK` is held it refuses with exit `1` instead
+of proceeding. `--dry-run` is its rehearsal: the same resolution and policy,
+zero writes. Every ledger verb keeps the suite-wide
+codes: `2` for a usage error and `13` for a refusable condition (a config or
+state-root refusal, or a ledger that cannot be read).
 
 ## Building
 

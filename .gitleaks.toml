@@ -83,6 +83,7 @@ paths = [
   '''(^|/)internal/flow/spool_test\.go$''',
   '''(^|/)internal/issues/github_driver_test\.go$''',
   '''(^|/)internal/ledger/scrub_boundary_test\.go$''',
+  '''(^|/)internal/ledger/verify_payload_hash_test\.go$''',
   '''(^|/)internal/lifecycle/config_test\.go$''',
   '''(^|/)internal/lifecycle/projects_test\.go$''',
   '''(^|/)internal/sentinel/helpers_test\.go$''',

@@ -880,7 +880,13 @@ func payloadBytes(payload map[string]any) int64 {
 	return int64(len(b))
 }
 
-// payloadHash is hex(sha256(canonical payload JSON))[:16].
+// payloadHash is hex(sha256(canonical payload JSON))[:16] over the payload as
+// the emitting side built it, BEFORE the payload_sha256 member is stamped in
+// (SPEC-01 §3.1). Nested values may be typed Go structs, so the hashed bytes
+// carry struct field order — which is why the verifier must recompute from the
+// stored payload bytes (verifyPayloadHashLine/payloadBytesWithoutHash,
+// recover.go) instead of re-marshaling a decoded map: Go sorts map keys, and a
+// re-marshaled map would never match a struct-ordered payload (TRBL-106).
 func payloadHash(payload map[string]any) string {
 	b, err := canonicalPayloadJSON(payload)
 	if err != nil {

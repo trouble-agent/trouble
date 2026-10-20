@@ -295,14 +295,8 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 			}
 			prev = rec.Seq
 			if h, ok := rec.Payload["payload_sha256"].(string); ok && h != "" {
-				cp := map[string]any{}
-				for k, v := range rec.Payload {
-					if k == "payload_sha256" {
-						continue
-					}
-					cp[k] = v
-				}
-				if payloadHash(cp) != h {
+				got, herr := verifyPayloadHashLine(line)
+				if herr == nil && got != h {
 					rep.PayloadHashMismatches++
 					rep.Errors = append(rep.Errors, fmt.Sprintf("seq %d: payload hash mismatch", rec.Seq))
 				}

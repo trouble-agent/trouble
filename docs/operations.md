@@ -546,16 +546,97 @@ resident set; it is a documented divergence in `docs/sentinel-compat.md` §5.
 
 ### Envelope size refusals
 
-The decompressed cap is enforced **at the cap**, not at the reader's memory
-bound: a body of 1,048,576 decompressed bytes is admitted and 1,048,577 is
-`413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`), on `identity` and
-`gzip` alike, for any ratio under 100:1. `cap + 64KB` is headroom the limited
-reader may hold so "over the cap" is detectable mid-stream (§6.1) and is never
-accepted as payload; `TestDecompressedCapBoundary` pins the boundary against the
-number in `docs/sentinel-compat.md` §3. §6.1's phrase "a limited reader capped at
-1MB + 64KB" is read as that memory bound — the reading §3.1's caps table and
-§3.7's own bomb row require — and is worth pinning in the spec text at the next
-SPEC-04 revision so it cannot be read as an allowance.
+The decompressed cap is a **transport** statement, not a reader's memory bound
+and not a dialect rule: the shared body reader (`readEnvelopeBody`) evaluates it
+on every route — `/envelope/`, `/store/` and `/event/` alike — before any parser
+runs, refusing `413` + `TROUBLE-SENTINEL-003` (cause `decompressed_cap`) past
+1,048,576 decompressed bytes, for any ratio under 100:1. `cap + 64KB` is
+headroom the limited reader may hold so "over the cap" is detectable mid-stream
+(§6.1) and is never accepted as payload. `TestDecompressedCapBoundary` pins the
+boundary against the number in `docs/sentinel-compat.md` §3. §6.1's phrase "a
+limited reader capped at 1MB + 64KB" is read as that memory bound — the reading
+§3.1's caps table and §3.7's own bomb row require — and is worth pinning in the
+spec text at the next SPEC-04 revision so it cannot be read as an allowance.
+
+Which refusal a caller sees at that boundary depends on the layers ABOVE it, in
+the order they answer:
+
+* The **200 KB compressed cap** answers first for any body that is not
+  compressed down under it: a 1 MiB `identity` body never reaches the
+  decompressed layer at all — it is `413` + `TROUBLE-SENTINEL-002` (cause
+  `too_large`). The boundary is exercisable only through `Content-Encoding:
+  gzip` (or `x-gzip`).
+* The **100:1 ratio guard** answers next: a highly compressible filler (a run
+  of one character) trips it (`413` + `TROUBLE-SENTINEL-003`, cause
+  `compression_ratio`) before the cap number matters. Use incompressible filler
+  — a pseudo-random A/B byte pattern, as the boundary test itself does.
+* The **§3.6 generic dialect's own 16 KB message cap** then answers for the
+  generic-JSON route (`POST /api/{id}/event/` with a JSON body — the
+  `curl` / any-runtime on-ramp `docs/sentinel-compat.md` §4 documents):
+  a single-message JSON document at exactly 1,048,576 bytes is `400` +
+  `TROUBLE-SENTINEL-019` + `message_too_long` — the dialect refuses the body
+  before the event is admitted, because a `message` may only be 16 KB
+  (`genericMaxMessage`). One byte past the cap, the transport answers first
+  again: `413` + `TROUBLE-SENTINEL-003` + `decompressed_cap`. So on the generic
+  route the boundary is visible only on the refusal side; the accept side at
+  the cap is unreachable with a single message.
+* The boundary's **accept side is reached through a multi-item envelope**:
+  `POST /api/{id}/envelope/` with a gzip'd body framing five `attachment` items
+  whose bodies sum — with the envelope and item headers — to exactly 1,048,576
+  decompressed bytes. That request is admitted (200); the same framing one byte
+  longer is `413` + `TROUBLE-SENTINEL-003` + `decompressed_cap`. A single
+  `attachment` item stays under the 256 KB per-item cap by construction, and
+  the gzip'd filler stays under the 200 KB compressed cap.
+
+Reproduce with a scratch boot (`tests/e2e/scratch_boot.sh`, ports 7643/7644
+must be free):
+
+```console
+$ # payload: 5 attachment items, byte-exact framing, gzip'd (incompressible filler)
+$ python3 - <<'PY'
+import json
+def filler(n, seed=1):                       # pseudo-random A/B: survives the ratio guard
+    out = bytearray(n); x = (0x2545f4914f6cdd1d + seed*0x9e3779b97f4a7c15) & ((1<<64)-1)
+    for i in range(n):
+        x ^= (x << 13) & ((1<<64)-1); x ^= x >> 7; x ^= (x << 17) & ((1<<64)-1)
+        out[i] = ord('A') if (x >> 31) & 1 == 0 else ord('B')
+    return out.decode()
+def build(lens, eid, seed0):
+    lines = [json.dumps({"event_id": eid})]
+    for i, L in enumerate(lens):
+        lines.append(json.dumps({"type":"attachment","length":L,"content_type":"text/plain"}))
+        lines.append(filler(L, seed0 + i))
+    return ("\n".join(lines) + "\n").encode()
+overhead = len(json.dumps({"event_id":"ab"*16}).encode()) + 1
+overhead += 5 * (len(json.dumps({"type":"attachment","length":0,"content_type":"text/plain"}).encode()) + 2)
+lens = [(1048576 - overhead)//5]*4 + [0]; lens[4] = 1048576 - overhead - 4*lens[0]
+raw = build(lens, "ab"*16, 11)
+for _ in range(10):                          # settle length-field digits
+    d = len(raw) - 1048576
+    if d == 0: break
+    lens[4] -= d; raw = build(lens, "ab"*16, 11)
+assert len(raw) == 1048576, len(raw)
+open("/tmp/atcap.envelope","wb").write(raw)
+lens[4] += 1
+raw2 = build(lens, "cd"*16, 77)
+assert len(raw2) == 1048577
+open("/tmp/over.envelope","wb").write(raw2)
+PY
+$ gzip -n -c /tmp/atcap.envelope > /tmp/atcap.gz
+$ gzip -n -c /tmp/over.envelope > /tmp/over.gz
+$ KEY=<pubkey>   # the project's public_key (bin/trouble config explain projects)
+$ curl -s -X POST "http://127.0.0.1:7643/api/1/envelope/?sentry_key=$KEY" \
+    -H 'Content-Encoding: gzip' --data-binary @/tmp/atcap.gz
+{"id":"abababababababababababababababab"}
+$ curl -s -X POST "http://127.0.0.1:7643/api/1/envelope/?sentry_key=$KEY" \
+    -H 'Content-Encoding: gzip' --data-binary @/tmp/over.gz
+{"causes":["decompressed_cap"],"detail":"decompressed payload exceeds the cap"}
+```
+
+The generic route's own answer at the cap, for completeness: a gzip'd
+`{"message":"…"}` document of exactly 1,048,576 bytes is `400` +
+`{"causes":["message_too_long"],"detail":"generic JSON body invalid"}` +
+`X-Sentry-Error: TROUBLE-SENTINEL-019`.
 
 ### Client report timestamps
 

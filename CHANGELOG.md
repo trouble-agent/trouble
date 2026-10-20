@@ -139,6 +139,24 @@ Note on versions: no release tag is cut yet. A build from this tree is
   the incident on the third) and edges resolve by ID, so legitimate
   closes through the dashboard no longer fail with `unknown transition`.
 
+- **The documented decompressed-cap boundary names its layers (TRBL-115)**:
+  `docs/operations.md` "Envelope size refusals" and `docs/sentinel-compat.md`
+  §3 claimed a body of exactly 1,048,576 decompressed bytes is admitted on
+  every route — but through the documented generic-JSON curl on-ramp
+  (`POST /api/{id}/event/`) a single-message body that size is refused `400` +
+  `TROUBLE-SENTINEL-019` + `message_too_long` first: the §3.6 dialect caps
+  `message` at 16 KB (`genericMaxMessage`), and the transport's boundary was
+  only observable one byte past the cap. Both documents now state the boundary
+  as what it is — a TRANSPORT statement from the shared body reader — name the
+  dialect's 16 KB cap beside it (new caps-table row, cause `message_too_long`),
+  and point the byte-exact accept example at a payload that can legally reach
+  the cap: a five-item `attachment` envelope (each item under the 256 KB
+  per-item cap), gzip'd with incompressible filler under the ratio guard and
+  the 200 KB compressed cap. `docs/operations.md` now carries the full
+  reproducible recipe (payload generator + curl lines) verified against a
+  scratch boot: exactly 1,048,576 decompressed bytes → `200` + event id, one
+  byte more → `413` + `TROUBLE-SENTINEL-003` + `decompressed_cap`.
+
 ### Notes
 
 - The repo publishes its own `guard/` connectors and a Python guard client used

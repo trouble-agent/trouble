@@ -79,17 +79,28 @@ explicit `length`; without it the envelope is `400` + `TROUBLE-SENTINEL-001`
 | single item | 256 KB | `413` + `TROUBLE-SENTINEL-002` (cause `item_too_large`) |
 | header / item-header line | 8 KB | `400` + `TROUBLE-SENTINEL-001` |
 | body line (log lines) | 64 KB | truncated, `truncated_total` |
+| generic JSON `message` / `exception.value` (§3.6) | 16 KB | `400` + `TROUBLE-SENTINEL-019` (cause `message_too_long`) — dialect-level, checked after the transport caps above |
 | in-flight requests | 64 | queued ≤1s, then `429` + `1:error:global:overloaded:` |
 | per IP | 600/min, burst 60 | `429` + `1:error:ip:overloaded:` |
 
-The decompressed cap is enforced **at the cap**: a body of exactly `1048576`
-decompressed bytes is accepted (200) and `1048577` is refused, on `identity` and
-`gzip` alike — the 200 KB compressed cap is checked first and only masks this
-boundary for a payload that does not actually compress. `cap + 64KB` is the
-limited reader's *memory* bound — the headroom that makes "over the cap"
-detectable without buffering the rest of the stream (§6.1) — so the window
-between the cap and cap + 64KB is a refusal, never a payload.
-`TestDecompressedCapBoundary` asserts the boundary against this table's number.
+The decompressed cap is a **transport** statement: it is evaluated by the shared
+body reader (`readEnvelopeBody`) on every route — `/envelope/`, `/store/` and
+`/event/` alike — before any parser sees a byte. The §3.6 generic-JSON dialect
+has its own per-message cap (16 KB, `TROUBLE-SENTINEL-019`,
+`message_too_long`), which answers **after** the transport but long **before**
+the cap for a single-message body: a 1 MiB JSON document with one `message`
+field is already 64× over the dialect's limit, so through the generic route the
+documented boundary answers `400` + `TROUBLE-SENTINEL-019` + `message_too_long`
+on the accept side, and `413` + `TROUBLE-SENTINEL-003` (`decompressed_cap`) one
+byte past it. To exercise the transport boundary itself, use a multi-item
+envelope — five `attachment` items of ~200 KB each sum to exactly
+`1048576` decompressed bytes and are admitted (200); one byte more is refused
+(`413` + `TROUBLE-SENTINEL-003`, cause `decompressed_cap`). Two caps can answer
+even earlier and mask the number: the 200 KB compressed cap (a 1 MiB
+`identity` body trips it first, `413` + `TROUBLE-SENTINEL-002`, cause
+`too_large`) and the 100:1 ratio guard (a highly compressible filler trips it,
+same 413, cause `compression_ratio` — use incompressible filler, e.g. a
+pseudo-random A/B byte pattern, and gzip the body).
 
 ## 4. SDK / client compatibility
 

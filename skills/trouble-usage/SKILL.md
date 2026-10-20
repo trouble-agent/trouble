@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.4.1
+version: 1.4.2
 category: software-development
 ---
 
@@ -287,6 +287,20 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   case. Run history lives in `.coding-hermes/dogfood-log.md` plus the per-run
   reports under `docs/dogfood/` — read the last two entries before choosing a
   surface, otherwise you will re-sweep a covered one.
+
+* **Ingest caps, the gzip guard and the quota ladder: where the contract actually rides**
+  (verified live 2026-10-20 at `a4362ff`): every refusal carries the documented code in the
+  **`X-Sentry-Error` HEADER** (002 compressed >200KB cause `too_large`; 003 ratio guard cause
+  `compression_ratio`; 003 decompressed cap cause `decompressed_cap` at exactly 1,048,577; 019
+  generic body invalid; 022 `415` unsupported encoding; 010 on a quota 429) — dump full headers
+  (`curl -D -`), never judge an ingest error from the body alone. Testing transport caps through the
+  documented generic-JSON on-ramp hits the dialect's OWN field cap first: `message` is capped at
+  16KB (`internal/sentinel/genericjson.go:15`), so a 1MiB body answers `400 + 019 +
+  message_too_long` even though the transport would have accepted it (TRBL-115). To drive the §3.9
+  loss policy, lower `quota_epm` in a scratch config (3 or 5) — the window counts every admitted
+  request including your baseline, so reset or count it before calling a threshold drift — and read
+  the audit trail afterwards: refusals land as event records with `disposition=dropped_quota` and
+  `payload.error_code=TROUBLE-SENTINEL-014`, landed ones as `disposition=admitted`.
 
 ## Where the knowledge lives
 

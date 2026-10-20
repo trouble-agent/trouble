@@ -528,3 +528,30 @@ the 3G cap — the new surface shipped with a test that is load-sensitive on
    `map[string]json.RawMessage`, delete the reserved member, `Encoder(SetEscapeHTML(false))`,
    `sha256[:16]`) and compare its digest with the stored `payload_sha256`. Exact match = the algorithm
    is right and the wiring is wrong; mismatch = the algorithm is wrong. Here it matched to the byte.
+
+
+## 2026-10-20 (run 3) — two false alarms worth more than the finding (ingest caps + quota)
+
+6. **Count the earlier admitted request before calling a quota threshold drift.** The proactive backoff
+   looked one event early: with `quota_epm=5` the rate-limit header appeared on the fourth request. The
+   code is `w.used*100 >= quotaEPM*proactiveBackoffPct` with `proactiveBackoffPct = 95`
+   (`internal/sentinel/quota.go:19`, `:108`) — exact. My run's baseline `200` had already consumed one
+   unit of the window, so the fourth request took `used` to 5/5 and the header was correct. Lesson: a
+   threshold probe on a ROLLING WINDOW must reset (or count) everything it posted earlier in the same
+   window, else the finding is about the probe. Same class as the 09-28 'refusal at 1s' trap.
+
+7. **Read the doc anchor's SURFACE before calling a missing field a defect.** `/health.json` returned
+   null/absent `events_per_min`, `dropped_total`, `sampled_total` and `reject_total` after a measured
+   quota loss — which reads like 'the operator signal the runbook names is dead'. The runbook row
+   ("quota is not eating evidence", operations §9.2) anchors those counters on the DASHBOARD
+   `ProjectRuntime` view (SPEC-10), not on health.json; my scratch instance refuses the dashboard data
+   plane without a token store (TROUBLE-LIFECYCLE-001 / QA-TROUBLE-19, known and filed long ago). The
+   probe was pointed at the wrong surface, not the product. Before filing 'the counter is missing', grep
+   which surface the doc line names — health.json, the dashboard JSON API, and the CLI status verb are
+   three different faces of the same state.
+
+8. **The ingest refusal contract is X-Sentry-Error, not the body.** A `grep` for status codes and
+   `causes` alone makes a correctly-coded refusal look codeless: every refusal in this build carries
+   `X-Sentry-Error: TROUBLE-SENTINEL-0xx` in the HEADER (002/003/010/019/022 verified live), which is
+   what SDKs and scripts match on. Dump full response headers before judging an error contract —
+   `curl -D -` — and only then compare against the doc's code table.

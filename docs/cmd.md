@@ -150,10 +150,10 @@ trouble upgrade [--to PATH] [--rollback] [--wait DURATION]
 trouble escalate --unit NAME            invoked by trouble-escalate@.service only
 trouble sensors probe [--json] [--timeout DURATION]   run the capability probe without a boot (exit 0, degraded included)
 trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
-                               [--output-env ENVFILE]
-trouble dashboard token rotate --label LABEL [--output-env ENVFILE]
-trouble dashboard token revoke --label LABEL
-trouble dashboard token list [--json]
+                               [--output-env ENVFILE] [--token-file PATH]
+trouble dashboard token rotate --label LABEL [--output-env ENVFILE] [--token-file PATH]
+trouble dashboard token revoke --label LABEL [--token-file PATH]
+trouble dashboard token list [--json] [--token-file PATH]
 trouble hub status [--json]             the light-hub profile: stream, dedup and archive state
 trouble hub archive [--dry-run] [--file FILE] [--force]   export closed generations to DuckBrain
 trouble hub dedup --key KEY [--json]    probe the dedup gate for one idempotency key
@@ -177,7 +177,12 @@ root — the pair a container `HEALTHCHECK` and a second-instance probe need.
 
 The dashboard token plaintext is printed exactly once, by
 `trouble dashboard token create` / `rotate`, on stdout; it is unrecoverable
-afterwards because only `sha256(token)[:32]` is stored (SPEC-10 §3.2). There is no
+afterwards because only `sha256(token)[:32]` is stored (SPEC-10 §3.2). Each
+token verb accepts `--token-file PATH` (alias `--dashboard-token_file PATH`)
+to write or read a store other than the resolved `dashboard.token_file`: pass
+the daemon's own `--dashboard-token_file` value so the mint lands in the file
+that daemon reads, and give an explicit path (`/…`, `~/…`, `./…` or `../…`),
+the same rule the daemon's argv control enforces. There is no
 token-management HTTP route in v0.1, by design.
 
 ### The `trouble hub` verbs

@@ -510,3 +510,21 @@ the 3G cap — the new surface shipped with a test that is load-sensitive on
    `HEAD` hint above the file's tail *is* the spec. What the 2026-10-16 run correctly caught was the
    gap riding silently; the trail now records `lifecycle{op:hole,from,to}` and `seq_recovered`, which
    is the honest half. Do not re-file the allocation as a defect — check the spec line first.
+
+
+## 2026-10-20 (run 2) — one defect, two verifiers: why a merged fix can still leave the user broken
+
+5. **A verifier fix must be re-driven through the CLI, not just through the package that was patched.**
+   This repo now has TWO payload-hash checks with the same error string: `internal/ledger/recover.go:548`
+   (`Ledger.Verify`, patched by the merged TRBL-106 fix at `:538`, helper at `:617`/`:641`) and
+   `internal/ledger/readonly.go:307` (`ReadVerify`, added when TRBL-104/105 made the verbs read-only).
+   `trouble ledger verify` calls `ReadVerify` (`cmd/trouble/ledger.go:232`), so the fix landed on the
+   path only the in-process tests use. The tell was cheap: `grep -rn 'payload hash mismatch' --include='*.go' internal/`
+   returns two producers — fix one, and the other keeps emitting. Whenever a verdict string exists in
+   more than one walk, treat it as a family and assert on the USER surface (a CLI run against a
+   freshly written ledger), not on the helper's unit test.
+   Bisect recipe that separates "helper wrong" from "helper unused": replicate the merged helper in a
+   throwaway Go program OUTSIDE the repo (unmarshal the raw line's payload into
+   `map[string]json.RawMessage`, delete the reserved member, `Encoder(SetEscapeHTML(false))`,
+   `sha256[:16]`) and compare its digest with the stored `payload_sha256`. Exact match = the algorithm
+   is right and the wiring is wrong; mismatch = the algorithm is wrong. Here it matched to the byte.

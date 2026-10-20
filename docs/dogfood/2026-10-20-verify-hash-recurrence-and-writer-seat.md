@@ -153,3 +153,42 @@ Land `98ba880` on main and prove it the way this run did: build HEAD stamped, bo
 root once, `trouble ledger verify` → rc 0. Then make the close-out step assert
 `git merge-base --is-ancestor <fix-sha> origin/main` — the same hour that fixes the tooling prevents
 the next silent regression of exactly this shape.
+
+
+## Run 2 addendum (same tick, second angle) — the fix landed, and it is wired into the wrong verifier
+
+While run 1 was being written, the foreman merged the TRBL-106 fix: `a4362ff Merge wt/TRBL-106: fix
+verify payload_hash false-positives (TRBL-106-R2)` (the merge of `98ba880`, which is now an ancestor
+of main, regression test included). Run 1's evidence base is that merge's parent; this addendum
+re-proves the FIX on the merged tree (`a4362ff`, binaries rebuilt and stamped).
+
+**Result: the helper is correct, the user-facing verb is not fixed.**
+
+* My standalone replication of the merged helper (`json.Unmarshal` into `map[string]json.RawMessage`,
+  `delete(payload_sha256)`, `Encoder(SetEscapeHTML(false))` — `internal/ledger/recover.go:617/:641`)
+  produces 18814 bytes whose `sha256[:16]` is `e983344ae3793f1f` — **exactly** the stored
+  `payload_sha256` of a virgin seq-2 config record, and byte-identical to an independent byte-splice.
+  The old decoded-map path on the same bytes gives `c8ea23335044558b`, which is what `verify` prints.
+* The merged regression suite PASSes: `go test ./internal/ledger -run
+  'TestVerifyPayloadHash|TestPayloadBytesWithoutHash' -count=1` → `ok 0.758s`, 7/7 subtests.
+* But `trouble ledger verify` never calls the fixed code: `cmd/trouble/ledger.go:232` →
+  `ledger.ReadVerify(...)`, whose walk at `internal/ledger/readonly.go:297-308` still recomputes via
+  the decoded map and emits `seq %d: payload hash mismatch` at `:307`. The fix went into
+  `Ledger.Verify` (`recover.go:538`), a path the CLI verb does not use since TRBL-104/105 made it
+  read-only.
+* Measured on a fresh scratch root at `a4362ff`: `verify` rc=1, 1 mismatch (`seq 2`) after one boot,
+  3 (`seq 2`, `18`, `40`) after three boots. Measured on a FRESH BOX (bunker-mvp agent
+  `df-trouble-1020r2`, a4362ff binaries shipped, verbatim quickstart config, destroyed afterwards):
+  rc=1, 1 mismatch, and 2 after one restart (`seq 2`, `seq 2846`).
+* Filed as **TRBL-106-R3** (P1). TRBL-106-R2 stays pending with an audit EVENT recording where its
+  fix stops; TRBL-112 was re-probed on the same build and still reproduces unchanged (the delta did
+  not touch its anchors) — cited as an event, no new row.
+
+**Perf on the moved build** (same command shape as run 1): `ledger verify` 10.4–15.8 ms (n=10) on a
+104 KB ledger vs run 1's 28.2 ms ± 4.4 on a 400 KB ledger — the cost tracks ledger size as before,
+still compute-bound (user ≈ wall), still nothing a user would notice. No PERF row.
+
+**What this changes about the run-1 verdict:** the audit-spine trust leak is now precisely located —
+one defect, two verifiers, one of them fixed. The lesson for the closure (TRBL-113) is sharpened:
+merging the cited commit is necessary but not sufficient; the acceptance must be re-driven through
+the CLI the user runs, which is what this addendum does.

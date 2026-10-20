@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.4.0
+version: 1.4.1
 category: software-development
 ---
 
@@ -210,20 +210,20 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   status exit code: a *degraded* ledger makes `ledger status` exit 1, so read
   the JSON rather than the exit code when the ledger has holes you injected
   yourself.
-* **`payload hash mismatch` on a virgin ledger is STILL a false positive at
-  HEAD — the fix never landed** (TRBL-106; re-proven 2026-10-20 at d081f79, filed
-  as TRBL-106-R2): verify re-canonicalizes struct-ordered payloads through a
-  sorted map, so the stored hash never reproduces — one false positive per
-  daemon boot config record, forever, on a ledger the daemon wrote itself. The
-  fix commit `98ba880` and its regression test exist only on
-  `origin/wt/TRBL-106` (`git merge-base --is-ancestor 98ba880 HEAD` → rc=1). To
-  prove the DATA is fine without trusting either side: splice the reserved
-  `payload_sha256` member out of the raw stored payload bytes and hash what is
-  left — on this run's seq 2 that reproduced the stored
-  `318d8e8e57a48537` exactly, while the sorted-map re-marshal gave
-  `571d2947a9469af3`. Treat hash-mismatch errors as noise (holes, torn/corrupt
-  counts and ts continuity stay trustworthy), and check a fix's merge status
-  before believing a closed row.
+* **`payload hash mismatch` is a false positive on the CLI verb — the fix landed but is wired to
+  the other verifier** (TRBL-106 / TRBL-106-R2 / TRBL-106-R3, run 2 of 2026-10-20 at `a4362ff`):
+  `trouble ledger verify` calls `ledger.ReadVerify`, whose walk still recomputes the hash through the
+  decoded-map path (`internal/ledger/readonly.go:297-308`), while the merged fix lives in
+  `Ledger.Verify` (`internal/ledger/recover.go:538`, helpers `:617`/`:641`) — so a virgin ledger still
+  reports `seq 2: payload hash mismatch`, rc=1, one per boot config record, and the package's own
+  regression test passes because it exercises the library, not the verb. Treat it as noise; holes,
+  torn/corrupt counts and ts continuity stay trustworthy. To prove the DATA is intact without
+  trusting either side: splice the reserved `payload_sha256` member out of the raw stored payload
+  bytes and hash what remains — a virgin seq-2 record reproduces its stored digest exactly
+  (`e983344ae3793f1f`) while the decoded-map form gives `c8ea23335044558b`, which is what verify
+  prints. General rule: when a verdict string exists in more than one walk
+  (`grep -rn 'payload hash mismatch' --include='*.go' internal/` → two producers), the fix is only
+  proven when you re-drive the USER surface, not the helper's unit test.
 * **A torn write glued to the next record (no newline) classifies as one 011
   corrupt line** (TRBL-107): the intact record sharing the line is
   unrecoverable. If verify reports corrupt_lines on a ledger that crashed

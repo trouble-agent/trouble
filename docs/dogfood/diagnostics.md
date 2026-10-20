@@ -472,3 +472,41 @@ chaos-corruption OK, ci-pass/chaos-resource FAIL on the known load-budget class
 plus TRBL-100's own TestLedgerVerifyExitCodesSpec01Section24 joining it under
 the 3G cap — the new surface shipped with a test that is load-sensitive on
 4-vCPU agents, same lineage as QA-TROUBLE-17.
+
+
+## 2026-10-20 — how the verify false positive came back, and where the writer seat leaks (tick trouble-dogfood-2026-10-20-00-18-40)
+
+1. **A fix that only ever existed on a branch reads exactly like a fix.** `98ba880` (TRBL-106)
+   added `verifyPayloadHashLine`/`payloadBytesWithoutHash` and a 487-line regression test, and the
+   row was closed with "verified fix on wt/TRBL-106". At HEAD `d081f79` the symbols do not exist in
+   any non-test file, the test file is absent, and `internal/ledger/recover.go`'s `Verify` still
+   runs the old block (`cp := map[string]any{}` … `payloadHash(cp) != h`). The right way to check a
+   closed fix is one command away and must be part of every closure:
+   `git merge-base --is-ancestor <fix-sha> origin/main` (or a content grep against `origin/main`).
+   Grading the branch tip grades a proxy; the branch tip is exactly what the closing commit cites.
+
+2. **The way to tell an honest payload hash from a verifier bug — without trusting either side.**
+   Take the stored line, locate the raw `payload` bytes, splice out the reserved `payload_sha256`
+   member at the byte level, and hash what remains (`hex(sha256)[:16]`). If that equals the stored
+   `payload_sha256`, the record is intact and the verifier's recomputation is wrong; if it does not,
+   the record is damaged. On this run's virgin ledger the raw-bytes hash matched exactly
+   (`318d8e8e57a48537`) while the recursive sorted-key re-marshal produced `571d2947a9469af3` — which
+   is why `verify` reports `seq 2: payload hash mismatch` on a ledger the daemon wrote itself, once
+   per boot config record, and why `docs/operations.md` section 2's daily check fails forever on a
+   healthy deployment.
+
+3. **A refusal is not a no-op: check the state root after every "it just refused" leg.** A `--dry-run`
+   `compact` that refuses (TROUBLE-LEDGER-007, rc=1) still opened the ledger and left a `LOCK` file
+   naming the CLI's own now-dead pid (`cmd/trouble/ledger.go:301` opens before the decision). The
+   read-only status path then reports that pid verbatim because `internal/ledger/readonly.go:176`
+   parses `LOCK` without the kill-0 liveness check its own sibling `CheckWriterHeld` (lines 44–62)
+   applies. The way to see it: run `ledger status --json` with no daemon (`writer_pid=-1`), run the
+   refusing verb, then run `ledger status --json` again (`writer_pid=<dead pid>`) and `kill -0` that
+   pid. Any verb that reports "the writer" must answer "is it alive" from the process, not from a
+   file the previous process left behind.
+
+4. **Stale hints are by design; silent gaps were not (TRBL-110 resolved).** SPEC-01 section 3.4 rule 7
+   defines `seq_alloc = max(HEAD.last_seq, highest seq in the highest-generation file) + 1`, so a
+   `HEAD` hint above the file's tail *is* the spec. What the 2026-10-16 run correctly caught was the
+   gap riding silently; the trail now records `lifecycle{op:hole,from,to}` and `seq_recovered`, which
+   is the honest half. Do not re-file the allocation as a defect — check the spec line first.

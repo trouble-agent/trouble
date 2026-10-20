@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.3.0
+version: 1.4.0
 category: software-development
 ---
 
@@ -20,7 +20,10 @@ This skill is the shortest path from "I landed in this repo" to "the daemon is
 running and I am looking at real incidents". Everything here was verified by
 hand on 2026-09-17 (`c363daf`, go1.26.5). See
 `docs/dogfood/2026-09-17-integration.md` for the full transcript and
-`docs/dogfood/diagnostics.md` for why the traps exist.
+`docs/dogfood/diagnostics.md` for why the traps exist. The 2026-10-20 pass
+re-verified every ledger verb at `d081f79`; its traps and evidence are in
+`docs/dogfood/2026-10-20-verify-hash-recurrence-and-writer-seat.md` (board rows
+TRBL-106-R2/112/113/114).
 
 ## Entry points
 
@@ -192,44 +195,72 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   session noise → 20+ incidents in seconds → `rule:dbus_unit_failed` open, see
   TRBL-094). Do not treat an open breaker on a brand-new install as a fault;
   look for the real signal under it.
-* **`trouble ledger status` is not read-only** (TRBL-104, dogfood 2026-10-16):
-  it takes the writer flock, appends a `lifecycle{op:"boot"}` record as
-  `trouble-ledger-cli`, rewrites HEAD/`.idx`, and reports its own pid as
-  `writer_pid` when no daemon is up. Budget for those records when auditing a
-  trail, and never point the CLI verbs at a ledger whose history you are
-  proving byte-for-byte.
-* **The ledger verbs refuse while the daemon holds LOCK** (TRBL-105): with the
-  daemon up, status exits 1 / verify exits 2 / compact exits 1 with a
-  `degraded_reason` naming the LOCK — despite ops.md §2's older "verify is
-  always safe against a live ledger" wording. Run the verbs after a clean
-  shutdown, or read `health.json` while it runs.
-* **Expect `payload hash mismatch` rows on config/lifecycle records** (TRBL-106):
-  verify re-canonicalizes struct-ordered payloads through a sorted map, so the
-  stored hash never reproduces — a false positive on the audit spine, not data
-  damage. Treat hash-mismatch errors as noise until TRBL-106 lands; holes,
-  torn/corrupt counts and ts continuity remain trustworthy.
+* **`trouble ledger status` IS read-only now — verified with a live writer**
+  (TRBL-104 fixed, re-proven 2026-10-20 at d081f79): with the daemon running,
+  `status`/`verify` write nothing at all (no `trouble-ledger-cli` records, no
+  HEAD/`.idx` rewrite) and `writer_pid` is the LOCK holder, not the CLI's own
+  pid. `compact` is the one that still takes the writer seat — it refuses
+  `writer-live` while the daemon runs, but it also opens the ledger on the
+  refusal path (see the LOCK-residue pitfall below).
+* **Status/verify are safe against a LIVE ledger; the runbook's older wording is
+  now the truth again** (TRBL-105 fixed; re-proven 2026-10-20 at d081f79): with
+  the daemon up, `status`/`verify` walk the files read-only, `compact` refuses
+  with `degraded: writer-live` (rc=1, naming the LOCK holder), and the daily
+  checks in `docs/operations.md` §2 run against a running daemon. Note the
+  status exit code: a *degraded* ledger makes `ledger status` exit 1, so read
+  the JSON rather than the exit code when the ledger has holes you injected
+  yourself.
+* **`payload hash mismatch` on a virgin ledger is STILL a false positive at
+  HEAD — the fix never landed** (TRBL-106; re-proven 2026-10-20 at d081f79, filed
+  as TRBL-106-R2): verify re-canonicalizes struct-ordered payloads through a
+  sorted map, so the stored hash never reproduces — one false positive per
+  daemon boot config record, forever, on a ledger the daemon wrote itself. The
+  fix commit `98ba880` and its regression test exist only on
+  `origin/wt/TRBL-106` (`git merge-base --is-ancestor 98ba880 HEAD` → rc=1). To
+  prove the DATA is fine without trusting either side: splice the reserved
+  `payload_sha256` member out of the raw stored payload bytes and hash what is
+  left — on this run's seq 2 that reproduced the stored
+  `318d8e8e57a48537` exactly, while the sorted-map re-marshal gave
+  `571d2947a9469af3`. Treat hash-mismatch errors as noise (holes, torn/corrupt
+  counts and ts continuity stay trustworthy), and check a fix's merge status
+  before believing a closed row.
 * **A torn write glued to the next record (no newline) classifies as one 011
   corrupt line** (TRBL-107): the intact record sharing the line is
   unrecoverable. If verify reports corrupt_lines on a ledger that crashed
   mid-write, inspect the flagged line by hand before writing it off.
-* **The `<day>.jsonl.idx` sidecar is advisory only** (TRBL-108): its
-  records/first_seq/last_seq can contradict the file after heals; rebuild the
-  truth from the JSONL itself.
-* **The quickstart's key placeholder is a trap — patch the key you SEE, not
-  the one the README names** (TRBL-109, dogfood 2026-10-16 run 2):
-  deploy/README.md says to replace `replace-with-a-new-32-lowercase-hex-character-key`,
-  but examples/config.toml ships `public_key = "0123456789abcdef0123456789abcdef"`.
-  Follow the README verbatim and your first event 401s `unknown_key` — the sed
-  no-op'd and the daemon booted with the stock placeholder. Always derive the
-  key from the config file itself (`grep public_key` after your edits) before
-  posting.
-* **The seq allocator seeds from the HEAD hint** (TRBL-110, run 2): a stale or
-  high HEAD (crash between HEAD refresh and fsync, or a restore of an old
-  HEAD) makes the next Append allocate from the hint, seeding a REAL verify-
-  visible seq hole — SPEC-01 §3.4 rule 7's "HEAD is never a source of truth"
-  does not hold (still true at HEAD 43e78ba: TRBL-110's fix 6ce84db adds only
-  the audit-trail hole record; the allocation semantics are unchanged). After
-  any restore/repair, rewrite HEAD to the file's true max seq BEFORE booting.
+* **A REFUSED `compact` is not a no-op — it leaves a LOCK naming its own dead
+  pid, and `status` then reports that dead pid as the writer** (TRBL-112,
+  2026-10-20): with no daemon up, `ledger status --json` honestly reports
+  `writer_pid=-1`; run `ledger compact --day <the ACTIVE day> --dry-run` and it
+  refuses (rc=1, `TROUBLE-LEDGER-007 … refusing to compact the file the writer
+  is appending to`) *after* creating `<state_root>/ledger/LOCK` with its own
+  pid, which stays on disk. The next `status` reports that dead pid
+  (`internal/ledger/readonly.go:176` parses LOCK without the kill-0 check its
+  sibling `CheckWriterHeld` applies), so a monitor reads "writer alive" on a
+  stopped host. The active day is *never* compactable — compact an older day
+  (verified: 437 lines → 428 kept + 9 aggregates, 12 ms) — and the refusal's
+  code (007 = "compaction failed" per SPEC-TYPES) is not the one ops.md §4
+  documents (009). After any refused compact, check the state root and `kill -0`
+  the reported pid before believing `writer_pid`.
+* **The quickstart's key placeholder trap is FIXED — do not pre-patch the key
+  (TRBL-109 fixed, re-proven 2026-10-20 on a fresh bunker agent)**: `deploy/README.md`
+  now names the placeholder `examples/config.toml` actually ships and says the
+  first-event command reads the key back out of the file, so the two cannot
+  disagree. Following it verbatim on a box that had never seen the repo: boot →
+  first event **200** in 0.352 s with the shipped key, no edit. Still derive the
+  key from the config file itself (`grep public_key`) instead of retyping it —
+  that part of the old pitfall stands.
+* **The seq allocator seeds from the HEAD hint — that is the SPEC, not a bug
+  (TRBL-110 resolved 2026-10-20)**: SPEC-01 §3.4 rule 7 itself defines
+  `seq_alloc = max(HEAD.last_seq, highest seq in the highest-generation file) + 1`
+  and `docs/operations.md` §3 repeats it, so a high/stale HEAD (restore of an old
+  HEAD, crash between refresh and fsync) makes the next Append allocate from the
+  hint and **burns the seq numbers in between** — measured at d081f79: file max
+  2839 + HEAD hint 9999 → the next records are `10000…10002` and the gap is now
+  recorded honestly as `lifecycle{op:"hole",from:2843,to:9999}` +
+  `seq_recovered`. It is not data loss, but `verify` will report that hole on
+  every pass, so after any restore/repair rewrite HEAD to the file's true max seq
+  BEFORE booting to avoid spending the range.
 * **A missing `--config` now refuses — it used to fall back to the DEFAULT
   root and write boot notes there** (TRBL-111, run 2; FIXED by f59b30e,
   2026-10-17): a `--config` path that does not exist exits 13 with
@@ -240,6 +271,22 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   but `compact` still opens the ledger for write and every open appends one
   `lifecycle{op:"boot"}` record — budget for it when auditing any trail
   `compact` has touched.
+* **A closed row does not mean a landed fix — assert the commit is an ancestor
+  of `origin/main` before trusting it** (TRBL-113, 2026-10-20): TRBL-106 read
+  `complete` with "verified fix on wt/TRBL-106" while `98ba880` was never merged
+  (`git merge-base --is-ancestor 98ba880 HEAD` → rc=1; `git branch -r --contains
+  98ba880` → `origin/wt/TRBL-106`), so the defect shipped for three more days.
+  The same census showed `origin/wt/TRBL-109` unmerged *and* harmless — its fix
+  content is on main via `d64b496` — which is why the check must grade the fix's
+  content or ancestry, never `git branch --contains`. Before re-proving a closed
+  finding, run the ancestry check first; before closing one, put its output in
+  the row.
+* **The dogfood/QA catalog `docs/qa/use-cases.md` does not exist** (TRBL-114,
+  2026-10-20): there are no `UC-`/`REG-` ids anywhere in the repo, so coverage is
+  re-derived from prose every tick and no fixed defect has a durable regression
+  case. Run history lives in `.coding-hermes/dogfood-log.md` plus the per-run
+  reports under `docs/dogfood/` — read the last two entries before choosing a
+  surface, otherwise you will re-sweep a covered one.
 
 ## Where the knowledge lives
 

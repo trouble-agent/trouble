@@ -257,12 +257,28 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 		spans    []seqSpan
 	}
 	aggs := map[string]*aggInfo{}
+	// Seq continuity is a PER-DAY property (see Ledger.Verify): each day file
+	// starts from its own seq base, so a multi-day walk neither invents holes at
+	// day boundaries nor lets one day's seqs mask another day's real hole.
 	seen := map[uint64]struct{}{}
 	var consumed []seqSpan
+	curDay := ""
+	flushDay := func() {
+		if curDay == "" {
+			return
+		}
+		rep.SeqHoles = append(rep.SeqHoles, verifyContinuity(seen, consumed)...)
+		seen = map[uint64]struct{}{}
+		consumed = nil
+	}
 
 	for _, p := range files {
 		if day != "" && p.Day != day {
 			continue
+		}
+		if p.Day != curDay {
+			flushDay()
+			curDay = p.Day
 		}
 		rep.Files = append(rep.Files, p.File)
 
@@ -343,7 +359,7 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 		}
 	}
 
-	rep.SeqHoles = verifyContinuity(seen, consumed)
+	flushDay()
 
 	// Check compaction aggregate counts. The denominator is the union of the
 	// seqs the surviving in-range event lines carry and the seqs the aggregates

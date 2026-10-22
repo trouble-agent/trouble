@@ -730,11 +730,28 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 		spans    []seqSpan
 	}
 	aggs := map[string]*aggInfo{}
+	// Seq continuity is a PER-DAY property: every day file starts from its own
+	// seq base, so a walk spanning several days must not compare one day's last
+	// seq against the next day's first (that invented a hole at every day
+	// boundary and, worse, let one day's seqs mask another day's real hole).
 	seen := map[uint64]struct{}{}
 	var consumed []seqSpan
+	curDay := ""
+	flushDay := func() {
+		if curDay == "" {
+			return
+		}
+		rep.SeqHoles = append(rep.SeqHoles, verifyContinuity(seen, consumed)...)
+		seen = map[uint64]struct{}{}
+		consumed = nil
+	}
 	for _, p := range parts {
 		if day != "" && p.Day != day {
 			continue
+		}
+		if p.Day != curDay {
+			flushDay()
+			curDay = p.Day
 		}
 		rep.Files = append(rep.Files, p.File)
 		f, ferr := os.Open(filepath.Join(l.root, p.File))
@@ -829,7 +846,7 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 			rep.OK = false
 		}
 	}
-	rep.SeqHoles = verifyContinuity(seen, consumed)
+	flushDay()
 	for _, ai := range aggs {
 		counted := eventSeqSet(ai.seqs, ai.spans)
 		if ai.declared != 0 && counted != 0 && ai.declared != counted {

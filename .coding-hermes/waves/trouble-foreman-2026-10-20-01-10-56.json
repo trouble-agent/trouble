@@ -1,0 +1,31 @@
+{
+  "tick_id": "trouble-foreman-2026-10-20-01-10-56",
+  "project": "trouble",
+  "base_sha": "720b081",
+  "workers": [
+    {
+      "task_id": "TRBL-112",
+      "branch": "wt/TRBL-112",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-112",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "outcome": "failed",
+      "reason": "branch and worktree absent; no TRBL-112 commit anywhere in git log --all; nothing recoverable"
+    },
+    {
+      "task_id": "TRBL-115",
+      "branch": "wt/TRBL-115",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-115",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "outcome": "complete",
+      "commit": "303e338eb46f97e5af0e7724e9f12ec296455dff",
+      "landed_in_main": "76a1ed39fc6dc4c16fdffff1e156bf3de98977e1",
+      "merge": "no-op merge: 303e338 already an ancestor of current main; branch had zero commits ahead and only board residue in its diff",
+      "gates": "build PASS, vet PASS, go test ./... -count=1 -short PASS (26 pkgs), specs/tools/selfcheck.py PASS, re-run on the preserved branch tip"
+    }
+  ],
+  "status": "recovered",
+  "recovered_by_tick": "trouble-foreman-2026-10-22-17-19-15",
+  "finished_at": "2026-10-22T17:32:47Z"
+}

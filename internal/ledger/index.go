@@ -1043,6 +1043,12 @@ func (ix *index) applyLocked(rec *types.Record) {
 	}
 }
 
+// isCompactionAggregate answers "is this record an aggregate?" for the paths
+// that only need to tell a group aggregate from a group snapshot: the index's
+// cold test (applyGroupLocked) and the compactor's own fold bookkeeping. The
+// dedup core stamps `aggregate: true` on every live group record it writes
+// (create/fold/update/flush, SPEC-01 §3.3), so this predicate is deliberately
+// broad — it must answer TRUE for its own inputs.
 func isCompactionAggregate(rec *types.Record) bool {
 	if v, ok := rec.Payload["op"].(string); ok && v == "compaction_aggregate" {
 		return true
@@ -1051,6 +1057,23 @@ func isCompactionAggregate(rec *types.Record) bool {
 		return true
 	}
 	return false
+}
+
+// isCompactionMarker is the verify-path predicate: only a record the compactor
+// actually wrote — payload.op == "compaction_aggregate" — may declare folded
+// event counts.
+//
+// It must NOT match on `aggregate: true` alone: the dedup core writes that flag
+// (with counters.events counting the group's events) on every live group record,
+// so the broad predicate made an ordinary fold declare events that are still
+// present as event records — declared=1, counted=0 for a suppressed retry, which
+// the verifiers reported as a tombstone mismatch and drove `trouble ledger
+// verify` to exit 1 on a healthy ledger (TRBL-116). The compactor's real
+// aggregate (compact.go) is the only record carrying both
+// `op: compaction_aggregate` and `agg_seqs`.
+func isCompactionMarker(rec *types.Record) bool {
+	v, ok := rec.Payload["op"].(string)
+	return ok && v == "compaction_aggregate"
 }
 
 // groupKeyOf resolves a record's group key. The precedence is the dedup core's:

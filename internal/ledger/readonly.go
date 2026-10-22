@@ -315,7 +315,10 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 					ai.counted++
 				}
 			case types.KGroup:
-				if isCompactionAggregate(rec) {
+				// Only the compactor's own aggregate may declare folded event
+				// counts; a dedup-core group record carries `aggregate: true`
+				// for the live group (TRBL-116).
+				if isCompactionMarker(rec) {
 					digest, _, _ := groupKeyOf(rec)
 					ai := aggs[digest]
 					if ai == nil {

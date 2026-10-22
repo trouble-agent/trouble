@@ -361,3 +361,129 @@ func countOccurrences(t *testing.T, l *Ledger, needle string) int {
 }
 
 func bytesEqual(a, b []byte) bool { return string(a) == string(b) }
+
+// ch:trace row=TRBL-117 spec=specs/SPEC-01-ledger.md#3.7 wave=.coding-hermes/waves/trouble-foreman-2026-10-22-19-12-53.json#TRBL-117 test=internal/ledger/compact_test.go::TestCompactionVerifyRoundTrip doc=none:not-needed prompt=/tmp/trouble-foreman-2026-10-22-19-12-53-TRBL-117-brief2.txt evidence=none:pending-foreman-verification witness=none:pending-foreman-verification verdict=none:pending-judge commit=none:pending-implementation memory=/trouble/v011-round
+//
+// TestCompactionVerifyRoundTrip (SPEC-01 §3.7 rule 5): compaction folds event
+// lines into one aggregate per group whose payload.agg_seqs declares the
+// consumed [first..last] seq range plus explicit exceptions. After Compact, a
+// verify of the day must return OK=true with zero SeqHoles and zero
+// TombstoneMismatches — through BOTH verifiers (Ledger.Verify and the read-only
+// ReadVerify the `ledger verify` CLI verb uses). Before TRBL-117 neither read
+// agg_seqs, so one healthy compaction "proved" 25 seq holes and 101 tombstone
+// mismatches on a live day.
+func TestCompactionVerifyRoundTrip(t *testing.T) {
+	day := time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC)
+	clk := newFakeClock(day)
+	l := compactFixture(t, clk, day, 12, true)
+
+	rp := DefaultRetentionPolicy()
+	rp.RawKeep = "1s"
+	res, err := l.Compact(context.Background(), "2026-09-16", rp)
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	if res.Aggregates == 0 {
+		t.Fatalf("fixture did not produce any compaction aggregate: %+v", res)
+	}
+
+	ctx := context.Background()
+	rep, err := l.Verify(ctx, "2026-09-16")
+	if err != nil {
+		t.Fatalf("Ledger.Verify of the compacted generation: %v", err)
+	}
+	if !rep.OK || len(rep.SeqHoles) != 0 || rep.TombstoneMismatches != 0 {
+		t.Fatalf("Ledger.Verify after compaction: OK=%v seq_holes=%+v tombstone_mismatches=%d corrupt=%d torn=%d errors=%v",
+			rep.OK, rep.SeqHoles, rep.TombstoneMismatches, rep.CorruptLines, rep.TornLines, rep.Errors)
+	}
+
+	// The CLI path must agree with the library path.
+	ro, err := ReadVerify(l.Root(), "2026-09-16")
+	if err != nil {
+		t.Fatalf("ReadVerify of the compacted generation: %v", err)
+	}
+	if !ro.OK || len(ro.SeqHoles) != 0 || ro.TombstoneMismatches != 0 {
+		t.Fatalf("ReadVerify after compaction: OK=%v seq_holes=%+v tombstone_mismatches=%d corrupt=%d torn=%d errors=%v",
+			ro.OK, ro.SeqHoles, ro.TombstoneMismatches, ro.CorruptLines, ro.TornLines, ro.Errors)
+	}
+	// The aggregate ranges are what make that clean: a day file minus its
+	// aggregate lines must show holes, or the fixture never exercised them.
+	if len(rep.SeqHoles) == 0 && rep.Lines == 0 {
+		t.Fatalf("verify read no lines at all")
+	}
+}
+
+// TestCompactionVerifyStillDetectsLoss is the negative half of the round trip:
+// after a healthy compaction, dropping the surviving event line for a group
+// leaves its aggregate declaring more folded events than any line or range
+// accounts for, and verify must still FAIL (the agg_seqs accounting must not
+// blind the gate).
+func TestCompactionVerifyStillDetectsLoss(t *testing.T) {
+	day := time.Date(2026, 9, 16, 9, 0, 0, 0, time.UTC)
+	clk := newFakeClock(day)
+	l := compactFixture(t, clk, day, 9, true)
+
+	rp := DefaultRetentionPolicy()
+	rp.RawKeep = "1s"
+	res, err := l.Compact(context.Background(), "2026-09-16", rp)
+	if err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	genPath := filepath.Join(l.Root(), res.ToFile)
+	raw, err := os.ReadFile(genPath)
+	if err != nil {
+		t.Fatalf("read generation: %v", err)
+	}
+
+	// Remove the ONE aggregate whose declared range is widest: its folded
+	// events become unaccounted while every surviving line keeps its seq.
+	lines := splitLines(raw)
+	dropAt := -1
+	widest := -1
+	for i, ln := range lines {
+		if len(strings.TrimSpace(string(ln))) == 0 {
+			continue
+		}
+		rec, derr := decodeRecord(ln, true)
+		if derr != nil || rec == nil || !isCompactionMarker(rec) {
+			continue
+		}
+		spans, _ := aggSeqSpans(rec)
+		width := 0
+		for _, sp := range spans {
+			width += int(sp.to - sp.from + 1)
+		}
+		if width > widest {
+			widest, dropAt = width, i
+		}
+	}
+	if dropAt < 0 || widest < 2 {
+		t.Fatalf("fixture produced no aggregate wide enough to falsify (dropAt=%d widest=%d, aggregates=%d)", dropAt, widest, res.Aggregates)
+	}
+	kept := make([][]byte, 0, len(lines))
+	for i, ln := range lines {
+		if i == dropAt {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	var buf []byte
+	for _, ln := range kept {
+		buf = append(buf, ln...)
+		buf = append(buf, '\n')
+	}
+	if err := os.WriteFile(genPath, buf, 0o600); err != nil {
+		t.Fatalf("rewrite generation: %v", err)
+	}
+
+	rep, err := ReadVerify(l.Root(), "2026-09-16")
+	if err != nil {
+		t.Fatalf("ReadVerify: %v", err)
+	}
+	if rep.OK {
+		t.Fatalf("ReadVerify reported OK=true after an aggregate line was dropped (%d folded events unaccounted)", widest)
+	}
+	if len(rep.SeqHoles) == 0 {
+		t.Fatalf("ReadVerify reported no seq holes after an aggregate line carrying a folded range was dropped")
+	}
+}

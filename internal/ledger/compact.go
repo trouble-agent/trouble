@@ -7,10 +7,32 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
+
+// sortedSeqs returns the aggregate's consumed seq list, deduplicated and in
+// ascending order, as the JSON array stored in payload.agg_seqs.seqs.
+func sortedSeqs(in []uint64) []any {
+	if len(in) == 0 {
+		return []any{}
+	}
+	cp := make([]uint64, len(in))
+	copy(cp, in)
+	sort.Slice(cp, func(i, j int) bool { return cp[i] < cp[j] })
+	out := make([]any, 0, len(cp))
+	var prev uint64
+	for i, s := range cp {
+		if i > 0 && s == prev {
+			continue
+		}
+		out = append(out, s)
+		prev = s
+	}
+	return out
+}
 
 // Compact writes a new generation file for day and unlinks the parts and the
 // previous generation only after the new one is fsynced (SPEC-01 §3.7).
@@ -127,8 +149,13 @@ func (l *Ledger) compact(ctx context.Context, day string, rp RetentionPolicy, dr
 		lastTS   string
 		firstSeq uint64
 		lastSeq  uint64
-		emitAt   int
-		src      *types.Record
+		// seqs is every seq this aggregate folded, in fold order (SPEC-01 §3.7
+		// rule 5: the aggregate's `seq` list). The folded seqs of one group are
+		// NOT contiguous — the groups interleave in the writer — so `first`/
+		// `last` alone cannot state what was consumed; verify reads this list.
+		seqs   []uint64
+		emitAt int
+		src    *types.Record
 	}
 	aggs := map[string]*agg{}
 	emit := map[int]*agg{}
@@ -163,6 +190,7 @@ func (l *Ledger) compact(ctx context.Context, day string, rp RetentionPolicy, dr
 				a.firstTS, a.firstSeq = rec.TS, rec.Seq
 			}
 			a.count++
+			a.seqs = append(a.seqs, rec.Seq)
 			a.redacted += uint64(rec.Redactions)
 			a.lastTS, a.lastSeq = rec.TS, rec.Seq
 			a.src = rec // the newest folded line carries the aggregate's identity
@@ -183,6 +211,16 @@ func (l *Ledger) compact(ctx context.Context, day string, rp RetentionPolicy, dr
 			}
 			eventsBefore += c.Events
 			a.count += c.Events
+			// The prior aggregate's own seq was itself a folded event line; it
+			// must stay in the consumed list so verify accounts for it too.
+			if prior, ok := rec.Payload["agg_seqs"].(map[string]any); ok {
+				if list, ok := prior["seqs"].([]any); ok {
+					for _, v := range list {
+						a.seqs = append(a.seqs, uint64(numOf(v)))
+					}
+				}
+			}
+			a.seqs = append(a.seqs, rec.Seq)
 			a.redacted += uint64(rec.Redactions)
 			a.lastTS, a.lastSeq = rec.TS, rec.Seq
 			a.src = rec
@@ -228,7 +266,7 @@ func (l *Ledger) compact(ctx context.Context, day string, rp RetentionPolicy, dr
 				"last_ts":               a.lastTS,
 				"first_seq":             a.firstSeq,
 				"last_seq":              a.lastSeq,
-				"agg_seqs":              map[string]any{"first": a.firstSeq, "last": a.lastSeq, "count": a.count, "exceptions": []any{}},
+				"agg_seqs":              map[string]any{"first": a.firstSeq, "last": a.lastSeq, "count": a.count, "seqs": sortedSeqs(a.seqs), "exceptions": []any{}},
 				"tombstone_counts_kept": true,
 				"counters": map[string]any{
 					"events":          a.count,

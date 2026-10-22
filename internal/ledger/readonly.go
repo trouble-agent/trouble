@@ -252,10 +252,13 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 
 	rep := VerifyReport{Day: day, OK: true}
 	type aggInfo struct {
-		declared, counted uint64
+		declared uint64
+		seqs     map[uint64]struct{}
+		spans    []seqSpan
 	}
 	aggs := map[string]*aggInfo{}
-	var prev uint64
+	seen := map[uint64]struct{}{}
+	var consumed []seqSpan
 
 	for _, p := range files {
 		if day != "" && p.Day != day {
@@ -286,14 +289,10 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 				return nil
 			}
 			rep.Lines++
-			if rec.Seq == 0 || (prev != 0 && rec.Seq != prev+1) {
-				from := prev + 1
-				if rec.Seq == 0 {
-					from = prev
-				}
-				rep.SeqHoles = append(rep.SeqHoles, SeqHole{From: from, To: rec.Seq - 1})
-			}
-			prev = rec.Seq
+			// A zero seq is not a continuity break to special-case here: it is
+			// absent from every accounted range, so verifyContinuity reports it
+			// like any other unaccounted seq.
+			seen[rec.Seq] = struct{}{}
 			if h, ok := rec.Payload["payload_sha256"].(string); ok && h != "" {
 				got, herr := verifyPayloadHashLine(line)
 				if herr == nil && got != h {
@@ -312,7 +311,10 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 						ai = &aggInfo{}
 						aggs[digest] = ai
 					}
-					ai.counted++
+					if ai.seqs == nil {
+						ai.seqs = map[uint64]struct{}{}
+					}
+					ai.seqs[rec.Seq] = struct{}{}
 				}
 			case types.KGroup:
 				// Only the compactor's own aggregate may declare folded event
@@ -325,9 +327,10 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 						ai = &aggInfo{}
 						aggs[digest] = ai
 					}
-					if c, ok := rec.Payload["counters"].(map[string]any); ok {
-						ai.declared += uint64(numOf(c["events"]))
-					}
+					spans, declared := aggSeqSpans(rec)
+					consumed = append(consumed, spans...)
+					ai.spans = append(ai.spans, spans...)
+					ai.declared += declared
 					rep.Counts.Events += uint64(numOf(rec.Payload["events_aggregated"]))
 				}
 			}
@@ -340,9 +343,16 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 		}
 	}
 
-	// Check compaction aggregate counts.
+	rep.SeqHoles = verifyContinuity(seen, consumed)
+
+	// Check compaction aggregate counts. The denominator is the union of the
+	// seqs the surviving in-range event lines carry and the seqs the aggregates
+	// declare consumed in payload.agg_seqs (TRBL-117): counting only surviving
+	// lines made every compacted group look short by the width of its folded
+	// range.
 	for _, ai := range aggs {
-		if ai.declared != 0 && ai.counted != 0 && ai.declared != ai.counted {
+		counted := eventSeqSet(ai.seqs, ai.spans)
+		if ai.declared != 0 && counted != 0 && ai.declared != counted {
 			rep.TombstoneMismatches++
 		}
 	}

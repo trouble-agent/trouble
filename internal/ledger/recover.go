@@ -465,6 +465,241 @@ type SeqHole struct {
 	To   uint64 `json:"to"`
 }
 
+// seqSpan is one inclusive seq range. A verified day's file needs to account for
+// every seq it no longer carries a line for; a compaction aggregate accounts for
+// the range it folded into itself.
+type seqSpan struct{ from, to uint64 }
+
+// aggSeqSpans reads the seq ranges a compaction aggregate declares consumed in
+// payload.agg_seqs (`[first..last]` plus explicit exceptions, SPEC-01 §3.7 rule
+// 5) and returns them along with the aggregate's declared event count.
+//
+// Both verifiers call it: without it a compacted generation reads as a ledger
+// full of seq holes and undeclared tombstones (TRBL-117 — one healthy
+// compaction produced 25 seq_holes and 101 tombstone_mismatches). The declared
+// count comes from counters.events, falling back to events_aggregated; a
+// payload that carries no usable range returns no spans, so the caller keeps the
+// strict contiguous-seq behaviour for a generation that has no aggregate at all.
+//
+// An exception names a seq that was NOT consumed even though it lies inside
+// [first..last]: an integer seq splits the range, a {from,to} object (or a
+// [from,to] pair) carves a sub-range, and an exception that falls outside the
+// declared range is ignored. A malformed agg_seqs leaves the record with no
+// spans rather than guessing.
+func aggSeqSpans(rec *types.Record) (spans []seqSpan, declared uint64) {
+	if rec == nil || rec.Payload == nil {
+		return nil, 0
+	}
+	raw, ok := rec.Payload["agg_seqs"]
+	if !ok {
+		return nil, 0
+	}
+	block, ok := raw.(map[string]any)
+	if !ok {
+		return nil, 0
+	}
+	first := uint64(numOf(block["first"]))
+	last := uint64(numOf(block["last"]))
+	// An aggregate that carries the explicit consumed-seq list states exactly
+	// what it folded; the [first..last] range cannot, because the writer
+	// interleaves groups and the folded seqs of one group are sparse. Prefer
+	// the list when present and fall back to the range for older aggregates.
+	if list, ok := block["seqs"].([]any); ok && len(list) > 0 {
+		numeric := make([]uint64, 0, len(list))
+		for _, v := range list {
+			if n := uint64(numOf(v)); n != 0 {
+				numeric = append(numeric, n)
+			}
+		}
+		if len(numeric) > 0 {
+			sort.Slice(numeric, func(i, j int) bool { return numeric[i] < numeric[j] })
+			start := numeric[0]
+			prev := numeric[0]
+			for _, n := range numeric[1:] {
+				if n == prev {
+					continue
+				}
+				if n == prev+1 {
+					prev = n
+					continue
+				}
+				spans = append(spans, seqSpan{start, prev})
+				start, prev = n, n
+			}
+			spans = append(spans, seqSpan{start, prev})
+			declared = uint64(len(numeric))
+			if c, ok := rec.Payload["counters"].(map[string]any); ok {
+				if n := uint64(numOf(c["events"])); n != 0 {
+					declared = n
+				}
+			} else if n := uint64(numOf(block["count"])); n != 0 {
+				declared = n
+			}
+			if n := uint64(numOf(rec.Payload["events_aggregated"])); n != 0 && declared == 0 {
+				declared = n
+			}
+			return spans, declared
+		}
+	}
+	if first == 0 || last < first {
+		return nil, 0
+	}
+	// The exceptions carve consumed seqs out of [first..last]; everything else
+	// in the range was folded into this aggregate.
+	var except []seqSpan
+	if list, ok := block["exceptions"].([]any); ok {
+		for _, e := range list {
+			switch v := e.(type) {
+			case map[string]any:
+				ef, el := uint64(numOf(v["from"])), uint64(numOf(v["to"]))
+				if ef == 0 {
+					ef = uint64(numOf(v["first"]))
+				}
+				if el == 0 {
+					el = uint64(numOf(v["last"]))
+				}
+				if ef != 0 && el >= ef {
+					except = append(except, seqSpan{ef, el})
+				}
+			case []any:
+				if len(v) == 2 {
+					ef, el := uint64(numOf(v[0])), uint64(numOf(v[1]))
+					if ef != 0 && el >= ef {
+						except = append(except, seqSpan{ef, el})
+					}
+				}
+			case float64, int, int64, json.Number:
+				if n := uint64(numOf(v)); n >= first && n <= last {
+					except = append(except, seqSpan{n, n})
+				}
+			}
+		}
+	}
+	sort.Slice(except, func(i, j int) bool { return except[i].from < except[j].from })
+	cur := first
+	for _, ex := range except {
+		if ex.to < cur {
+			continue
+		}
+		if ex.from > last {
+			break
+		}
+		if ex.from > cur {
+			spans = append(spans, seqSpan{cur, ex.from - 1})
+		}
+		if ex.to+1 > cur {
+			cur = ex.to + 1
+		}
+	}
+	if cur <= last {
+		spans = append(spans, seqSpan{cur, last})
+	}
+	counted := uint64(0)
+	for _, s := range spans {
+		counted += s.to - s.from + 1
+	}
+	declared = uint64(numOf(rec.Payload["events_aggregated"]))
+	if c, ok := rec.Payload["counters"].(map[string]any); ok {
+		if n := uint64(numOf(c["events"])); n != 0 {
+			declared = n
+		}
+	}
+	if declared == 0 {
+		declared = counted
+	}
+	return spans, declared
+}
+
+// verifyContinuity folds the seqs a day's lines actually carry together with
+// the ranges its compaction aggregates declare consumed, and reports the seq
+// ranges that neither accounts for. A line's own seq is always accounted for;
+// an aggregate accounts for the folded events whose lines compaction replaced
+// (TRBL-117). An aggregate may not account for a seq a line still carries.
+func verifyContinuity(seen map[uint64]struct{}, consumed []seqSpan) []SeqHole {
+	if len(seen) == 0 {
+		return nil
+	}
+	max := uint64(0)
+	for s := range seen {
+		if s > max {
+			max = s
+		}
+	}
+	for _, sp := range consumed {
+		if sp.to > max {
+			max = sp.to
+		}
+	}
+	spans := make([]seqSpan, 0, len(consumed))
+	for _, sp := range consumed {
+		if sp.to >= sp.from {
+			spans = append(spans, sp)
+		}
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].from < spans[j].from })
+
+	var holes []SeqHole
+	var start, end uint64
+	record := func(s, e uint64) {
+		if start == 0 {
+			start, end = s, e
+			return
+		}
+		if s == end+1 {
+			end = e
+			return
+		}
+		holes = append(holes, SeqHole{From: start, To: end})
+		start, end = s, e
+	}
+	idx := 0
+	for s := uint64(1); s <= max; s++ {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		for idx < len(spans) && spans[idx].to < s {
+			idx++
+		}
+		if idx < len(spans) && spans[idx].from <= s {
+			continue
+		}
+		record(s, s)
+	}
+	if start != 0 {
+		holes = append(holes, SeqHole{From: start, To: end})
+	}
+	return holes
+}
+
+// eventSeqSet is the tombstone-reconciliation denominator for one group
+// (TRBL-117): the seqs its compaction aggregate declares consumed, PLUS any
+// surviving event/canary line whose own seq falls inside those ranges. A line
+// the aggregate did not fold (it stayed verbatim in the generation file) is not
+// part of what the aggregate declares, so it must not inflate the count.
+// Without the agg_seqs half, every compacted group looked short by the width of
+// its folded range; without the in-range restriction, a surviving line outside
+// the range made it look long.
+func eventSeqSet(lines map[uint64]struct{}, consumed []seqSpan) uint64 {
+	set := make(map[uint64]struct{}, len(lines))
+	for _, sp := range consumed {
+		if sp.to < sp.from {
+			continue
+		}
+		for s := sp.from; s <= sp.to; s++ {
+			set[s] = struct{}{}
+		}
+	}
+	for s := range lines {
+		for _, sp := range consumed {
+			if s >= sp.from && s <= sp.to {
+				set[s] = struct{}{}
+				break
+			}
+		}
+	}
+	return uint64(len(set))
+}
+
 // VerifyReport is the read-only walk result (SPEC-01 §2.2).
 type VerifyReport struct {
 	Day                   string              `json:"day"`
@@ -489,9 +724,14 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 		return VerifyReport{}, err
 	}
 	rep := VerifyReport{Day: day, OK: true}
-	type aggInfo struct{ declared, counted uint64 }
+	type aggInfo struct {
+		declared uint64
+		seqs     map[uint64]struct{}
+		spans    []seqSpan
+	}
 	aggs := map[string]*aggInfo{}
-	var prev uint64
+	seen := map[uint64]struct{}{}
+	var consumed []seqSpan
 	for _, p := range parts {
 		if day != "" && p.Day != day {
 			continue
@@ -526,14 +766,10 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 				return nil
 			}
 			rep.Lines++
-			if rec.Seq == 0 || (prev != 0 && rec.Seq != prev+1) {
-				from := prev + 1
-				if rec.Seq == 0 {
-					from = prev
-				}
-				rep.SeqHoles = append(rep.SeqHoles, SeqHole{From: from, To: rec.Seq - 1})
-			}
-			prev = rec.Seq
+			// A zero seq is not a continuity break to special-case here: it is
+			// absent from every accounted range, so verifyContinuity reports it
+			// like any other unaccounted seq.
+			seen[rec.Seq] = struct{}{}
 			if h, ok := rec.Payload["payload_sha256"].(string); ok && h != "" {
 				got, herr := verifyPayloadHashLine(line)
 				switch {
@@ -559,7 +795,10 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 						ai = &aggInfo{}
 						aggs[digest] = ai
 					}
-					ai.counted++
+					if ai.seqs == nil {
+						ai.seqs = map[uint64]struct{}{}
+					}
+					ai.seqs[rec.Seq] = struct{}{}
 				}
 			case types.KGroup:
 				// Only the compactor's own aggregate may declare folded event
@@ -572,9 +811,10 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 						ai = &aggInfo{}
 						aggs[digest] = ai
 					}
-					if c, ok := rec.Payload["counters"].(map[string]any); ok {
-						ai.declared += uint64(numOf(c["events"]))
-					}
+					spans, declared := aggSeqSpans(rec)
+					consumed = append(consumed, spans...)
+					ai.spans = append(ai.spans, spans...)
+					ai.declared += declared
 					rep.Counts.Events += uint64(numOf(rec.Payload["events_aggregated"]))
 				}
 			}
@@ -589,8 +829,10 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 			rep.OK = false
 		}
 	}
+	rep.SeqHoles = verifyContinuity(seen, consumed)
 	for _, ai := range aggs {
-		if ai.declared != 0 && ai.counted != 0 && ai.declared != ai.counted {
+		counted := eventSeqSet(ai.seqs, ai.spans)
+		if ai.declared != 0 && counted != 0 && ai.declared != counted {
 			rep.TombstoneMismatches++
 		}
 	}

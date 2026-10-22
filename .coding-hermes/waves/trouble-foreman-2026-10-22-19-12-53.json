@@ -1,0 +1,16 @@
+{
+  "tick_id": "trouble-foreman-2026-10-22-19-12-53",
+  "project": "trouble",
+  "budget": 12,
+  "mode": "serial",
+  "reason": "Only TRBL-117 is worker-eligible; REVIEW-TROUBLE-10-22 is a review/report row and is not implementation work.",
+  "base": "856d21fa4ab440e6b2626a75a8aa943357b9403e",
+  "tasks": [
+    {
+      "row": "TRBL-117",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-117",
+      "branch": "wt/TRBL-117",
+      "status": "planned"
+    }
+  ]
+}

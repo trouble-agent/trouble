@@ -9,25 +9,31 @@
       "row": "TRBL-118",
       "worktree": "/home/kara/worktrees/trouble-TRBL-118",
       "branch": "wt/TRBL-118",
-      "status": "dispatching"
+      "status": "failed",
+      "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-119",
       "worktree": "/home/kara/worktrees/trouble-TRBL-119",
       "branch": "wt/TRBL-119",
-      "status": "dispatching"
+      "status": "failed",
+      "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-120",
       "worktree": "/home/kara/worktrees/trouble-TRBL-120",
       "branch": "wt/TRBL-120",
-      "status": "dispatching"
+      "status": "failed",
+      "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-121",
       "worktree": "/home/kara/worktrees/trouble-TRBL-121",
       "branch": "wt/TRBL-121",
-      "status": "dispatching"
+      "status": "failed",
+      "reason": "state.db lock contention \u2014 worker stalled"
     }
-  ]
+  ],
+  "finished_at": "2026-10-23T05:27:30.714281Z",
+  "recovery_note": "Workers stuck on state.db lock contention (parallel hermes chat sessions). All 4 workers killed without commits. TRBL-118/119/120/121 remain open for next tick."
 }

@@ -10,21 +10,34 @@
       "row": "TRBL-119",
       "worktree": "/home/kara/worktrees/trouble-TRBL-119",
       "branch": "wt/TRBL-119",
-      "files_owned": ["internal/dashboard/server.go", "internal/dashboard/tokens.go", "internal/dashboard/*_test.go"],
+      "files_owned": [
+        "internal/dashboard/server.go",
+        "internal/dashboard/tokens.go",
+        "internal/dashboard/*_test.go"
+      ],
       "status": "dispatched"
     },
     {
       "row": "TRBL-120",
       "worktree": "/home/kara/worktrees/trouble-TRBL-120",
       "branch": "wt/TRBL-120",
-      "files_owned": ["internal/ledger/recover.go", "internal/ledger/readonly.go", "internal/ledger/*_test.go", "cmd/trouble/*.go"],
+      "files_owned": [
+        "internal/ledger/recover.go",
+        "internal/ledger/readonly.go",
+        "internal/ledger/*_test.go",
+        "cmd/trouble/*.go"
+      ],
       "status": "dispatched"
     },
     {
       "row": "QA-TROUBLE-17-R2",
       "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R2",
       "branch": "wt/QA-TROUBLE-17-R2",
-      "files_owned": ["internal/sentinel/load_test.go", "internal/skills/canonical_test.go", "internal/loadfence/*.go"],
+      "files_owned": [
+        "internal/sentinel/load_test.go",
+        "internal/skills/canonical_test.go",
+        "internal/loadfence/*.go"
+      ],
       "status": "dispatched"
     }
   ],
@@ -36,5 +49,9 @@
       "status": "foreman-direct salvage"
     }
   ],
-  "dispatched_at": "2026-10-23T14:29:00Z"
+  "dispatched_at": "2026-10-23T14:29:00Z",
+  "status": "recovered",
+  "finished_at": "2026-10-23T20:42:13-05:00",
+  "recovered_by": "trouble-foreman-2026-10-23-20-42-13",
+  "recovery_note": "All three prior worker outcomes are already landed on current main: TRBL-119=0307f231, TRBL-120=092ee37f, QA-TROUBLE-17-R2=e05397a; TRBL-118 salvage=ffd26370. The named worker branches/worktrees for 119, 120, and QA-TROUBLE-17-R2 are absent; TRBL-118 is an ancestor of main with zero commits ahead. Current-main gates were re-run: build PASS, vet PASS, SPEC selfcheck PASS, focused package battery running/re-verified. No merge was needed; no new worker was dispatched during recovery."
 }

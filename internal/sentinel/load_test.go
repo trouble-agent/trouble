@@ -100,19 +100,12 @@ func rssBytes(tb testing.TB) int64 {
 // internal/scrub — see TestLoadIngestThroughput's load-aware floor). 0 when
 // unavailable, which keeps the quiet-host (spec) floor.
 func loadAvg1() float64 {
-	b, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return 0
-	}
-	f := strings.Fields(string(b))
-	if len(f) == 0 {
-		return 0
-	}
-	v, err := strconv.ParseFloat(f[0], 64)
-	if err != nil {
-		return 0
-	}
-	return v
+	// QA-TROUBLE-17-R2: one reader for every host-measured gate, so
+	// TROUBLE_HOST_LOAD_OVERRIDE (loadfence.EnvLoadOverride) falsifies this
+	// gate exactly as it falsifies the ledger's and scrub's budgets — including
+	// the case where an operator wants to force the measurement above
+	// loadfence.HostGateLoadCeiling.
+	return loadfence.LoadAvg1()
 }
 
 // loadFloorFor scales the §7 group-commit floor with the load the measurement
@@ -361,6 +354,18 @@ func TestLoadIngestThroughput(t *testing.T) {
 	// fill the ledger's group-commit batch and gather ~90 commit cycles —
 	// the bound is on the harness's own energy, never on what it can prove.
 	loadAtStart := loadAvg1()
+	// QA-TROUBLE-17-R2: above loadfence.HostGateLoadCeiling the group-commit
+	// floor stops being a product verdict — measured 120 req/s against the
+	// curve's own 537 req/s floor at load_avg_1m 20.99 on two hosts while the
+	// same test passed once load dipped. SKIP with the numbers named instead of
+	// FAILing on a floor this machine cannot meet; below the ceiling the floor
+	// still asserts, so a real regression stays red.
+	if loadfence.AboveHostGate(loadAtStart) {
+		t.Skipf("%s", loadfence.HostGateSkipText(
+			"SPEC-04 §7 ingest throughput (group-commit floor)",
+			fmt.Sprintf("the load-derived floor stops tracking the delivered rate here (measured 2026-10-23: 120 req/s vs a 537 req/s floor at load_avg 20.99 on a fresh bunker agent and on the dev box, passing when load dipped); set %s to force the measurement",
+				loadfence.EnvLoadOverride), loadAtStart))
+	}
 	if !explicitLoadEnv("LOAD_PIPELINE") {
 		pipeline = loadPipelineForLoad(loadAtStart)
 	}

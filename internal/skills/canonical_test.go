@@ -1,13 +1,14 @@
 package skills
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -261,6 +262,18 @@ func TestArtifactParseBudget(t *testing.T) {
 		return
 	}
 	load := loadAvgSkills()
+	// QA-TROUBLE-17-R2: the same declared ceiling as the sentinel throughput
+	// gate (loadfence.HostGateLoadCeiling). Above it this budget would grade the
+	// host's scheduler delay, not the parser, so the gate SKIPS and names the
+	// measurement instead of failing on a number the machine cannot meet. Below
+	// it the load-scaled budget above still asserts, so a real parse regression
+	// stays caught.
+	if loadfence.AboveHostGate(load) {
+		t.Skipf("%s", loadfence.HostGateSkipText(
+			"SPEC-06a artifact parse budget",
+			fmt.Sprintf("1000-artifact budget %s would be graded on scheduler delay, not parsing", artifactParseBudgetFor(load)),
+			load))
+	}
 	budget := artifactParseBudgetFor(load)
 	if elapsed > budget {
 		t.Fatalf("1000 artifacts parsed in %s, over the %s budget (load_avg_1m=%.2f; the spec budget is 500ms on a quiet host)", elapsed, budget, load)
@@ -344,19 +357,11 @@ func TestArtifactParseBudgetScaling(t *testing.T) {
 // (mirrors loadAvg1 in internal/ledger and internal/scrub). 0 when unavailable,
 // which keeps the quiet-host (spec) budget.
 func loadAvgSkills() float64 {
-	b, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
-		return 0
-	}
-	fields := strings.Fields(string(b))
-	if len(fields) == 0 {
-		return 0
-	}
-	v, err := strconv.ParseFloat(fields[0], 64)
-	if err != nil {
-		return 0
-	}
-	return v
+	// QA-TROUBLE-17-R2: one reader for every host-measured gate, so
+	// TROUBLE_HOST_LOAD_OVERRIDE (loadfence.EnvLoadOverride) falsifies this
+	// budget exactly as it falsifies the sentinel floor and the ledger's —
+	// otherwise a CI run could not exercise the assertion path on a loaded host.
+	return loadfence.LoadAvg1()
 }
 
 // TestArtifactLoadsFromDisk proves play_ref resolution against a real tree.

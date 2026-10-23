@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"time"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
@@ -60,6 +61,18 @@ func (r *refusedOnlyServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		r.server.ServeHTTP(w, req)
 		return
 	}
+	// TRBL-119: the refusal describes the token store AT BOOT, not a permanent
+	// property of this daemon. The mint verb runs in its OWN process
+	// (cmd/trouble `dashboard token create`), so a credential file can appear
+	// while this daemon is still up; the per-request §3.2 refresh — the code that
+	// clears the signal — lives INSIDE the auth chain this wrapper bypasses, so
+	// before answering 503 the wrapper re-stats the store itself and, once it
+	// loads, hands the request to the ordinary route table. Without this a token
+	// minted after a refused boot answered 503 on every data route until restart.
+	if r.refusalCleared() {
+		r.server.ServeHTTP(w, req)
+		return
+	}
 	r.counters.denied.Add(1)
 	r.writeError(w, req, &dashError{
 		Code:    types.CodeDashboard013,
@@ -67,6 +80,19 @@ func (r *refusedOnlyServer) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		Message: "dashboard refused at boot: token store missing",
 		Detail:  "dashboard_refused",
 	})
+}
+
+// refusalCleared reports whether the boot-time refusal no longer describes the
+// store. It runs the same per-request refresh the auth chain runs (auth.go) and
+// then re-reads the signal, so the wrapper's decision is per-request rather than
+// the boolean it captured at boot. A still-missing store keeps the data plane
+// closed: refresh leaves the signal alone and the refusal path answers.
+func (r *refusedOnlyServer) refusalCleared() bool {
+	if !r.store.Refused() {
+		return true
+	}
+	r.store.refresh(time.Now())
+	return !r.store.Refused()
 }
 
 // serveOn is the shared serve/drain body: serve until ctx is cancelled, then

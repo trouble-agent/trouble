@@ -146,9 +146,18 @@ func refusedProbeDeps() Deps {
 // edge 8) and refuses every OTHER route with 503 + TROUBLE-DASHBOARD-013,
 // before any credential evaluation.
 func TestRefusedOnlyServesHealthAndRefusesEverythingElse(t *testing.T) {
-	s, err := newServer(DefaultConfig(), refusedProbeDeps())
+	// The wrapper exists ONLY for a boot that refused: pin that premise instead of
+	// inheriting DefaultConfig's TokenFile, which may or may not exist on the host
+	// running the suite (TRBL-119 made the wrapper honour a store that is no longer
+	// refused, so a healthy store must serve the route table rather than 503).
+	cfg := DefaultConfig()
+	cfg.TokenFile = filepath.Join(t.TempDir(), "dashboard-tokens.json")
+	s, err := newServer(cfg, refusedProbeDeps())
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
+	}
+	if !s.store.Refused() {
+		t.Fatalf("premise: a missing token store must refuse at boot")
 	}
 	ro := &refusedOnlyServer{server: s}
 	ts := httptest.NewServer(ro)
@@ -196,9 +205,18 @@ func TestRefusedOnlyServesHealthAndRefusesEverythingElse(t *testing.T) {
 // caller. This is the literal inversion of the defeated state, where an
 // unauthenticated dashboard was silently serving.
 func TestRefusedOnlyRejectsTheDataPlaneWithAToken(t *testing.T) {
-	s, err := newServer(DefaultConfig(), refusedProbeDeps())
+	// Pin the refused-boot premise (a missing store) instead of inheriting
+	// DefaultConfig's TokenFile: what is under test is that the boot refusal is
+	// answered BEFORE credential evaluation, so the store must genuinely be
+	// refused while a credential is presented (TRBL-119).
+	cfg := DefaultConfig()
+	cfg.TokenFile = filepath.Join(t.TempDir(), "dashboard-tokens.json")
+	s, err := newServer(cfg, refusedProbeDeps())
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
+	}
+	if !s.store.Refused() {
+		t.Fatalf("premise: a missing token store must refuse at boot")
 	}
 	ro := &refusedOnlyServer{server: s}
 	ts := httptest.NewServer(ro)

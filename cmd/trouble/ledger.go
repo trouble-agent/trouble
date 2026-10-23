@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/trouble-agent/trouble/internal/ledger"
-	"github.com/trouble-agent/trouble/internal/lifecycle"
+	ledger "github.com/trouble-agent/trouble/internal/ledger"
+	lifecycle "github.com/trouble-agent/trouble/internal/lifecycle"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -298,6 +298,23 @@ func cmdLedgerCompact(args []string) int {
 	if code != 0 {
 		return code
 	}
+	// SPEC-01 §2.4: compact refuses the active day. Check the HEAD hint
+	// BEFORE taking the writer seat so a refused dry-run leaves no LOCK
+	// file behind. The headFile.readHeadFile path is the only way to know
+	// the current day without locking.
+	activeDay, _ := ledger.ReadHeadActiveDay(lc.root)
+	if *day == activeDay {
+		// Active day — refuse immediately without ever taking the writer
+		// seat (no LOCK, no ledger struct). The failure message names the
+		// documented refusal code 007.
+		if *asJSON {
+			_, _ = fmt.Fprintf(os.Stdout, "{\n  \"refused\": true,\n  \"refused_code\": \"TROUBLE-LEDGER-007\",\n  \"refused_reason\": \"compact of active day %s is not allowed; stop the daemon or specify a prior day\\n\"", *day)
+		} else {
+			fmt.Fprintln(os.Stderr, "ledger compact: TROUBLE-LEDGER-007 (compaction): cannot compact the active day (", *day, "); stop the daemon or specify a prior day")
+		}
+		return 1
+	}
+
 	led, held, err := openLedger(lc)
 	if held {
 		// Compaction must never race the daemon's writer: the open is refused

@@ -37,6 +37,16 @@ func readHeadFile(root string) (headFile, bool) {
 	return h, true
 }
 
+// ReadHeadActiveDay reads the active day from the HEAD hint.
+// Returns the day string and true if HEAD exists, or "" and false otherwise.
+func ReadHeadActiveDay(root string) (string, bool) {
+	h, ok := readHeadFile(root)
+	if !ok {
+		return "", false
+	}
+	return h.Day, true
+}
+
 // readLockPID opens the LOCK file (no flock) and returns the PID it records,
 // or -1 if the file does not exist or is empty.
 func readLockPID(root string) int {

@@ -362,7 +362,7 @@ func knownState(s types.LadderState) bool {
 	switch s {
 	case types.StDetected, types.StRecorded, types.StPlayDrafted, types.StPlayCheck, types.StPlayApplied,
 		types.StPlayFailed, types.StResRequested, types.StResReturned, types.StResDegraded, types.StResSkipped,
-		types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended,
+		types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended, types.StAcknowledged,
 		types.StVerifying, types.StResolved, types.StEscalated, types.StSuppressed, types.StQuarantined:
 		return true
 	}

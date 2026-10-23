@@ -248,6 +248,7 @@ const (
 	StAgentDone      LadderState = "agent:done"
 	StAgentFailed    LadderState = "agent:failed"
 	StAgentSuspended LadderState = "agent:suspended"
+	StAcknowledged   LadderState = "acknowledged"
 	StVerifying      LadderState = "verifying"
 	StResolved       LadderState = "resolved"
 	StEscalated      LadderState = "escalated"

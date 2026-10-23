@@ -8,10 +8,12 @@ import (
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
-// The transition table is DATA (SPEC-05 §7): 48 legal edges (T01–T48) and 13
-// refused edges (R01–R13), asserted cell-by-cell. A count guard in the tests
-// asserts len(legal)==48 && len(refused)==13 so a table edit cannot silently drop
-// an edge.
+// The transition table is DATA (SPEC-05 §7): 50 legal edges (T01–T50) and 14
+// refused edges (R01–R14), asserted cell-by-cell. A count guard in the tests
+// asserts len(legal)==50 && len(refused)==14 so a table edit cannot silently drop
+// an edge. T49/T50 are the human ack/close edges added by amendment TRBL-118
+// (§3.2a): the dashboard's ack owns a real state (`acknowledged`) instead of a
+// record-only note, and a human close walks out of it.
 
 // commonKeys are emitted by every legal edge (§3.2 lists them per row).
 var commonKeys = []string{"transition", "from", "to"}
@@ -789,7 +791,7 @@ var legal = []edge{
 		ID: "T47", From: anyOf(types.StDetected, types.StRecorded, types.StPlayDrafted, types.StPlayCheck, types.StPlayApplied, types.StPlayFailed,
 			types.StResRequested, types.StResReturned, types.StResDegraded, types.StResSkipped,
 			types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended,
-			types.StVerifying, types.StResolved, types.StEscalated, types.StSuppressed),
+			types.StAcknowledged, types.StVerifying, types.StResolved, types.StEscalated, types.StSuppressed),
 		To: types.StQuarantined, Trigger: "illegal_transitions_or_corrupt_snapshot",
 		Emitted: []string{"transition", "quarantine_reason", "illegal_transitions"},
 		Code:    types.CodeLadder017,
@@ -809,7 +811,7 @@ var legal = []edge{
 	{
 		ID: "T48", From: anyOf(types.StDetected, types.StRecorded, types.StPlayDrafted, types.StPlayCheck, types.StPlayApplied, types.StPlayFailed,
 			types.StResRequested, types.StResReturned, types.StResDegraded, types.StResSkipped,
-			types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended, types.StVerifying),
+			types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended, types.StAcknowledged, types.StVerifying),
 		To: types.StRecorded, Trigger: "scope_breaker_open_fold",
 		Emitted: []string{"transition", "folded", "breaker_scope", "suppressed_count"},
 		Code:    types.CodeLadder014,
@@ -822,6 +824,29 @@ var legal = []edge{
 		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
 			st.FoldCount++
 			st.SuppressedCount++
+			return nil
+		},
+	},
+	// T49/T50 — amendment TRBL-118 (SPEC-05 §3.2a). The human ack is a STATE,
+	// not only a note: without it the dashboard's own ack left the incident in a
+	// pre-work state with no edge into `resolved`, so its close button could never
+	// succeed (no_close_edge). Neither edge is a stage entry: §3.4/SPEC-10 §6.4
+	// keep ack and close working while the kill-switch is set, because they are
+	// the human decisions the freeze waits for.
+	{
+		ID: "T49", From: anyOf(types.StDetected, types.StRecorded), To: types.StAcknowledged, Trigger: "human_ack",
+		Emitted: []string{"transition", "state"},
+		Apply:   func(l *Ladder, st *incState, tr Transition) *Error { return nil },
+	},
+	{
+		ID: "T50", From: anyOf(types.StAcknowledged), To: types.StResolved, Trigger: "human_close",
+		Emitted: []string{"transition", "state", "resolved_ts"},
+		// No evidence tuple: the human IS the resolution evidence (§3.2a). The
+		// ladder's own proofs (T38 window_passed, T45 quiet_close) stay the only
+		// edges the daemon may take on its own — T50 exists only because a person
+		// clicked close.
+		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
+			st.Inc.ResolvedTS = types.FormatUTC(l.now())
 			return nil
 		},
 	},
@@ -891,6 +916,19 @@ var refused = []refusal{
 	{ID: "R13", From: anyOf(), To: anyOf(), Why: "any stage entry while the kill-switch is set is refused and recorded as pending",
 		Wild:  true,
 		Match: func(from, to types.LadderState) bool { return false }},
+	// R14 (amendment TRBL-118): the human ack is a PRE-WORK edge. Once the ladder
+	// has taken the incident into a work state, verification, suppression or a
+	// terminal state, an ack is an audit note only — it never moves the machine,
+	// so nothing can rewind `verifying`/`suppressed`/`play:*` into `acknowledged`.
+	{ID: "R14", From: anyOf(types.StPlayDrafted, types.StPlayCheck, types.StPlayApplied, types.StPlayFailed,
+		types.StResRequested, types.StResReturned, types.StResDegraded, types.StResSkipped,
+		types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended,
+		types.StVerifying, types.StSuppressed, types.StResolved, types.StEscalated, types.StQuarantined),
+		To:  anyOf(types.StAcknowledged),
+		Why: "acknowledged is the pre-work human hold: after work starts an ack is recorded, never a transition",
+		Match: func(from, to types.LadderState) bool {
+			return to == types.StAcknowledged && from != types.StDetected && from != types.StRecorded
+		}},
 }
 
 func isAgentState(s types.LadderState) bool {
@@ -1275,6 +1313,37 @@ func RefuseFor(from, to types.LadderState) (string, bool) {
 	for _, r := range refused {
 		if r.Match != nil && r.Match(from, to) {
 			return r.ID, true
+		}
+	}
+	return "", false
+}
+
+// CloseEdge names the table's own edge from st into `resolved`: T38
+// (window_passed) from verifying, T45 (quiet_close) from suppressed, T50
+// (human_close) from acknowledged. Table order means the lowest id wins, so a
+// state that ever gains both a proof edge and the human one keeps the proof.
+//
+// It is the pre-check a close caller uses before it attempts the transition and
+// the same predicate the dashboard renders the close control from: a button whose
+// only possible outcome is TROUBLE-LADDER-012 (no_close_edge) is the TRBL-118
+// defect, and the control is not offered for a state this reports false on.
+func CloseEdge(st types.LadderState) (string, bool) {
+	for _, e := range legal {
+		if e.To == types.StResolved && statesContain(e.From, st) {
+			return e.ID, true
+		}
+	}
+	return "", false
+}
+
+// AckEdge names the table's own edge from st into `acknowledged` (T49
+// human_ack). It reports false for every other state, where an ack is an audit
+// record only (R14): attempting the edge there would count as an illegal
+// transition, and three of those quarantine the incident (§3.3/INV-6).
+func AckEdge(st types.LadderState) (string, bool) {
+	for _, e := range legal {
+		if e.To == types.StAcknowledged && statesContain(e.From, st) {
+			return e.ID, true
 		}
 	}
 	return "", false

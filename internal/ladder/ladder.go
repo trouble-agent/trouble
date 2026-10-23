@@ -176,7 +176,7 @@ type AdmitResult struct {
 }
 
 // Transition is one requested state change (SPEC-05 §2). Trigger names an edge
-// (T01…T48) or is empty, in which case the ladder picks the edge implied by
+// (T01…T50) or is empty, in which case the ladder picks the edge implied by
 // From/To when exactly one is legal.
 type Transition struct {
 	Seq      uint64

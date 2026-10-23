@@ -355,6 +355,7 @@ type LadderState string
 const (
     StDetected   LadderState = "detected"
     StRecorded   LadderState = "recorded"
+    StAcknowledged LadderState = "acknowledged"   // human ack, amendment TRBL-118 (SPEC-05 §3.2a)
     StPlayDrafted LadderState = "play:drafted"
     StPlayCheck  LadderState = "play:check_only"
     StPlayApplied LadderState = "play:applied"

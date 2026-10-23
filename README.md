@@ -43,8 +43,9 @@ no `os/exec` anywhere in the package, and a module that accepts a `command`/`arg
 cannot register.
 
 `internal/ladder` — the state machine that decides what work a detection gets and is the only
-component allowed to declare a problem fixed (SPEC-05): the 19 pinned states, the 48-edge transition
-table plus 13 refused edges as data, the dedup/merge upsert keyed by `sig` and `inKey` (AC-22),
+component allowed to declare a problem fixed (SPEC-05): the 20 states (19 pinned plus the human
+`acknowledged` of amendment TRBL-118), the 50-edge transition
+table plus 14 refused edges as data, the dedup/merge upsert keyed by `sig` and `inKey` (AC-22),
 verification as an `Evidence` tuple where a canary that did not land can never produce `passed`,
 budgets, storm breakers and suppression windows, the host agent lease, and park/re-adopt for daemon
 restarts. It owns the `incident`, `verify` and `breaker` record kinds.

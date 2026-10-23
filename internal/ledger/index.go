@@ -1285,6 +1285,17 @@ func (ix *index) applyIncidentLocked(rec *types.Record, ts time.Time) {
 	if v, ok := rec.Payload["state"].(string); ok && v != "" {
 		inc.State = types.LadderState(v)
 	}
+	// TRBL-118: a dashboard ack is a state-bearing write. The bridge stamps the
+	// resulting state explicitly (the branch above), and a ledger written before
+	// that stamp carries only `transition:"acknowledged"` — fold it to
+	// `acknowledged` here rather than leaving the incident at the `detected`
+	// default. Without this a boot rebuild and the live append disagree, and the
+	// next observation re-derives a state the ladder has already left.
+	if _, stamped := rec.Payload["state"]; !stamped {
+		if v, ok := rec.Payload["transition"].(string); ok && v == "acknowledged" {
+			inc.State = types.StAcknowledged
+		}
+	}
 	if inc.State == "" {
 		inc.State = types.StDetected
 	}

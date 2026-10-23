@@ -415,6 +415,10 @@ func (s *server) pageIncident(w http.ResponseWriter, r *http.Request) {
 	cinc := cleanIncident(*inc)
 	d.Incident = &cinc
 	d.IncidentID = id
+	// The close control is state-gated (SPEC-10 §2.2, TRBL-118): offered only for
+	// the states whose edge into `resolved` exists, so the page stops inviting a
+	// click the ladder must refuse with no_close_edge.
+	d.CanClose = humanClosable(cinc.State)
 	if inc.GroupID != "" {
 		if g, ok := s.deps.Lookup.Group(inc.GroupID); ok && g != nil {
 			cg := cleanGroup(*g)

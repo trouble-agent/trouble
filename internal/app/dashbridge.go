@@ -25,14 +25,15 @@ import (
 //	close → ladder.Close(...) → incident record {transition:"closed", resolution, via:"dashboard"}
 //	autonomy → lifecycle.SetAutonomy → config record
 //
-// SPEC-05's frozen 19-state machine has no `acknowledged` and no human-close
-// edge (the legal edges into `resolved` are T38 window_passed from `verifying`
-// and T45 quiet_close from `suppressed`). The adapters below therefore do the
-// two things the spec's own semantics define and record the difference:
-// an ack is a sig-scoped hold until the given time (SPEC-05 §3's suppression)
-// plus its audit record, and a close walks the ladder's own edge into `resolved`
-// when the incident is in a state that has one, refusing otherwise instead of
-// inventing a transition. Both are recorded with the human actor.
+// Both human decisions own a state in SPEC-05's table (amendment TRBL-118,
+// §3.2a): the ack walks T49 `human_ack` (detected|recorded → acknowledged) and
+// the close walks T50 `human_close` (acknowledged → resolved), beside the
+// ladder's own proof edges T38 (window_passed from verifying) and T45
+// (quiet_close from suppressed). Before the amendment an ack wrote only an audit
+// record, so a freshly-acked incident stayed in a state with no edge into
+// `resolved` and every close was refused — the adapters below therefore move the
+// machine for the states that have an edge and refuse, never invent, for the
+// states that do not. Both are recorded with the human actor.
 
 // actorKey carries a per-request actor override into Store.Append, so a record
 // written on behalf of a human says so (SPEC-TYPES §3.1: Actor.Kind=human, ID =
@@ -182,15 +183,38 @@ func NewActions(lb *ladder.Ladder, store *Store) Actions {
 	return Actions{Ladder: lb, Store: store, Now: time.Now}
 }
 
-// Ack records the human acknowledgement and applies the hold the `until` means.
+// Ack records the human acknowledgement, walks the ladder's own pre-work edge
+// into `acknowledged` (T49), and applies the hold the `until` means.
+//
+// TRBL-118: the record alone was not enough. The ack used to write ONLY an audit
+// record, so the incident stayed in a state with no edge into `resolved` and the
+// dashboard's own close button could never succeed (every close was a
+// no_close_edge refusal or a stale_view 409). The ladder owns the state now, and
+// the record carries the operator's reason/until/via beside it, plus the
+// resulting state so a boot rebuild of the index agrees with the live append.
+//
+// An incident the ladder has already taken into work, verification, suppression
+// or a terminal state keeps the record-only behaviour: there the ack is an audit
+// note and the table declares no edge (R14), so the machine is left untouched
+// instead of counting the click as an illegal transition (§3.3/INV-6).
 func (a Actions) Ack(ctx context.Context, inc string, actor types.Actor, reason string, until types.Duration) error {
 	cur, err := a.Ladder.Incident(ctx, inc)
 	if err != nil {
 		return adaptSeam(err)
 	}
 	ctx = WithActor(ctx, actor)
+	state := cur.State
+	if trig, ok := ladder.AckEdge(cur.State); ok {
+		tr := ladder.Transition{Seq: a.seq(), From: cur.State, To: types.StAcknowledged, Trigger: trig}
+		next, err := a.Ladder.Advance(ctx, inc, tr)
+		if err != nil {
+			return adaptSeam(err)
+		}
+		state = next.State
+	}
 	payload := map[string]any{
 		"transition": "acknowledged",
+		"state":      string(state),
 		"reason":     reason,
 		"until":      string(until),
 		"via":        "dashboard",
@@ -233,6 +257,7 @@ func (a Actions) Close(ctx context.Context, inc string, actor types.Actor, reaso
 	}
 	_, err = a.Store.Append(ctx, types.KIncident, cur.Sig, inc, map[string]any{
 		"transition": "closed",
+		"state":      string(types.StResolved),
 		"reason":     reason,
 		"resolution": resolution,
 		"via":        "dashboard",
@@ -249,17 +274,15 @@ func (a Actions) seq() uint64 {
 
 // closeTrigger names the ladder's own edge for the state the incident is in.
 // Transition.Trigger carries the edge ID — FindEdge resolves by ID, not by the
-// trigger's display name — so a verifying close walks T38 and a suppressed
-// close walks T45.
+// trigger's display name — so a verifying close walks T38, a suppressed close
+// walks T45 and an acknowledged close (amendment TRBL-118) walks T50. The set is
+// DERIVED from the transition table, never restated here: a state that gains an
+// edge into `resolved` becomes closable without a second list to keep in sync.
 func closeTrigger(st types.LadderState) string {
-	switch st {
-	case types.StVerifying:
-		return "T38" // window_passed
-	case types.StSuppressed:
-		return "T45" // quiet_close
-	default:
-		return ""
+	if id, ok := ladder.CloseEdge(st); ok {
+		return id
 	}
+	return ""
 }
 
 // Autonomy is the dashboard's autonomy seam: reads come from the ladder, and the
@@ -315,7 +338,7 @@ var (
 )
 
 // errNoCloseEdge is the refusal a human close gets when the incident is not in
-// a state the frozen state machine can leave for `resolved`. It names both
+// a state the ladder's table can leave for `resolved`. It names both
 // states so the UI can say why instead of "failed", and it carries the seam
 // shape the dashboard maps to the wire: the ladder's TROUBLE-LADDER-012 as the
 // owning code, no_close_edge as the machine-readable detail, the human reason
@@ -329,7 +352,7 @@ type noCloseEdge struct{ state types.LadderState }
 
 func (e *noCloseEdge) Error() string {
 	return "TROUBLE-LADDER-012: incident state " + string(e.state) +
-		" has no legal edge to resolved; a human close is defined from verifying (T38) or suppressed (T45)"
+		" has no legal edge to resolved; a human close is defined from verified work (T38), a quiet suppression window (T45) or an acknowledged incident (T50)"
 }
 
 // ErrorCode is the seam code: TROUBLE-LADDER-012 is the ladder's permanent

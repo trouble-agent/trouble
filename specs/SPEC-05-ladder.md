@@ -286,15 +286,18 @@ the standard `Record` fields (seq, rec_id, ts, sig, inc, origin, actor, redactio
 
 ### 3.1 States and invariants
 
-States are exactly the 19 pinned in amendment N (`LadderState` constants; no additional state is legal):
+States are exactly the 19 pinned in amendment N plus `acknowledged` (amendment TRBL-118, §3.2a) — 20 in
+total (`LadderState` constants; no additional state is legal):
 
-`detected` · `recorded` · `play:drafted` · `play:check_only` · `play:applied` · `play:failed` ·
+`detected` · `recorded` · `acknowledged` · `play:drafted` · `play:check_only` · `play:applied` · `play:failed` ·
 `research:requested` · `research:returned` · `research:degraded` · `research:skipped` ·
 `agent:running` · `agent:done` · `agent:failed` · `agent:suspended` · `verifying` · `resolved` ·
 `escalated` · `suppressed` · `quarantined`.
 
 Terminal-with-exit: `resolved` (exit = reopen to `recorded`), `escalated` (exit = reopen to `recorded`),
 `quarantined` (exit = `Unquarantine`, operator actor only). `suppressed` is a waiting state, not terminal.
+`acknowledged` is a waiting state too: its exits are the human close (T50 → `resolved`) and T47's
+quarantine, and an arrival for the same `sig` folds into it (§3.2a rule 3) rather than re-entering `recorded`.
 
 INV-1 One open incident per `sig`, and one open incident per `inKey` (§3.9). Both maps are enforced by the
 same admission critical section; a violation is TROUBLE-LADDER-020.
@@ -359,13 +362,54 @@ mutates state, only increments the incident's `illegal_transitions` counter.
 | T44 | suppressed → recorded | suppression window closed with ≥1 suppressed event | `quiet_close` == false OR `suppressed_count` > 0 | I⟨transition, suppressed_count, rung⟩ | — |
 | T45 | suppressed → resolved | quiet-close: zero events for the whole window | `quiet_close` == true AND `suppressed_count` == 0 (positive quiet: the window's canary landed) | V⟨evidence{tuple,result:passed}, window⟩ + I⟨transition, state:resolved, quiet_close:true⟩ | — |
 | T46 | {detected, recorded, play:\*, research:\*, agent:suspended} → suppressed | a suppression window is declared while the incident is live | takes effect at the next checkpoint (§3.4); no in-flight mutating tool call is interrupted | I⟨transition, suppress_until, suppress_reason⟩ | TROUBLE-LADDER-018 |
-| T47 | any non-terminal state → quarantined | `illegal_transitions` ≥ 3, or a state snapshot fails validation | — | I⟨transition, quarantine_reason, illegal_transitions⟩ | TROUBLE-LADDER-017 |
+| T47 | any non-terminal state (incl. `acknowledged`) → quarantined | `illegal_transitions` ≥ 3, or a state snapshot fails validation | — | I⟨transition, quarantine_reason, illegal_transitions⟩ | TROUBLE-LADDER-017 |
 | T48 | (no state change) arrival while a scope breaker is open | an observation arrives for a `sig`/`rule`/`source` whose breaker is `open` | the observation is folded into the group counters and the newest open incident for that source, and never advances a rung | I⟨transition, folded:true, breaker_scope, suppressed_count⟩ | TROUBLE-LADDER-014 (once per window, then every 100th arrival) |
 
 Kill-switch refusals (§3.4) are recorded but are not transitions: every stage-entry edge (T03, T04, T05,
 T08, T10 with a mutating diff, T13, T14, T16, T22, T23, T24, T25, T31, T34, T39) is evaluated against
 `AutonomyGates.KillSwitch` first and, when set, records `I⟨refused:true, pending:true, resume_from:<state>,
 error_code:TROUBLE-LADDER-010⟩` without changing state.
+
+### 3.2a Amendment TRBL-118 — the human ack and human close edges (T49, T50, R14)
+
+The dashboard's ack and close are human decisions, and each owns a state. Before this amendment the ack
+wrote only an audit record (SPEC-10 §4.2 row 9), so a freshly-acknowledged incident stayed in a pre-work
+state whose edges run into work or suppression: no legal path to `resolved` existed, every close was refused
+(TROUBLE-LADDER-012 `no_close_edge`) or lost the compare-and-set race (409 `stale_view`), and the page kept
+rendering a close control that could not succeed. The amendment adds one state and two edges; nothing is
+renumbered and no existing edge changes its target.
+
+| # | Edge | Trigger | Guard | Emitted | Error |
+|---|---|---|---|---|---|
+| T49 | {detected, recorded} → acknowledged | the human ack (SPEC-10 §4.2 row 9); the actor is the token's human actor and rides `Record.actor` | none: the ack is the human's own decision, and neither the kill-switch nor an autonomy gate may refuse it (§3.4 point 4) | I⟨transition, state⟩ | — |
+| T50 | acknowledged → resolved | the human close (SPEC-10 §4.2 row 10) | no evidence tuple: the human IS the resolution evidence. The ladder's own proofs stay T38/T45 — a daemon may never take T50 | I⟨transition, state, resolved_ts⟩ | — |
+
+Rules, and what stays record-only:
+
+1. **`acknowledged` is entered only from a pre-work state.** `recorded` is what admission lands in (T01);
+   `detected` is the entry state the ledger index reports for an incident whose records carry no `state`
+   key, so both are listed and a reader, the index and the machine agree on the edge's scope.
+2. **A post-work ack is record-only (R14).** From `play:*`, `research:*`, `agent:*`, `verifying`,
+   `suppressed` or a terminal state there is no `human_ack` edge. The dashboard ack still writes its audit
+   record (reason, `until`, `via`) and the ladder does not move: an ack must never rewind work in flight or
+   an open verification window (the same instinct as R12), and a click that cannot move the machine must
+   not count toward `illegal_transitions` (§3.3). Callers ask the table for the edge instead of attempting
+   it.
+3. **`acknowledged` has exactly two exits:** T50 (human close → `resolved`) and T47 (quarantine, from any
+   non-terminal state). An arrival for the same `sig` folds into the live incident (§3.9) and never
+   re-enters `recorded`; a suppression window declared while the incident is acknowledged is expressed by
+   the `sig` breaker — exactly what the ack's own `until` hold does — and leaves the state alone.
+4. **The record carries the state.** T49/T50 emit `state` like T38/T45, so a boot rebuild of the ledger
+   index reaches `acknowledged`/`resolved` and does not re-derive `detected` from the next observation
+   (INV-2: the ledger is authoritative, the index is a cache).
+5. **R14 is the refusal row for the ack's scope.** `verifying → acknowledged` and its siblings are refused
+   edges: an attempted `Advance` there is TROUBLE-LADDER-001, the state is byte-identical and
+   `illegal_transitions` increments.
+6. **T47 and T48 gain `acknowledged` in their `from` sets** (§3.2): T47 is stated as "any non-terminal
+   state", and T48 folds an arrival under an open scope breaker — an acknowledged incident is live for
+   both. No other edge gains the state: T46 keeps its own list, so declaring a suppression window is not
+   a path out of `acknowledged`, and nothing makes `acknowledged` reachable from work, verification or a
+   terminal state (R14).
 
 ### 3.3 Refused transitions — TROUBLE-LADDER-001
 
@@ -387,6 +431,7 @@ incident's `illegal_transitions` counter, leaves the state untouched, and return
 | R11 | quarantined → any | terminal; `Unquarantine` writes `I⟨state:recorded, unquarantined_by, reason⟩` with a human actor |
 | R12 | suppressed → verifying | a suppressed incident collects no evidence window |
 | R13 | any stage entry while `KillSwitch` is set | no state change; refused and recorded as pending (TROUBLE-LADDER-010, §3.4) |
+| R14 | {play:\*, research:\*, agent:\*, verifying, suppressed, resolved, escalated, quarantined} → acknowledged | the human ack is the pre-work hold (§3.2a): once work has started, an ack is an audit record, never a transition — and the click must not count toward `illegal_transitions` |
 
 ### 3.4 Checkpoints, kill-switch, pending work and resume
 
@@ -704,7 +749,7 @@ applies.
 
 | Kind (owner) | Payload keys (SPEC-01 `Record.payload`) |
 |---|---|
-| `incident` (this spec) | `transition`, `from`, `to`, `rung`, `entry_rung`, `rule`, `inKey`, `sigs[]`, `arrival_paths{}`, `reopen`, `reopen_count`, `play_runs`, `agent_runs`, `strikes`, `lease{}`, `budget{}`, `breaker_scope`, `suppress_until`, `suppressed_count`, `park{}`, `resume{}`, `orphan{}`, `refused`, `pending`, `resume_from`, `illegal_transitions`, `window{}`, `evidence_ref`, `research_id`, `issue_id`, `task_id`, `spawn_id`, `pending_human`, `severity`, `stabilize_degraded`, `changed`, `folded` |
+| `incident` (this spec) | `transition`, `from`, `to`, `state`, `rung`, `entry_rung`, `rule`, `inKey`, `sigs[]`, `arrival_paths{}`, `reopen`, `reopen_count`, `play_runs`, `agent_runs`, `strikes`, `lease{}`, `budget{}`, `breaker_scope`, `suppress_until`, `suppressed_count`, `park{}`, `resume{}`, `orphan{}`, `refused`, `pending`, `resume_from`, `illegal_transitions`, `window{}`, `evidence_ref`, `research_id`, `issue_id`, `task_id`, `spawn_id`, `pending_human`, `severity`, `stabilize_degraded`, `changed`, `folded` |
 | `verify` (this spec) | `evidence` (the complete `Evidence` tuple), `gap_refs[]`, `gap_missing`, `invalid_count`, `canary{id,path,observed_ts}`, `window{}` |
 | `breaker` (this spec) | `scope`, `state`, `trips`, `opened_ts`, `open_until`, `reason`, `probe_inc`, `previous_duration_s` |
 | `agent_run` (this spec, §3.12a) | `stage`, `outcome`, `serving_candidate`, `model`, `endpoint`, `attempts[]`, `usage{}`, `compaction{}`, `failure_class`, `error_code`, `reason`, `prompt_digest`, `research_id`, `brief_digest`, `budget{}` |
@@ -1038,10 +1083,14 @@ re-minted here.
 ## 7. Testing
 
 `internal/ladder/statemachine_test.go`
-- The transition table is data: 48 legal vectors (T01–T48) + 13 refusal vectors (R01–R13) asserted
+- The transition table is data: 50 legal vectors (T01–T50) + 14 refusal vectors (R01–R14) asserted
   cell-by-cell — resulting `LadderState`, emitted record kind, the exact `payload` keys, and the exact
-  error code. A count guard asserts `len(legal)=48 && len(refused)=13` so a table edit cannot silently drop
+  error code. A count guard asserts `len(legal)=50 && len(refused)=14` so a table edit cannot silently drop
   an edge. Threshold: 0 uncovered rows.
+- The human ack/close edges (§3.2a): T49 lands in `acknowledged` and its record stamps `state`; T50 closes
+  from there with no evidence tuple and stamps `resolved_ts`; `acknowledged` has no edge into `resolved`
+  from any pre-work state it did not come from; a `human_ack` attempted from `verifying` is refused with
+  TROUBLE-LADDER-001, leaves the state byte-identical and increments `illegal_transitions` (R14).
 - INV-5 idempotency: 1,000 repeated `Advance` calls with the same `Transition.Seq` produce exactly 1 record
   and 1 state change.
 - Illegal transitions: every refusal leaves the state byte-identical and increments

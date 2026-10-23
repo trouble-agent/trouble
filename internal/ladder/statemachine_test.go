@@ -9,20 +9,20 @@ import (
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
-// statemachine_test.go is the §7 row for the transition table: 48 legal vectors
-// (T01–T48) plus 13 refusal vectors (R01–R13) asserted cell-by-cell — the
+// statemachine_test.go is the §7 row for the transition table: 50 legal vectors
+// (T01–T50) plus 14 refusal vectors (R01–R14) asserted cell-by-cell — the
 // resulting LadderState, the emitted record kind, the exact payload keys and the
-// exact error code. A count guard asserts len(legal)=48 && len(refused)=13 so a
+// exact error code. A count guard asserts len(legal)=50 && len(refused)=14 so a
 // table edit cannot silently drop an edge.
 
 func TestTransitionTableCountGuard(t *testing.T) {
-	if got := LegalEdgeCount(); got != 48 {
-		t.Errorf("the legal table must hold 48 edges, got %d", got)
+	if got := LegalEdgeCount(); got != 50 {
+		t.Errorf("the legal table must hold 50 edges, got %d", got)
 	}
-	if got := RefusedEdgeCount(); got != 13 {
-		t.Errorf("the refused table must hold 13 edges, got %d", got)
+	if got := RefusedEdgeCount(); got != 14 {
+		t.Errorf("the refused table must hold 14 edges, got %d", got)
 	}
-	// The ids must be T01…T48 and R01…R13 with no gaps.
+	// The ids must be T01…T50 and R01…R14 with no gaps.
 	for i, id := range EdgeIDs() {
 		want := fmt.Sprintf("T%02d", i+1)
 		if id != want {
@@ -67,7 +67,7 @@ func TestLegalEdgesAreWellFormed(t *testing.T) {
 		types.StRecorded, types.StPlayDrafted, types.StPlayCheck, types.StPlayApplied, types.StPlayFailed,
 		types.StResRequested, types.StResReturned, types.StResDegraded, types.StResSkipped,
 		types.StAgentRunning, types.StAgentDone, types.StAgentFailed, types.StAgentSuspended,
-		types.StVerifying, types.StResolved, types.StEscalated, types.StSuppressed, types.StQuarantined,
+		types.StAcknowledged, types.StVerifying, types.StResolved, types.StEscalated, types.StSuppressed, types.StQuarantined,
 	} {
 		found := false
 		for _, e := range legal {
@@ -399,10 +399,24 @@ func TestLegalEdgeVectors(t *testing.T) {
 			}
 			return res.Inc, Transition{Trigger: "T48"}
 		}, wantTo: types.StRecorded, wantErr: types.CodeLadder014},
+		// T49/T50 — amendment TRBL-118: the human ack owns a state and the human
+		// close walks out of it. The seed admits normally, so the incident sits in
+		// `recorded` (T01's target) exactly as a dashboard incident does.
+		{id: "T49", seed: func(t *testing.T, h *harness) (string, Transition) {
+			res := h.admit(t, obsFor(sigFor("t49"), "rule-a", "journald"))
+			return res.Inc, Transition{Trigger: "T49"}
+		}, wantTo: types.StAcknowledged},
+		{id: "T50", seed: func(t *testing.T, h *harness) (string, Transition) {
+			res := h.admit(t, obsFor(sigFor("t50"), "rule-a", "journald"))
+			if _, err := h.l.Advance(context.Background(), res.Inc, Transition{Trigger: "T49"}); err != nil {
+				t.Fatalf("T49 before T50: %v", err)
+			}
+			return res.Inc, Transition{Trigger: "T50"}
+		}, wantTo: types.StResolved},
 	}
 
-	if len(vectors) != 48 {
-		t.Fatalf("the vector suite must cover all 48 legal rows, got %d", len(vectors))
+	if len(vectors) != 50 {
+		t.Fatalf("the vector suite must cover all 50 legal rows, got %d", len(vectors))
 	}
 	for _, v := range vectors {
 		v := v
@@ -496,9 +510,10 @@ func TestRefusalVectors(t *testing.T) {
 		{"R10", types.StResolved, types.StVerifying},
 		{"R11", types.StQuarantined, types.StRecorded},
 		{"R12", types.StSuppressed, types.StVerifying},
+		{"R14", types.StVerifying, types.StAcknowledged},
 	}
-	if len(cases) != 12 {
-		t.Fatalf("the refusal suite must cover R01–R12 explicitly, got %d", len(cases))
+	if len(cases) != 13 {
+		t.Fatalf("the refusal suite must cover R01–R12 and R14 explicitly, got %d", len(cases))
 	}
 	for _, c := range cases {
 		if id, ok := RefuseFor(c.from, c.to); !ok || id != c.id {
@@ -511,6 +526,86 @@ func TestRefusalVectors(t *testing.T) {
 	if _, ok := RefuseFor(types.StRecorded, types.StPlayDrafted); ok {
 		// R06 vs R01: recorded → play:drafted is a LEGAL edge (T03).
 		t.Errorf("T03 must not be reported as a refused edge")
+	}
+}
+
+// TestHumanAckCloseEdges is the TRBL-118 behaviour row (SPEC-05 §3.2a): the
+// human ack owns the state `acknowledged` (T49) instead of leaving the incident
+// in a pre-work state with no edge into `resolved`, the human close walks out of
+// it (T50) with no evidence tuple, and an ack after work has started is refused
+// (R14) instead of counting as an illegal transition.
+func TestHumanAckCloseEdges(t *testing.T) {
+	ctx := context.Background()
+	rules := map[string]types.Rule{"rule-a": {Name: "rule-a", EntryRung: types.RungPlay, Severity: types.SevHigh}}
+
+	// Pre-work: the ack is a transition, and the close that follows it succeeds
+	// without any evidence (the human IS the resolution evidence).
+	h := newHarness(t, harnessOpts{rules: rules})
+	res := h.admit(t, obsFor(sigFor("ack-close"), "rule-a", "journald"))
+	if id, ok := AckEdge(types.StRecorded); !ok || id != "T49" {
+		t.Fatalf("AckEdge(recorded) = %q, %t; want T49, true", id, ok)
+	}
+	acked, err := h.l.Advance(ctx, res.Inc, Transition{Trigger: "T49"})
+	if err != nil {
+		t.Fatalf("T49 human_ack: %v", err)
+	}
+	if acked.State != types.StAcknowledged {
+		t.Fatalf("state after the ack is %q, want acknowledged", string(acked.State))
+	}
+	// The record carries the state so the ledger index (a boot rebuild included)
+	// cannot fall back to the `detected` default.
+	p := h.incidentPayload()
+	if got, _ := p["state"].(string); got != string(types.StAcknowledged) {
+		t.Fatalf("the T49 record's state payload is %q, want acknowledged (keys %v)", got, payloadKeys(p))
+	}
+	if got, _ := p["transition"].(string); got != "T49" {
+		t.Fatalf("the record's transition is %q, want T49", got)
+	}
+
+	if id, ok := CloseEdge(types.StAcknowledged); !ok || id != "T50" {
+		t.Fatalf("CloseEdge(acknowledged) = %q, %t; want T50, true", id, ok)
+	}
+	closed, err := h.l.Advance(ctx, res.Inc, Transition{Trigger: "T50"})
+	if err != nil {
+		t.Fatalf("T50 human_close: %v", err)
+	}
+	if closed.State != types.StResolved {
+		t.Fatalf("state after the close is %q, want resolved", string(closed.State))
+	}
+	if closed.ResolvedTS == "" {
+		t.Fatal("the human close left resolved_ts empty")
+	}
+	if got, _ := h.incidentPayload()["state"].(string); got != string(types.StResolved) {
+		t.Fatalf("the T50 record's state payload is %q, want resolved", got)
+	}
+
+	// The states with no edge into `resolved` stay unclosable: the dashboard
+	// stops offering the control for exactly these (SPEC-10 §2.2).
+	for _, st := range []types.LadderState{types.StDetected, types.StRecorded, types.StPlayDrafted, types.StAgentRunning, types.StEscalated} {
+		if id, ok := CloseEdge(st); ok {
+			t.Errorf("CloseEdge(%s) = %s, true; want no close edge", string(st), id)
+		}
+	}
+
+	// Post-work: the ack edge does not exist, and an attempted T49 is refused
+	// with the state byte-identical (R14 — never an illegal-transition count).
+	h2 := newHarness(t, harnessOpts{rules: rules})
+	inc, st := verifying(t, h2, "ack-refused")
+	if id, ok := AckEdge(types.StVerifying); ok {
+		t.Fatalf("AckEdge(verifying) = %s, true; want no human_ack edge", id)
+	}
+	refused, err := h2.l.Advance(ctx, inc, Transition{Trigger: "T49"})
+	if CodeOf(err) != types.CodeLadder001 {
+		t.Fatalf("T49 from verifying: code %q (err %v), want TROUBLE-LADDER-001", CodeOf(err), err)
+	}
+	if refused.State != types.StVerifying {
+		t.Fatalf("a refused human_ack moved the state to %q", string(refused.State))
+	}
+	if st.IllegalTransitions != 1 {
+		t.Fatalf("illegal_transitions = %d, want 1", st.IllegalTransitions)
+	}
+	if id, ok := RefuseFor(types.StVerifying, types.StAcknowledged); !ok || id != "R14" {
+		t.Fatalf("RefuseFor(verifying → acknowledged) = %q, %t; want R14, true", id, ok)
 	}
 }
 

@@ -49,8 +49,8 @@ no regex routes, no third-party mux. `{id}` is an exact `<prefix>_<ULID>` match.
 | 6 | GET | `/rules` | read | HTML page | SPEC-03 rule-set snapshot + `Index.RuleStats(name)` (last fire, fire count, suppressed count) + `SensorHealth` |
 | 7 | GET | `/breakers` | read | HTML page | `Index.Breakers()` (kind `breaker`, SPEC-05 registry) |
 | 8 | GET | `/health.json` | read¹ | JSON `HealthResponse` | §2.9 aggregator; **also consumed by the external stall checker (SPEC-12 §3)** |
-| 9 | POST | `/api/incidents/{id}/ack` | write | HTML fragment (200) | `ladder.Ack(ctx, inc, actor, reason, until)` → refreshed `incident-rows` |
-| 10 | POST | `/api/incidents/{id}/close` | write | HTML fragment (200) | `ladder.Close(ctx, inc, actor, reason, resolution)` → refreshed `incident-rows` |
+| 9 | POST | `/api/incidents/{id}/ack` | write | HTML fragment (200) | `ladder.Ack(ctx, inc, actor, reason, until)` → T49 `human_ack` (`{detected,recorded}` → `acknowledged`, SPEC-05 §3.2a; record-only where the table has no edge, R14) + refreshed `incident-rows` |
+| 10 | POST | `/api/incidents/{id}/close` | write | HTML fragment (200) | `ladder.Close(ctx, inc, actor, reason, resolution)` → the table's own edge into `resolved` (T38 from `verifying`, T45 from `suppressed`, T50 `human_close` from `acknowledged`) + refreshed `incident-rows` |
 | 11 | POST | `/api/autonomy` | autonomy | HTML fragment (200) | `lifecycle.SetAutonomy(ctx, gates, actor)` → refreshed `health-strip` |
 | 12 | GET | `/partials/health` | read | HTML fragment | §2.9 aggregator (strip fields only) |
 | 13 | GET | `/partials/incidents?since=<seq>` | read | HTML fragment | `Index.OpenIncidentsSince(seq,limit)` |
@@ -172,6 +172,22 @@ in full, including every ack/close/autonomy control — the controls render `dis
 feature does not exist"). UI state is presentation only: the server re-checks the scope on every POST and
 returns **403** + TROUBLE-DASHBOARD-003 even when a client forges the request. That is the assertion the
 `auth_test.go` scope matrix in §7 makes.
+
+**State-gated controls (TRBL-118).** Scope is not the only axis a control can be absent on. The close
+control is rendered only for the states whose edge into `resolved` exists in SPEC-05's table — `verifying`
+(T38), `suppressed` (T45) and `acknowledged` (T50, §3.2a) — and for any other state the actions panel
+explains why instead ("close is not offered in state `recorded`: a close needs verified work (T38), a quiet
+suppression window (T45) or an acknowledgement (T50)"). A control whose only possible outcome is
+TROUBLE-LADDER-012 (`no_close_edge`) is a defect, not an affordance: the dogfood run of 2026-10-23 found
+every close from a freshly-acked incident refused while the form still invited the click. This gate is
+presentation only in exactly the same sense as the scope gate: the ladder owns the decision, and a POST that
+reaches the server from a stale page is refused with the same named error.
+
+**A successful ack/close re-renders the page it was clicked on.** The write invalidates the page's own
+compare-and-set pair (§2.1.1) and can change which controls are offered (the state gate above), so the
+embedded `app.js` reloads the incident page once a `POST /api/incidents/{id}/(ack|close)` answers 2xx. The
+fragment the route returns is the `incident-rows` body, which only the list pages can swap in; a detail page
+that kept its old pair would answer the operator's next click with **409** `stale_view`.
 
 ### 2.3 CSRF — every POST
 
@@ -607,8 +623,8 @@ The dashboard never appends to the ledger; each action is a call on the subsyste
 
 | Action | Call | Record kind | Payload | Actor |
 |---|---|---|---|---|
-| ack | `ladder.Ack(ctx, inc, actor, reason, until)` | `incident` (SPEC-05) | `{transition:"acknowledged", reason, until, via:"dashboard"}` | `{kind:"human", id:"dash-write@laptop"}` |
-| close | `ladder.Close(ctx, inc, actor, reason, resolution)` | `incident` (SPEC-05) | `{transition:"closed", reason, resolution, via:"dashboard"}` | same |
+| ack | `ladder.Ack(ctx, inc, actor, reason, until)` | `incident` (SPEC-05) | `{transition:"acknowledged", state, reason, until, via:"dashboard"}` | `{kind:"human", id:"dash-write@laptop"}` |
+| close | `ladder.Close(ctx, inc, actor, reason, resolution)` | `incident` (SPEC-05) | `{transition:"closed", state:"resolved", reason, resolution, via:"dashboard"}` | same |
 | autonomy | `lifecycle.SetAutonomy(ctx, gates, actor)` | `config` (SPEC-12) | `{autonomy:AutonomyGates}` incl. `ChangedBy`, `ChangedTS` | same |
 
 Every click is therefore auditable by reading the ledger alone: `dash-write@laptop` closed
@@ -617,6 +633,14 @@ renders exactly those rows, which is also how AC-26's "ledger + dashboard show e
 human steps. Refusals that never reach the subsystem (401/403/404/413/429) are visible in the
 `#health-strip` counters (`denied`, `csrf`, `rl`) and in the daemon's journal at WARN with the token label —
 the dashboard emits no ledger kind of its own, by SPEC-INDEX §3.4.
+
+An ack or a close writes **two** `incident` records when it moves the state: the ladder's own transition
+record (T49/T50, carrying `state` — SPEC-05 §3.2a) and the bridge's audit record above with the operator's
+reason/hold/resolution. Both carry the human actor, so the timeline reads as one decision followed by its
+note. An ack the table has no edge for (R14: the incident is already in work, verification, suppression or a
+terminal state) writes only the audit record and leaves the machine where it is — the record's `state` field
+is then the incident's unchanged state, which is what tells an audit reader that this ack was a note and not
+a transition.
 
 ### 4.3 The dashboard token is never an ingestion key
 
@@ -709,11 +733,20 @@ All tests are `internal/dashboard` package tests
 | `auth_test.go` | matrix: absent token (001), 6 malformed forms (002), revoked (002), 3 scope refusals (003), both carriers equal, both carriers different (002), loopback health exemption on/off, non-loopback request on a loopback listener (006), ingestion-key-equal token (002), identity impl absent (013), token store unreadable (013, and `/health.json` still 200 on loopback), the §2.8a throttle: 10 failures for one credential then a **valid** token on the same client IP (200), an unseen credential still 401, a no-material flood throttled per client IP | 30+ cases, all codes/statuses exact |
 | `csrf_test.go` | missing header, wrong header, cookie≠header, value from 3 hours ago, value bound to a different token ID, Origin mismatch, Bearer+cookie mixture, correct browser POST, correct curl Bearer POST | every failure → 403 + 004 with no state change; both legal paths → 200 |
 | `partials_test.go` | each of the 7 partials returns its exact root `id`, carries `data-seq`/`data-rendered-ts`/`data-stall-s`, contains no `<html>`/`<body>`/`<script>`, and is ≤8 KB with 200 rows of fixtures; the whitelist rejects an unknown name (008) | 7/7 exact; 0 inline scripts |
-| `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML; first-paint budget: the server-rendered panel's `incidents open`/`groups open` equal the page's own header counters and its byte/rate/version rows equal what `/partials/budget` serves; the footer stamp on all seven pages equals the `version`/`git_sha` **`/health.json` reports** | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates; 0 zero-valued first-paint rows; footer stamp identical to the health surface |
+| `render_test.go` | AC-16 golden render: fixture index with incidents, groups, issue refs, board row, breakers → `/`, `/incidents`, `/incidents/{id}`, `/groups`, `/groups/{id}`, `/rules`, `/breakers` each contain the expected entities; every `src`/`href` in every rendered page is same-origin (no CDN); 404 path served with a deliberately broken template set still returns 200-byte static HTML; first-paint budget: the server-rendered panel's `incidents open`/`groups open` equal the page's own header counters and its byte/rate/version rows equal what `/partials/budget` serves; the footer stamp on all seven pages equals the `version`/`git_sha` **`/health.json` reports**; the close control renders for exactly the states with an edge into `resolved` (`verifying`, `suppressed`, `acknowledged`) and the actions panel names why for every other state (**TRBL-118**) | **AC-16** renders all four entity classes; 0 external origins; 404 independent of templates; 0 zero-valued first-paint rows; footer stamp identical to the health surface; the state gate matches SPEC-05 §3.2/§3.2a exactly |
 | `live_test.go` | **AC-19 timing**: trigger a fixture incident, poll `/partials/incidents?since=` at the real intervals, record `ts_response − ts_trigger` of the first fragment containing the ID; 20 iterations; assert p100 ≤2000 ms and p50 ≤1100 ms; assert the strip-accelerator-off variant still passes p95 ≤2000 ms; assert the stall banner appears when the writer is paused ≥`stall_alert_s` | p100 ≤2000 ms (**AC-19**), p95 ≤2000 ms without the accelerator |
 | `budget_test.go` | boot with a fixture index of 10,000 groups / 50,000 records; 100 rps of `/partials/incidents` for 60 s; retained heap (`HeapAlloc` after a forced GC, GC percent pinned) sampled every 250 ms and batched into a steady-state slope (§2.9a); a control handler driven at the same rate in the same process; the 100-concurrent-render burst measured against a post-collection baseline with no collection in flight; a panicking ledger-accessor stub proves **0** file opens during renders | RSS delta ≤12 MB (steady ≤6 MB, §2.9a), p99 render ≤20 ms **× `CPUScale()`** and the 100 rps row's driver-side floor 0.9 × 100 **÷ `CPUScale()`** (host calibration per SPEC-01 §7a, TRBL-053: the render p99 is a template render measured inside the helper — CPU speed + scheduling, no disk — so both wall-clock rows follow the §7a profile, measured once per process; a rate is a floor and moves down with the host's slowdown. §2.9's byte ceilings are retained state at a fixed request count and stay unscaled. The 40 ms p99 ceiling and the 40 rps floor clamp stay — past them the host is no longer the explanation), 0 ledger file opens |
 | `auth_test.go` scope matrix + `TestHumanActorOnWrites` (§2.2; the planned daemon-start e2e named integration/e2e_dashboard_test.go was never landed) | a `read`-scope token POSTs ack/close/autonomy over the live mux: every POST is refused 403 + 003 with the required scope named; a granted write records `Actor{kind:human, id:<token label>}` carrying the build fields | **AC-19** read-only clause; 3/3 posts refused; actor ID exact |
 | `pagination_test.go` | **AC-30** (dashboard half): `/incidents` and `/groups` walked with `page_token` + `page_size` over a 10,000-incident fixture index — page-size stability, no row repeated, no row skipped, `next_page_token` empty exactly at the end; a token minted before a simulated generation drop renders the reset banner with **200**; every render opens 0 ledger files (§2.9) | every row exactly once per walk; the drop case is 200 + banner, never 500; 0 file opens |
+
+One row is a composition-root test rather than a package test, because the contract it pins is the seam
+between this spec and SPEC-05: `internal/app/dashbridge_ack_close_test.go` boots the real ladder over the
+real ledger behind the real dashboard server and drives the core loop — ingest → ack → close — requiring 200
+on both writes, the close to succeed with the **ack response's own** `(data-seq, state)` pair, the ladder and
+the ledger index to agree on `acknowledged` and then `resolved`, the audit records to carry both decisions,
+recurrence after the human close to reopen the same incident, a second ack to be a record rather than an
+illegal transition, and a pre-work close to be refused with 409 + TROUBLE-LADDER-012 + `no_close_edge`
+(**TRBL-118**).
 
 ## 8. hilo impact
 

@@ -38,6 +38,7 @@
 <button type="submit" data-requires="write"{{if not .CanWrite}} disabled{{end}}>acknowledge</button>
 {{if not .CanWrite}}<small class="why">requires a write-scope token (this session has {{.Scope}})</small>{{end}}
 </form>
+{{if .CanClose}}
 <form class="action" method="post" action="/api/incidents/{{.Incident.ID}}/close" hx-post="/api/incidents/{{.Incident.ID}}/close" hx-target="#incident-rows" hx-swap="outerHTML">
 <input type="hidden" name="expected_state" value="{{.Incident.State}}">
 <input type="hidden" name="ledger_seq" value="{{.Seq}}">
@@ -48,6 +49,9 @@
 <button type="submit" data-requires="write"{{if not .CanWrite}} disabled{{end}}>close</button>
 {{if not .CanWrite}}<small class="why">requires a write-scope token (this session has {{.Scope}})</small>{{end}}
 </form>
+{{else}}
+<p class="why">close is not offered in state {{.Incident.State}}: a close needs verified work (T38), a quiet suppression window (T45) or an acknowledgement (T50) — SPEC-05 §3.2</p>
+{{end}}
 </section>
 <section class="panel">
 <h2>timeline</h2>

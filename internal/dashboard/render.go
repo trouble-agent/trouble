@@ -132,9 +132,16 @@ type pageData struct {
 	// Write-control state: the controls always render (never hidden), with
 	// data-requires and a disabled attribute when the scope is missing
 	// (SPEC-10 §2.2). The server re-checks every POST regardless.
-	CanWrite     bool
-	CanAutonomy  bool
-	KillSwitch   bool
+	CanWrite    bool
+	CanAutonomy bool
+	KillSwitch  bool
+	// CanClose is the STATE gate on the close control, a different axis from the
+	// scope gate above (SPEC-10 §2.2): the form is offered only when the ladder's
+	// transition table has an edge from the incident's state into `resolved`
+	// (T38 verifying, T45 suppressed, T50 acknowledged). It is presentation — the
+	// server re-checks every POST and the ladder owns the refusal — but a control
+	// whose only possible outcome is TROUBLE-LADDER-012 is not offered (TRBL-118).
+	CanClose     bool
 	AutonomyMode string
 	AllowResume  bool
 	AllowFull    bool
@@ -266,6 +273,22 @@ func (s *server) newPage(r *http.Request, title, nav string) *pageData {
 // read-only deployment still renders the value so a later scope upgrade needs
 // no re-render — the server re-checks on every POST).
 func (s *server) canWrite() bool { return true }
+
+// humanClosable reports whether the ladder's transition table has an edge from
+// st into `resolved` for a human click: T38 (window_passed) from `verifying`,
+// T45 (quiet_close) from `suppressed` and T50 (human_close) from
+// `acknowledged` (SPEC-05 §3.2/§3.2a). The list is a MIRROR of the table, kept
+// here because the dashboard imports `internal/types` only and the row-render
+// path must not reach into the ladder; it is presentation, and the bridge's
+// derived check (ladder.CloseEdge) is the authority a POST is held to
+// (SPEC-10 §2.2: UI state is presentation only).
+func humanClosable(st types.LadderState) bool {
+	switch st {
+	case types.StVerifying, types.StSuppressed, types.StAcknowledged:
+		return true
+	}
+	return false
+}
 
 // best returns the highest scope in the set for display.
 func (s scopeSet) best() types.Scope {

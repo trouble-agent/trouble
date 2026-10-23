@@ -1,6 +1,6 @@
 /* trouble dashboard // SPEC-10 §2.6
  *
- * The htmx-loaded poller. It does four things and nothing else:
+ * The htmx-loaded poller. It does five things and nothing else:
  *   1. copies the <meta name="trouble-csrf"> value into X-Trouble-CSRF on
  *      every htmx request (§2.3 — the double-submit pair);
  *   2. dispatches the `troubleSeq` DOM event when #health-strip's data-seq
@@ -10,7 +10,10 @@
  *      refresh on visibilitychange;
  *   4. drives the #stale-banner: three consecutive identical strip seqs AND
  *      data-stall-s ≥ stall_alert_s, any 429/5xx poll, or no successful poll
- *      for 5× the poll interval.
+ *      for 5× the poll interval;
+ *   5. re-renders the incident page after its own ack/close succeeded, because
+ *      those forms carry the CAS pair and a state-gated close control
+ *      (§2.1.1/§2.2, TRBL-118).
  *
  * The banner is advisory — the authoritative stall alarm is SPEC-12's external
  * checker on /health.json. No inline script anywhere: this file is the only JS
@@ -94,6 +97,19 @@
     var el = evt.detail.elt;
     if (el && el.id === "health-strip") {
       trackStrip(el);
+    }
+    /* 5. a successful ack/close re-renders the incident page it was clicked on.
+     * The form carries the CAS pair (expected_state + ledger_seq) and the close
+     * control is rendered from the incident's state (SPEC-10 §2.1.1/§2.2), so
+     * the write itself invalidates the page the operator is looking at: without
+     * the reload the next click posts a stale pair (409 stale_view) or a state
+     * that has no close edge (TRBL-118). The response is the incident-rows
+     * fragment, which only the list pages can swap in. */
+    if (el && el.tagName === "FORM" && xhr && xhr.status >= 200 && xhr.status < 300) {
+      var action = el.getAttribute("action") || "";
+      if (/\/api\/incidents\/[^\/]+\/(ack|close)$/.test(action)) {
+        window.location.reload();
+      }
     }
   });
 

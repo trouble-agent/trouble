@@ -109,6 +109,8 @@ func run(args []string) int {
 		return cmdLedger(args[1:])
 	case "sensors":
 		return cmdSensors(args[1:])
+	case "board":
+		return cmdBoard(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

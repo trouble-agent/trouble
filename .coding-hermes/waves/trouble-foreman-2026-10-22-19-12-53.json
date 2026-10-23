@@ -12,5 +12,7 @@
       "branch": "wt/TRBL-117",
       "status": "planned"
     }
-  ]
+  ],
+  "finished_at": "2026-10-23T04:58:13.726434Z",
+  "recovery_note": "Wave recovered: TRBL-117 already merged (9adb391), worktree/branch cleaned by prior tick. Manifest closed."
 }

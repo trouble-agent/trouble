@@ -13,6 +13,17 @@ import (
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
+// RemoveLockIfOwned removes a LOCK file left by this process after it has
+// released its flock. Call only after closing the Ledger; a different PID is
+// never removed (in particular, a daemon's writer lock is left untouched).
+func RemoveLockIfOwned(root string, pid int) error {
+	path := filepath.Join(root, "LOCK")
+	if readLockPID(root) != pid {
+		return nil
+	}
+	return os.Remove(path)
+}
+
 // readHeadFile reads the HEAD hint from a bare root path without locking.
 func readHeadFile(root string) (headFile, bool) {
 	b, err := os.ReadFile(filepath.Join(root, "HEAD"))
@@ -172,8 +183,12 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 		st.WriterVersion = head.Version
 	}
 
-	// Read LOCK file (open, NO flock) to get the actual writer PID.
-	st.WriterPID = readLockPID(root)
+	// Read LOCK file (open, NO flock) and report only a live writer. A stale
+	// LOCK remains on disk for flock inode stability, but its PID is not a
+	// writer; -1 is the SPEC-01 LedgerStatus sentinel for no active writer.
+	if pid, held := CheckWriterHeld(root); held {
+		st.WriterPID = pid
+	}
 
 	// Walk authoritative files to count records and find last seq/ts.
 	files, _, err := authoritativeFilesRoot(root)

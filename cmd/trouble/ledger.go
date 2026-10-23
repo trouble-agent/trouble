@@ -321,6 +321,17 @@ func cmdLedgerCompact(args []string) int {
 		// The library's own refusal carries the §5 code (007 no files for the
 		// day / writer is on that file; 009 retention blocked). §2.4's failed
 		// row is exit 1 for every one of them; the message names the code.
+		// A dry-run that acquired this process's own writer seat must not leave
+		// its PID in LOCK after a refusal. Never touch a different owner's LOCK:
+		// the live-daemon refusal returned above before we owned the seat.
+		if *dryRun && ledger.CodeOf(err) == types.CodeLedger007 {
+			if closeErr := led.Close(context.Background()); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "ledger compact: close after refusal: %v\n", closeErr)
+			}
+			if cleanErr := ledger.RemoveLockIfOwned(lc.root, os.Getpid()); cleanErr != nil && !os.IsNotExist(cleanErr) {
+				fmt.Fprintf(os.Stderr, "ledger compact: remove owned LOCK: %v\n", cleanErr)
+			}
+		}
 		fmt.Fprintf(os.Stderr, "ledger compact: %v\n", err)
 		return 1
 	}

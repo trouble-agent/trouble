@@ -404,6 +404,59 @@ func TestLedgerCompactExitCodesAndDryRunSpec01Section24(t *testing.T) {
 		t.Fatalf("compact of an absent day = %d (%s), want 1 naming TROUBLE-LEDGER-007", code, errOut)
 	}
 
+	// Active-day 007 refusal must clean up the lock acquired by this CLI.
+	// The existence probe is deliberate: wording/status alone cannot prove it.
+	activeDay := time.Now().UTC().Format("2006-01-02")
+	writeDayFixture(t, led, activeDay, 1)
+	lockPath := filepath.Join(led, "LOCK")
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("LOCK before active-day refusal exists: %v", err)
+	}
+	preCode, preStatus, preErr := runCLI(t, bin, cfg, "ledger", "status")
+	if preCode != 0 {
+		t.Fatalf("status before refusal: code=%d stdout=%s stderr=%s", preCode, preStatus, preErr)
+	}
+	code, _, errOut = runCLI(t, bin, cfg, "ledger", "compact", "--day", activeDay, "--dry-run")
+	if code != 1 || !strings.Contains(errOut, "TROUBLE-LEDGER-007") {
+		t.Fatalf("compact of active day = %d (%s), want 1 naming TROUBLE-LEDGER-007", code, errOut)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("LOCK after active-day refusal must not exist: %v", err)
+	}
+	postCode, postStatus, postErr := runCLI(t, bin, cfg, "ledger", "status")
+	t.Logf("active-day refusal probe: refuser=TROUBLE-LEDGER-007 LOCK_before=false LOCK_after=false status_before=%q status_after=%q refusal_stderr=%q", preStatus, postStatus, errOut)
+	if postCode != 0 || !strings.Contains(postStatus, "writer: pid=-1") {
+		t.Fatalf("status after refusal: code=%d stdout=%s stderr=%s; want no writer", postCode, postStatus, postErr)
+	}
+
+	// A live writer's LOCK is not ours to remove. The refused CLI must leave
+	// the file intact, and status must continue naming the actual holder.
+	liveBase := ledgerTestRoot(t)
+	liveCfg, liveStateRoot := writeLedgerConfig(t, liveBase)
+	liveLedgerRoot := filepath.Join(liveStateRoot, "ledger")
+	if err := os.MkdirAll(liveLedgerRoot, 0o700); err != nil {
+		t.Fatalf("live ledger root: %v", err)
+	}
+	writeDayFixture(t, liveLedgerRoot, "2026-06-01", 1)
+	holdLedgerOpen(t, liveLedgerRoot)
+	liveLock := filepath.Join(liveLedgerRoot, "LOCK")
+	if _, err := os.Stat(liveLock); err != nil {
+		t.Fatalf("live writer LOCK before refused compact: %v", err)
+	}
+	liveBeforeCode, liveBefore, liveBeforeErr := runCLI(t, bin, liveCfg, "ledger", "status")
+	liveCompactCode, liveCompactOut, liveCompactErr := runCLI(t, bin, liveCfg, "ledger", "compact", "--day", "2026-06-01", "--dry-run")
+	liveAfterCode, liveAfter, liveAfterErr := runCLI(t, bin, liveCfg, "ledger", "status")
+	if liveBeforeCode != 0 || liveAfterCode != 0 || liveCompactCode != 1 || !strings.Contains(liveCompactOut+liveCompactErr, "another writer holds") {
+		t.Fatalf("live-lock refusal: before=%d/%s (%s), compact=%d/%s/%s, after=%d/%s (%s)", liveBeforeCode, liveBefore, liveBeforeErr, liveCompactCode, liveCompactOut, liveCompactErr, liveAfterCode, liveAfter, liveAfterErr)
+	}
+	if _, err := os.Stat(liveLock); err != nil {
+		t.Fatalf("live writer LOCK was removed by refused compact: %v", err)
+	}
+	if !strings.Contains(liveBefore, fmt.Sprintf("writer: pid=%d", os.Getpid())) || !strings.Contains(liveAfter, fmt.Sprintf("writer: pid=%d", os.Getpid())) {
+		t.Fatalf("status did not retain live writer identity: before=%s after=%s", liveBefore, liveAfter)
+	}
+	t.Logf("live-lock refusal probe: refuser=writer-held LOCK_before=true LOCK_after=true status_before=%q refusal=%q status_after=%q", strings.Split(strings.TrimSpace(liveBefore), "\n")[3], strings.TrimSpace(liveCompactOut), strings.Split(strings.TrimSpace(liveAfter), "\n")[3])
+
 	// Failed row 2: the only candidates are spine records (an all-event day
 	// still inside retention_raw has nothing legal to reclaim) → §5 code 009,
 	// exit 1. Counts are never sacrificed. The fresh day must NOT be the
@@ -475,6 +528,37 @@ func TestLedgerCompactExitCodesAndDryRunSpec01Section24(t *testing.T) {
 	if vrep.Counts.Events != 3 {
 		t.Fatalf("counts must be preserved across compaction: %+v", vrep.Counts)
 	}
+}
+
+func TestLedgerStatusDoesNotReportDeadLockPID(t *testing.T) {
+	bin := buildTrouble(t)
+	base := ledgerTestRoot(t)
+	cfg, stateRoot := writeLedgerConfig(t, base)
+	led := filepath.Join(stateRoot, "ledger")
+	if err := os.MkdirAll(led, 0o700); err != nil {
+		t.Fatalf("ledger root: %v", err)
+	}
+	const deadPID = 999999
+	lockPath := filepath.Join(led, "LOCK")
+	if err := os.WriteFile(lockPath, []byte("{\"pid\":999999,\"version\":\"test\"}\n"), 0o600); err != nil {
+		t.Fatalf("write stale LOCK: %v", err)
+	}
+	code, out, errOut := runCLI(t, bin, cfg, "ledger", "status", "--json")
+	if code != 0 {
+		t.Fatalf("status with stale LOCK exit=%d stdout=%s stderr=%s", code, out, errOut)
+	}
+	var st types.LedgerStatus
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatalf("status JSON: %v: %s", err, out)
+	}
+	if st.WriterPID != -1 {
+		t.Fatalf("writer_pid=%d for definitely dead pid %d; want -1", st.WriterPID, deadPID)
+	}
+	textCode, textOut, textErr := runCLI(t, bin, cfg, "ledger", "status")
+	if textCode != 0 || strings.Contains(textOut, fmt.Sprintf("pid=%d", deadPID)) || !strings.Contains(textOut, "writer: pid=-1") {
+		t.Fatalf("text status with stale LOCK: code=%d stdout=%s stderr=%s", textCode, textOut, textErr)
+	}
+	t.Logf("stale-pid status probe: LOCK_pid=%d JSON_writer_pid=%d text_writer=%q", deadPID, st.WriterPID, strings.Split(strings.TrimSpace(textOut), "\n")[3])
 }
 
 // ---------------------------------------------------------------------------

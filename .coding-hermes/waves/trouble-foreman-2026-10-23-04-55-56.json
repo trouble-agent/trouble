@@ -1,0 +1,33 @@
+{
+  "tick_id": "trouble-foreman-2026-10-23-04-55-56",
+  "project": "trouble",
+  "budget": 12,
+  "mode": "wave",
+  "base": "fddccf7",
+  "tasks": [
+    {
+      "row": "TRBL-118",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-118",
+      "branch": "wt/TRBL-118",
+      "status": "dispatching"
+    },
+    {
+      "row": "TRBL-119",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-119",
+      "branch": "wt/TRBL-119",
+      "status": "dispatching"
+    },
+    {
+      "row": "TRBL-120",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-120",
+      "branch": "wt/TRBL-120",
+      "status": "dispatching"
+    },
+    {
+      "row": "TRBL-121",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-121",
+      "branch": "wt/TRBL-121",
+      "status": "dispatching"
+    }
+  ]
+}

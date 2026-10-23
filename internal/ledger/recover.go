@@ -154,17 +154,36 @@ func acquireLock(root string, actor types.Actor) (*os.File, error) {
 		return nil, ledgerErr(types.CodeLedger005, ReasonWrite,
 			fmt.Sprintf("another writer holds %s: %s", path, string(bytes.TrimSpace(body))), err)
 	}
-	if err := f.Truncate(0); err == nil {
-		_, _ = f.Seek(0, io.SeekStart)
-		payload, _ := json.Marshal(lockFile{
-			PID:     os.Getpid(),
-			Version: actor.Version,
-			GitSHA:  actor.GitSHA,
-			BootTS:  types.NowUTC(),
-			Root:    root,
-		})
-		_, _ = f.Write(append(payload, '\n'))
-		_ = f.Sync()
+	if err := f.Truncate(0); err != nil {
+		_ = releaseLock(f)
+		return nil, ledgerErr(types.CodeLedger012, ReasonIO, fmt.Sprintf("cannot truncate %s", path), err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		_ = releaseLock(f)
+		return nil, ledgerErr(types.CodeLedger012, ReasonIO, fmt.Sprintf("cannot seek %s", path), err)
+	}
+	payload, err := json.Marshal(lockFile{
+		PID:     os.Getpid(),
+		Version: actor.Version,
+		GitSHA:  actor.GitSHA,
+		BootTS:  types.NowUTC(),
+		Root:    root,
+	})
+	if err != nil {
+		_ = releaseLock(f)
+		return nil, ledgerErr(types.CodeLedger012, ReasonIO, fmt.Sprintf("cannot encode %s", path), err)
+	}
+	payload = append(payload, '\n')
+	n, err := f.Write(payload)
+	if err == nil && n != len(payload) {
+		err = io.ErrShortWrite
+	}
+	if err == nil {
+		err = f.Sync()
+	}
+	if err != nil {
+		_ = releaseLock(f)
+		return nil, ledgerErr(types.CodeLedger012, ReasonIO, fmt.Sprintf("cannot publish writer identity in %s", path), err)
 	}
 	return f, nil
 }

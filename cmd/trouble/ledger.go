@@ -193,7 +193,7 @@ func printLedgerStatus(st types.LedgerStatus) {
 	fmt.Printf("ledger: last_seq=%d last_ts=%s stall_s=%.0f loss_window_ms=%d\n", st.LastSeq, st.LastTS, st.StallS, st.LossWindowMS)
 	fmt.Printf("day:    %s gen=%d part=%d file=%s bytes=%d records=%d\n", st.Day, st.Gen, st.Part, st.File, st.Bytes, st.Records)
 	fmt.Printf("queue:  depth=%d cap=%d backpressure_total=%d\n", st.QueueDepth, st.QueueCap, st.BackpressureTotal)
-	fmt.Printf("writer: pid=%d version=%s\n", st.WriterPID, st.WriterVersion)
+	fmt.Printf("writer: pid=%d lock_held=%t version=%s\n", st.WriterPID, st.WriterLockHeld, st.WriterVersion)
 	fmt.Printf("disk:   bytes=%d budget=%d (%.1f%%)\n", st.DiskBytes, st.DiskBudgetBytes,
 		100*float64(st.DiskBytes)/float64(max64(st.DiskBudgetBytes, 1)))
 	fmt.Printf("index:  entries=%d groups=%d cold=%d torn=%d corrupt=%d degraded=%t\n",

@@ -77,7 +77,8 @@ type LedgerStatus struct {
 	QueueDepth        int        `json:"queue_depth"`
 	QueueCap          int        `json:"queue_cap"`
 	BackpressureTotal uint64     `json:"backpressure_total"`
-	WriterPID         int        `json:"writer_pid"`
+	WriterPID         int        `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
+	WriterLockHeld    bool       `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
 	WriterVersion     string     `json:"writer_version"`
 	DiskBytes         int64      `json:"disk_bytes"`
 	DiskBudgetBytes   int64      `json:"disk_budget_bytes"`

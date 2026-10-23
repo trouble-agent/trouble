@@ -260,8 +260,8 @@ func TestLedgerStatusOkDegradedAndLiveWriterSpec01Section24(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &live); err != nil {
 		t.Fatalf("writer-live stanza is not LedgerStatus JSON: %v\n%s", err, out)
 	}
-	if live.WriterPID != os.Getpid() {
-		t.Errorf("writer_pid = %d, want the REAL holder pid %d (the CLI must not report itself)", live.WriterPID, os.Getpid())
+	if live.WriterPID != os.Getpid() || !live.WriterLockHeld {
+		t.Errorf("live writer status = writer_pid:%d writer_lock_held:%t, want pid %d and held=true", live.WriterPID, live.WriterLockHeld, os.Getpid())
 	}
 	if live.LastSeq < 2 {
 		t.Errorf("writer-live status must report the real watermark: last_seq=%d, want >= 2", live.LastSeq)
@@ -452,6 +452,19 @@ func TestLedgerCompactExitCodesAndDryRunSpec01Section24(t *testing.T) {
 	if _, err := os.Stat(liveLock); err != nil {
 		t.Fatalf("live writer LOCK was removed by refused compact: %v", err)
 	}
+	lockPayload, err := os.ReadFile(liveLock)
+	if err != nil {
+		t.Fatalf("read live LOCK after refused compact: %v", err)
+	}
+	var lockOwner struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(lockPayload, &lockOwner); err != nil {
+		t.Fatalf("decode live LOCK after refused compact: %v", err)
+	}
+	if lockOwner.PID != os.Getpid() {
+		t.Fatalf("LOCK payload after refused compact pid=%d, want still-live holder %d", lockOwner.PID, os.Getpid())
+	}
 	if !strings.Contains(liveBefore, fmt.Sprintf("writer: pid=%d", os.Getpid())) || !strings.Contains(liveAfter, fmt.Sprintf("writer: pid=%d", os.Getpid())) {
 		t.Fatalf("status did not retain live writer identity: before=%s after=%s", liveBefore, liveAfter)
 	}
@@ -551,14 +564,42 @@ func TestLedgerStatusDoesNotReportDeadLockPID(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &st); err != nil {
 		t.Fatalf("status JSON: %v: %s", err, out)
 	}
-	if st.WriterPID != -1 {
-		t.Fatalf("writer_pid=%d for definitely dead pid %d; want -1", st.WriterPID, deadPID)
+	if st.WriterPID != -1 || st.WriterLockHeld {
+		t.Fatalf("unlocked stale LOCK status = writer_pid:%d writer_lock_held:%t; want -1/false", st.WriterPID, st.WriterLockHeld)
 	}
 	textCode, textOut, textErr := runCLI(t, bin, cfg, "ledger", "status")
 	if textCode != 0 || strings.Contains(textOut, fmt.Sprintf("pid=%d", deadPID)) || !strings.Contains(textOut, "writer: pid=-1") {
 		t.Fatalf("text status with stale LOCK: code=%d stdout=%s stderr=%s", textCode, textOut, textErr)
 	}
 	t.Logf("stale-pid status probe: LOCK_pid=%d JSON_writer_pid=%d text_writer=%q", deadPID, st.WriterPID, strings.Split(strings.TrimSpace(textOut), "\n")[3])
+
+	// The same stale payload must not hide a kernel flock. This is the status
+	// surface used by operators and must distinguish it from an unlocked stale file.
+	liveBase := ledgerTestRoot(t)
+	liveCfg, liveStateRoot := writeLedgerConfig(t, liveBase)
+	liveRoot := filepath.Join(liveStateRoot, "ledger")
+	if err := os.MkdirAll(liveRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	holdLedgerOpen(t, liveRoot)
+	if err := os.WriteFile(filepath.Join(liveRoot, "LOCK"), []byte(`{"pid":999999,"version":"stale"}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut = runCLI(t, bin, liveCfg, "ledger", "status", "--json")
+	if code != 0 {
+		t.Fatalf("status with live flock/stale payload: exit=%d stdout=%s stderr=%s", code, out, errOut)
+	}
+	var held types.LedgerStatus
+	if err := json.Unmarshal([]byte(out), &held); err != nil {
+		t.Fatalf("decode live-flock status: %v: %s", err, out)
+	}
+	if (held.WriterPID != -1 && held.WriterPID != os.Getpid()) || !held.WriterLockHeld {
+		t.Fatalf("live flock with stale payload status = writer_pid:%d writer_lock_held:%t; want holder %d or unknown/-1 with held=true", held.WriterPID, held.WriterLockHeld, os.Getpid())
+	}
+	code, out, errOut = runCLI(t, bin, liveCfg, "ledger", "status")
+	if code != 0 || !(strings.Contains(out, "writer: pid=-1 lock_held=true") || strings.Contains(out, fmt.Sprintf("writer: pid=%d lock_held=true", os.Getpid()))) || strings.Contains(out, "pid=999999") {
+		t.Fatalf("text status hid live flock or exposed dead PID: exit=%d stdout=%s stderr=%s", code, out, errOut)
+	}
 }
 
 // ---------------------------------------------------------------------------

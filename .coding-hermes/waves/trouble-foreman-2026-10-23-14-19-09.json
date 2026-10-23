@@ -1,0 +1,40 @@
+{
+  "tick_id": "trouble-foreman-2026-10-23-14-19-09",
+  "project": "trouble",
+  "budget": 3,
+  "mode": "wave",
+  "base": "182dc62",
+  "note": "TRBL-118 is NOT dispatched: the 2026-10-23-04-55-56 wave left ~15 files of uncommitted, coherent work in /home/kara/worktrees/trouble-TRBL-118 (T49/T50/R14 ladder amendment + spec amendments). Foreman salvages and verifies that in-flight attempt instead of re-dispatching.",
+  "tasks": [
+    {
+      "row": "TRBL-119",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-119",
+      "branch": "wt/TRBL-119",
+      "files_owned": ["internal/dashboard/server.go", "internal/dashboard/tokens.go", "internal/dashboard/*_test.go"],
+      "status": "dispatched"
+    },
+    {
+      "row": "TRBL-120",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-120",
+      "branch": "wt/TRBL-120",
+      "files_owned": ["internal/ledger/recover.go", "internal/ledger/readonly.go", "internal/ledger/*_test.go", "cmd/trouble/*.go"],
+      "status": "dispatched"
+    },
+    {
+      "row": "QA-TROUBLE-17-R2",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R2",
+      "branch": "wt/QA-TROUBLE-17-R2",
+      "files_owned": ["internal/sentinel/load_test.go", "internal/skills/canonical_test.go", "internal/loadfence/*.go"],
+      "status": "dispatched"
+    }
+  ],
+  "serial": [
+    {
+      "row": "TRBL-118",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-118",
+      "branch": "wt/TRBL-118",
+      "status": "foreman-direct salvage"
+    }
+  ],
+  "dispatched_at": "2026-10-23T14:29:00Z"
+}

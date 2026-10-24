@@ -11,7 +11,10 @@
       "worktree": "/home/kara/worktrees/trouble-RELEASE-011",
       "branch": "wt/RELEASE-011",
       "brief": "/tmp/trouble-foreman-2026-10-24-12-19-33-RELEASE-011-brief.txt",
-      "status": "dispatched"
+      "status": "recovered",
+      "recovery": "implementation already merged on main as da3f7f7; branch tip dec01b3 verified as ancestor of current main 8ba71d6; merged-tree gates and release matrix re-run"
     }
-  ]
+  ],
+  "status": "recovered",
+  "finished_at": "2026-10-24T14:06:57Z"
 }

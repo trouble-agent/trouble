@@ -35,6 +35,7 @@ var linuxOnlyPatterns = []linuxOnlyPattern{
 	{"unix.ST_RDONLY", "ST_RDONLY is a Linux statfs flag"},
 	{"syscall.Fdatasync", "fdatasync(2) has no windows or darwin binding in package syscall"},
 	{"syscall.Flock", "flock(2) does not exist on windows"},
+	{"syscall.Kill", "syscall.Kill does not exist on windows; use the platform process API"},
 	{"syscall.Stat_t", "syscall.Stat_t does not exist on windows"},
 	{"syscall.Statfs_t", "syscall.Statfs_t does not exist on windows"},
 	{"Setpgid:", "syscall.SysProcAttr has no Setpgid field on windows"},

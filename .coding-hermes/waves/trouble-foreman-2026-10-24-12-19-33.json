@@ -1,0 +1,17 @@
+{
+  "tick_id": "trouble-foreman-2026-10-24-12-19-33",
+  "project": "trouble",
+  "mode": "serial",
+  "wave_budget": 1,
+  "base": "origin/main",
+  "base_sha": "28593ada3681aa46267adc7d41e3301fd0a2238f",
+  "tasks": [
+    {
+      "task_id": "RELEASE-011",
+      "worktree": "/home/kara/worktrees/trouble-RELEASE-011",
+      "branch": "wt/RELEASE-011",
+      "brief": "/tmp/trouble-foreman-2026-10-24-12-19-33-RELEASE-011-brief.txt",
+      "status": "dispatched"
+    }
+  ]
+}

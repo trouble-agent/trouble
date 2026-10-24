@@ -4,7 +4,7 @@
   "tasks": [
     {
       "id": "TRBL-README-1",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-README-1",
+      "worktree": "~/worktrees/trouble-TRBL-README-1",
       "branch": "wt/TRBL-README-1",
       "base": "origin/main@5deacaf",
       "files": ["deploy/README.md"],
@@ -12,7 +12,7 @@
     },
     {
       "id": "TRBL-README-2",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-README-2",
+      "worktree": "~/worktrees/trouble-TRBL-README-2",
       "branch": "wt/TRBL-README-2",
       "base": "origin/main@5deacaf",
       "files": ["README.md"],

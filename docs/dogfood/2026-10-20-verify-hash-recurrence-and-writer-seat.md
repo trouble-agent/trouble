@@ -144,7 +144,7 @@ so the checkout was staged as a tar over ssh (`.git` included, which is what mak
   `boardctl validate` OK.
 * this report, the diagnostics section and the usage-skill pitfalls; the run entry in
   `.coding-hermes/dogfood-log.md`.
-* evidence scripts (scratch, outside the repo): `/home/kara/df1020/{setup,first-event,readonly-proof,probe2,perf,compactprobe,lockprobe,pidprobe}.sh`,
+* evidence scripts (scratch, outside the repo): `~/df1020/{setup,first-event,readonly-proof,probe2,perf,compactprobe,lockprobe,pidprobe}.sh`,
   `hashprobe.py`, `snap/verify-*.json`, `snap/perf.txt`.
 
 ## What to tell the maintainer first, with one hour

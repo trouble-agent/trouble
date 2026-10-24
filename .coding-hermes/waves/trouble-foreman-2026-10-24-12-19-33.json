@@ -8,7 +8,7 @@
   "tasks": [
     {
       "task_id": "RELEASE-011",
-      "worktree": "/home/kara/worktrees/trouble-RELEASE-011",
+      "worktree": "~/worktrees/trouble-RELEASE-011",
       "branch": "wt/RELEASE-011",
       "brief": "/tmp/trouble-foreman-2026-10-24-12-19-33-RELEASE-011-brief.txt",
       "status": "recovered",

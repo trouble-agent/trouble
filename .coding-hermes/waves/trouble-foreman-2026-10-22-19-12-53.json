@@ -8,7 +8,7 @@
   "tasks": [
     {
       "row": "TRBL-117",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-117",
+      "worktree": "~/worktrees/trouble-TRBL-117",
       "branch": "wt/TRBL-117",
       "status": "planned"
     }

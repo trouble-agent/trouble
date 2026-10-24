@@ -6,7 +6,7 @@
     {
       "task_id": "TRBL-112",
       "branch": "wt/TRBL-112",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-112",
+      "worktree": "~/worktrees/trouble-TRBL-112",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "outcome": "failed",
@@ -15,7 +15,7 @@
     {
       "task_id": "TRBL-115",
       "branch": "wt/TRBL-115",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-115",
+      "worktree": "~/worktrees/trouble-TRBL-115",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "outcome": "complete",

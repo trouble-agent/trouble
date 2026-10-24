@@ -14,7 +14,7 @@
     {
       "task_id": "TRBL-116",
       "branch": "wt/TRBL-116",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-116",
+      "worktree": "~/worktrees/trouble-TRBL-116",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default -> PAYG fallback (killed per doctrine); foreman finished the verified in-tree diff",
       "commit": "a373bfe26bb04055dad2b79fbac87c3455c8886e",

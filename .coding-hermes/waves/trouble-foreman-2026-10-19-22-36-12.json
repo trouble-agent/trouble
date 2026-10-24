@@ -7,7 +7,7 @@
   "tasks": [
     {
       "id": "DOC-8",
-      "worktree": "/home/kara/worktrees/trouble-DOC-8",
+      "worktree": "~/worktrees/trouble-DOC-8",
       "branch": "wt/DOC-8",
       "status": "merged",
       "content_commit": "37698888d250039f373fdd9af45f3177e37f741d",
@@ -15,7 +15,7 @@
     },
     {
       "id": "DOC-14",
-      "worktree": "/home/kara/worktrees/trouble-DOC-14",
+      "worktree": "~/worktrees/trouble-DOC-14",
       "branch": "wt/DOC-14",
       "status": "merged",
       "content_commit": "8cfb1180f49bc86a81baba597a57df785c6dd0ea",
@@ -23,7 +23,7 @@
     },
     {
       "id": "DOC-16",
-      "worktree": "/home/kara/worktrees/trouble-DOC-16",
+      "worktree": "~/worktrees/trouble-DOC-16",
       "branch": "wt/DOC-16",
       "status": "merged",
       "content_commit": "f34716d461f09c0edeacce17a834bd97eb49af03",

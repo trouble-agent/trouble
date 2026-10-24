@@ -7,28 +7,28 @@
   "tasks": [
     {
       "row": "TRBL-118",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-118",
+      "worktree": "~/worktrees/trouble-TRBL-118",
       "branch": "wt/TRBL-118",
       "status": "failed",
       "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-119",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-119",
+      "worktree": "~/worktrees/trouble-TRBL-119",
       "branch": "wt/TRBL-119",
       "status": "failed",
       "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-120",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-120",
+      "worktree": "~/worktrees/trouble-TRBL-120",
       "branch": "wt/TRBL-120",
       "status": "failed",
       "reason": "state.db lock contention \u2014 worker stalled"
     },
     {
       "row": "TRBL-121",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-121",
+      "worktree": "~/worktrees/trouble-TRBL-121",
       "branch": "wt/TRBL-121",
       "status": "failed",
       "reason": "state.db lock contention \u2014 worker stalled"

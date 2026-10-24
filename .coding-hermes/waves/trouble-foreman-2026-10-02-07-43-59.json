@@ -7,7 +7,7 @@
   "workers": [
     {
       "task_id": "TRBL-085",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-085",
+      "worktree": "~/worktrees/trouble-TRBL-085",
       "branch": "wt/TRBL-085",
       "base_sha": "8bc2752",
       "gitreins_task": "TRBL-085",
@@ -15,7 +15,7 @@
     },
     {
       "task_id": "QA-TROUBLE-13",
-      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-13",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-13",
       "branch": "wt/QA-TROUBLE-13",
       "base_sha": "8bc2752",
       "gitreins_task": "QA-TROUBLE-13",

@@ -3,12 +3,12 @@
   "wave_budget": 1,
   "mode": "serial",
   "serial_reason": "WAVE_BUDGET=1 (hard ceiling = 1 concurrent worker); a wave requires >=2 independent workers per the foreman skill, so the serial path applies. 10 pending rows existed but only one worker may run this tick.",
-  "checkout": "/home/kara/trouble",
+  "checkout": "~/trouble",
   "base_sha": "0e5f646",
   "workers": [
     {
       "task_id": "TRBL-110",
-      "worktree": "/home/kara/trouble",
+      "worktree": "~/trouble",
       "branch": "main",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",

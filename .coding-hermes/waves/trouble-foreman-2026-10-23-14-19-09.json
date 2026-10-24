@@ -4,11 +4,11 @@
   "budget": 3,
   "mode": "wave",
   "base": "182dc62",
-  "note": "TRBL-118 is NOT dispatched: the 2026-10-23-04-55-56 wave left ~15 files of uncommitted, coherent work in /home/kara/worktrees/trouble-TRBL-118 (T49/T50/R14 ladder amendment + spec amendments). Foreman salvages and verifies that in-flight attempt instead of re-dispatching.",
+  "note": "TRBL-118 is NOT dispatched: the 2026-10-23-04-55-56 wave left ~15 files of uncommitted, coherent work in ~/worktrees/trouble-TRBL-118 (T49/T50/R14 ladder amendment + spec amendments). Foreman salvages and verifies that in-flight attempt instead of re-dispatching.",
   "tasks": [
     {
       "row": "TRBL-119",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-119",
+      "worktree": "~/worktrees/trouble-TRBL-119",
       "branch": "wt/TRBL-119",
       "files_owned": [
         "internal/dashboard/server.go",
@@ -19,7 +19,7 @@
     },
     {
       "row": "TRBL-120",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-120",
+      "worktree": "~/worktrees/trouble-TRBL-120",
       "branch": "wt/TRBL-120",
       "files_owned": [
         "internal/ledger/recover.go",
@@ -31,7 +31,7 @@
     },
     {
       "row": "QA-TROUBLE-17-R2",
-      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R2",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-17-R2",
       "branch": "wt/QA-TROUBLE-17-R2",
       "files_owned": [
         "internal/sentinel/load_test.go",
@@ -44,7 +44,7 @@
   "serial": [
     {
       "row": "TRBL-118",
-      "worktree": "/home/kara/worktrees/trouble-TRBL-118",
+      "worktree": "~/worktrees/trouble-TRBL-118",
       "branch": "wt/TRBL-118",
       "status": "foreman-direct salvage"
     }

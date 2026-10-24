@@ -183,8 +183,16 @@ index (SPEC-10 §2.9's no-scan rule) and uses a token to continue a long list, n
 |---|---|---|
 | `trouble ledger status --json` | prints `LedgerStatus` (durable watermark, queue depth, index stats, loss window) | 0 ok, 1 degraded |
 | `trouble ledger verify [--day D]` | read-only walk: seq continuity, line parse, payload hash, tombstone totals; opens **no** lock | 0 ok, 1 findings, 2 unreadable |
-| `trouble ledger compact --day D [--dry-run]` | dry-run prints a `CompactionResult` with `ToFile` and byte deltas and writes nothing | 0 ok, 1 failed |
+| `trouble ledger compact --day D [--dry-run]` | dry-run prints a `CompactionResult` with `ToFile` and byte deltas and writes nothing; the active UTC day is refused before the writer seat is taken (§2.4a) | 0 ok, 1 failed |
 | `trouble ledger reindex [--rebuild-store]` | re-runs the boot index build; `--rebuild-store` is meaningful only under the SQLite tier (§3.8) and is a no-op otherwise | 0 ok, 1 failed |
+
+### 2.4a Active-day compaction refusal
+
+The current UTC day is not eligible for compaction. `trouble ledger compact --day D`, with or without
+`--dry-run`, refuses an active-day request with `TROUBLE-LEDGER-007` and the reason `cannot compact the
+active day; stop the daemon or specify a prior day`. The check is performed before the command takes the
+writer seat, so a refused active-day request creates no `ledger/LOCK`. This is a refusal sub-case of
+007, not a compaction rewrite failure; the retention refusal remains `TROUBLE-LEDGER-009` (§5).
 
 ### 2.5 Config surface (`[ledger]`, precedence `flag > env > file > default`, SPEC-12 §3.4)
 
@@ -979,7 +987,7 @@ The ledger also propagates SPEC-02 codes unchanged (§4.2) and references SPEC-1
 | 004 | permanent | a record's `schema_version` > `Options.MaxSchema` | forward-compat: the line is skipped, counted (`SkippedNewerSchema`), the file is flagged `version_gate`; the daemon stays up and `/health.json` shows the gap |
 | 005 | permanent | `flock(LOCK_EX\|LOCK_NB)` on `ledger/LOCK` fails — a second writer | the process logs `LOCK`'s pid/version/git_sha, emits the error and exits non-zero; never retried, never overridden |
 | 006 | transient | rotation failed (new day/part file uncreatable, ENOSPC on create) | the writer keeps appending to the current file, retries with backoff, records `lifecycle{op:"rotate_failed"}`; no record is lost |
-| 007 | transient | compaction failed (temp file, rename, unlink or fsync of the directory failed), or an interrupted compaction commit is found at boot | the current generation stays authoritative; retained generations are untouched; retried at the next interval; boot case resolves by highest generation (§3.4 rule 3) |
+| 007 | transient | compaction failed (temp file, rename, unlink or fsync of the directory failed), an interrupted compaction commit is found at boot, or an active-day compaction request is refused (§2.4a) | for a rewrite failure, the current generation stays authoritative and the operation is retried; the boot case resolves by highest generation (§3.4 rule 3); for an active-day refusal, the command exits before taking the writer seat and creates no `LOCK` |
 | 008 | transient | index rebuild failed or exceeded the budget / scan-rate floor | the degraded ladder of §3.6 applies, `IndexStats.Degraded=true`, the cold-read path answers, and `lifecycle{op:"index_degraded"}` is written; the daemon still starts |
 | 009 | permanent | retention blocked: the only compaction candidates are spine records whose counts must be kept | compaction is refused, `IndexStats`/`LedgerStatus` carry the condition, the operator must raise `disk_budget_bytes` or lower `retention_compacted`; counts are never sacrificed |
 | 010 | transient | disk budget exceeded and compaction cannot reclaim enough | escalated payload mode (§3.7 rule 3/4): records keep identity/counters with `payload_dropped=true`, then producers are refused with 001/`backpressure`; `lifecycle{op:"budget_exceeded"}` |

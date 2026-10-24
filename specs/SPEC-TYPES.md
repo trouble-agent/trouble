@@ -2026,7 +2026,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-LEDGER-004 | permanent | record schema_version newer than this binary supports | SPEC-01 |
 | TROUBLE-LEDGER-005 | permanent | second writer attempted a ledger file (single-writer violation) | SPEC-01 |
 | TROUBLE-LEDGER-006 | transient | rotation failed (target file uncreatable) | SPEC-01 |
-| TROUBLE-LEDGER-007 | transient | compaction (generation rewrite) failed | SPEC-01 |
+| TROUBLE-LEDGER-007 | transient | compaction (generation rewrite) failed, or an active-day compaction request was refused before the writer seat was taken (§2.4a) | SPEC-01 |
 | TROUBLE-LEDGER-008 | transient | in-memory index rebuild failed at boot | SPEC-01 |
 | TROUBLE-LEDGER-009 | permanent | retention blocked: compaction cannot free space without violating tombstone counts | SPEC-01 |
 | TROUBLE-LEDGER-010 | transient | disk budget exceeded (rotation/compaction cannot reclaim enough) | SPEC-01 |

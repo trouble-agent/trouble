@@ -43,12 +43,25 @@ repairs.
   seq in the highest-generation file) + 1`; a corrupt or missing HEAD costs one bounded tail read.
 * **Second writer**: `Open` fails with `TROUBLE-LEDGER-005`, logs the holding `LOCK`'s pid/version/
   git_sha, and exits non-zero. Never override it — one writer per ledger, forever.
+* **Stale `LOCK` after SIGKILL**: if `troubled` is killed with SIGKILL, `ledger/LOCK` may remain and
+  name the dead process. The kernel flock is authoritative, not the JSON pid in that file:
+  `trouble ledger status` liveness-checks the pid and reports `writer_pid=-1` for a dead writer.
+  Once you have confirmed that no live process holds the flock, the stale file is safe to remove.
 
 ## 4. Compaction and retention
 
 `trouble ledger compact --day D [--dry-run]` rewrites one day into a new generation file
 (`D.N.gen.jsonl`). It is never in place: the previous inode may be unlinked but never modified, so a
-reader holding it finishes on a stable image. What compaction may do:
+reader holding it finishes on a stable image.
+
+The current UTC day is not eligible for compaction. `trouble ledger compact --day D`, with or without
+`--dry-run`, refuses an active-day request with `TROUBLE-LEDGER-007` (`cannot compact the active day;
+stop the daemon or specify a prior day`). This check happens before the command takes the writer seat,
+so a refused active-day request creates no `ledger/LOCK`. This is distinct from the retention refusal:
+`TROUBLE-LEDGER-009` means compaction cannot free space without violating tombstone counts. Keep both
+codes in scripts that classify documented refusals.
+
+What compaction may do:
 
 * fold every `event`/`canary` line into one aggregate per group per day (`op=compaction_aggregate`)
   carrying the counters, first/last ts and first/last seq — **counts are never dropped**;

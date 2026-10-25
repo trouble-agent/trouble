@@ -1,0 +1,17 @@
+{
+  "tick_id": "trouble-foreman-2026-10-25-07-03-06",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "9223e87f03027f1434f2d4cdded11497194e8ed4",
+  "mode": "serial-fallback",
+  "wave_budget": 5,
+  "reason": "Only one in-scope dispatchable row: QA-TROUBLE-17-R2-R2; RELEASE-009 is owner-gated and TRBL-049 is externally blocked.",
+  "tasks": [
+    {
+      "id": "QA-TROUBLE-17-R2-R2",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R2-R2",
+      "branch": "wt/QA-TROUBLE-17-R2-R2",
+      "status": "prepared"
+    }
+  ]
+}

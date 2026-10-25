@@ -1,6 +1,7 @@
 {
   "tick_id": "trouble-foreman-2026-10-25-18-09-11",
   "status": "blocked_no_dispatch",
+  "finished_at": "2026-10-25T18:20:47Z",
   "mode": "serial-idle-light-audit",
   "base_sha": "7d2424f45fc58a4d75c8785f46bf8b102b5742e3",
   "wave_budget": 3,

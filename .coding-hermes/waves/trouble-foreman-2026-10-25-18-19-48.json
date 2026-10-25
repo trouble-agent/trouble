@@ -1,0 +1,40 @@
+{
+  "tick_id": "trouble-foreman-2026-10-25-18-19-48",
+  "status": "blocked_no_dispatch",
+  "finished_at": "2026-10-25T18:20:47Z",
+  "mode": "recovery-then-serial-idle-audit",
+  "base_sha": "c99c78ec6491b5101e9330e3a90dadd0cb570329",
+  "wave_budget": 10,
+  "tasks": [],
+  "recovery": {
+    "manifest": ".coding-hermes/waves/trouble-foreman-2026-10-25-18-09-11.json",
+    "status": "recovered_no_workers",
+    "workers": 0,
+    "branches": 0,
+    "worktrees": 0,
+    "gates": "PASS on current main: go build ./..., go vet ./..., specs selfcheck, go test ./cmd/trouble -count=1"
+  },
+  "census": {
+    "rows_total": 197,
+    "complete": 194,
+    "blocked": ["TRBL-049"],
+    "pending": ["RELEASE-009", "QA-TROUBLE-FOREMAN-1"]
+  },
+  "no_dispatch_reason": "No actionable implementation rows. TRBL-049 is externally remediated and owner/harness-decision blocked; RELEASE-009 is owner-gated on initial release authorization; QA-TROUBLE-FOREMAN-1 is an unverified truncated QA collection invalidated by bunker capacity and is not safe to relaunch on the same exhausted agent.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "origin_parity": "0/0",
+    "build": "PASS",
+    "vet": "PASS",
+    "spec_selfcheck": "PASS",
+    "cmd_trouble_test": "PASS",
+    "release_authorization": "BLOCKED: .release-authorized absent, zero v* tags, zero GitHub Releases",
+    "runtime_health": "UNAVAILABLE: 127.0.0.1:7644 refused",
+    "ci": "GREEN: latest three main runs completed success"
+  },
+  "residue_preserved": [
+    ".gitreins/tasks.yaml.corrupt-963c8d6c853e",
+    "resolved",
+    "trouble"
+  ]
+}

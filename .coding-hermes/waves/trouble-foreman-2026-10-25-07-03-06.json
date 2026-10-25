@@ -13,5 +13,8 @@
       "branch": "wt/QA-TROUBLE-17-R2-R2",
       "status": "prepared"
     }
-  ]
+  ],
+  "finished_at": "2026-10-25T16:03:57Z",
+  "status": "recovered",
+  "recovery_note": "Recovered QA-TROUBLE-17-R2-R2: branch rebased onto current main, full gate passed, commit 9eb42ac96c8ec0bf6b22c0ffe80676ff7cf7ae7d fast-forwarded and pushed; worktree removed and branch deleted. Tier-2 verdict unavailable after evaluator contention; no Tier-2 pass claimed."
 }

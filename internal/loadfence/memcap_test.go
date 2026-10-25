@@ -133,6 +133,19 @@ func TestMemCapText(t *testing.T) {
 	}
 }
 
+func TestMemCapSkipReasonNames3145728KB(t *testing.T) {
+	t.Setenv(EnvMemOverride, "3145728KB")
+	reason, skip := MemCapSkipReason("TestBudgetDashboardRSS", 4<<30, "fixed-shape two-process measurement")
+	if !skip {
+		t.Fatal("MemCapSkipReason did not skip a fixed-shape 4GiB measurement under the 3145728KB cap")
+	}
+	for _, want := range []string{"TestBudgetDashboardRSS", "SKIP", "3145728KB", "3221225472", "3.00GiB", EnvMemOverride, "fixed-shape two-process measurement"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("skip reason missing %q: %s", want, reason)
+		}
+	}
+}
+
 func TestHumanBytes(t *testing.T) {
 	cases := []struct {
 		in   int64

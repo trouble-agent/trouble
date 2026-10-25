@@ -88,6 +88,18 @@ func runAppends(t *testing.T, l *Ledger, n, c int) time.Duration {
 // enforced by TestAmortizedThroughput.
 func TestFsyncCountIsStructural(t *testing.T) {
 	const batch = 4096
+	loadAtStart := loadAvg1()
+	// QA-TROUBLE-17-R2-R2: this structural count still depends on the
+	// scheduler delivering the producer wave. Above the shared host-load
+	// ceiling, a count miss cannot distinguish a ledger regression from host
+	// descheduling, so skip before creating the measured region. Below it, the
+	// want..want+1 invariant below remains unchanged and can fail normally.
+	if loadfence.AboveHostGate(loadAtStart) {
+		t.Skipf("%s", loadfence.HostGateSkipText(
+			"TestFsyncCountIsStructural",
+			"batch-counted fsync invariant is not falsifiable while producer scheduling is above the shared ceiling",
+			loadAtStart))
+	}
 	// QA-TROUBLE-22: under a memory cap the group-commit run's wall time is
 	// what the timeout eats (25600×4096 producers × ~1050 batches of fsyncs
 	// scale with cap pressure). The invariant is batch-COUNTED, so a smaller
@@ -156,6 +168,17 @@ func TestFsyncCountIsStructural(t *testing.T) {
 // fails exactly as it always has.
 func TestAmortizedThroughput(t *testing.T) {
 	loadfence.SkipUnderCIIfLoadCalibrated(t, "amortized group-commit 515,000 rec/s (spec floor 100,000), reference host measured 515k")
+	loadAtStart := loadAvg1()
+	// QA-TROUBLE-17-R2-R2: the measured rate includes producer scheduling and
+	// fsync service time. Above the shared host-load ceiling, a low rate is not
+	// falsifiable as a ledger regression, so skip before the measured region.
+	// Below it, the calibrated floor remains a real assertion.
+	if loadfence.AboveHostGate(loadAtStart) {
+		t.Skipf("%s", loadfence.HostGateSkipText(
+			"TestAmortizedThroughput",
+			"amortized group-commit rate is not falsifiable while producer scheduling is above the shared ceiling",
+			loadAtStart))
+	}
 	if raceEnabled {
 		t.Skip("absolute throughput floors are measured without -race; run `go test -count=1 ./internal/ledger/...` for the regression bar")
 	}

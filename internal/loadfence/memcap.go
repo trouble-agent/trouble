@@ -56,7 +56,10 @@ const (
 func MemCap() (cap int64, source string) {
 	if v := strings.TrimSpace(os.Getenv(EnvMemOverride)); v != "" {
 		if b, ok := parseMemSize(v); ok && b > 0 {
-			return b, "env:" + EnvMemOverride
+			// Keep the operator's declared cap spelling in the provenance. The
+			// verdict must show both the normalized bytes and the observed limit
+			// (for example, 3145728KB), not merely the env var name.
+			return b, "env:" + EnvMemOverride + "=" + v
 		}
 	}
 	for _, c := range []struct{ path, name string }{

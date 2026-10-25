@@ -41,6 +41,26 @@ func TestHostGateCeiling(t *testing.T) {
 
 func TestHostGateSkipTextNamesEverything(t *testing.T) {
 	t.Setenv(EnvLoadOverride, "")
+	for _, gate := range []string{
+		"SPEC-04 §7 ingest throughput (group-commit floor)",
+		"SPEC-06a artifact parse budget",
+		"TestBudgetDashboardRSS",
+		"TestFsyncCountIsStructural",
+		"TestAmortizedThroughput",
+	} {
+		txt := HostGateSkipText(gate, "measured rate/latency/structural result", 20.99)
+		for _, want := range []string{
+			gate,
+			"SKIP",
+			"loadfence.HostGateLoadCeiling", // the shared constant, named in the message
+			"20.99",
+			"measured rate/latency/structural result", // the measurement itself
+		} {
+			if !strings.Contains(txt, want) {
+				t.Errorf("skip text for %q does not name %q: %s", gate, want, txt)
+			}
+		}
+	}
 	txt := HostGateSkipText("SPEC-04 §7 ingest throughput", "120 req/s vs a 537 req/s floor", 20.99)
 	for _, want := range []string{
 		"SPEC-04 §7 ingest throughput",

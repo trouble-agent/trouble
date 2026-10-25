@@ -1,0 +1,9 @@
+{
+  "tick_id": "trouble-foreman-2026-10-25-17-58-51",
+  "status": "blocked_no_dispatch",
+  "finished_at": null,
+  "base": "c317d791e3dfa4f51a9e31831fee5d6576a166a7",
+  "wave_budget": 4,
+  "tasks": [],
+  "reason": "After named-wave recovery, the board has only TRBL-049 (owner/harness decision blocker), RELEASE-009 (owner release authorization blocker), and QA-TROUBLE-FOREMAN-1 (truncated QA collection blocker); no dispatchable implementation rows."
+}

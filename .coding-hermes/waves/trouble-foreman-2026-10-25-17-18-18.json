@@ -1,0 +1,30 @@
+{
+  "tick_id": "trouble-foreman-2026-10-25-17-18-18",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "1744f755f6edcf2df2f433ba582f9887732f9c38",
+  "mode": "serial-fallback",
+  "wave_budget": 10,
+  "census": {
+    "physical_lines": 197,
+    "unique_rows": 197,
+    "complete": 194,
+    "blocked": 1,
+    "pending": 2,
+    "dispatchable_implementation_rows": 0
+  },
+  "tasks": [],
+  "reason": "No implementation row is dispatchable. TRBL-049 is externally remediated and owner/harness-decision blocked; RELEASE-009 is owner-gated on initial release authorization; QA-TROUBLE-FOREMAN-1 is a QA collection-integrity blocker with unverified truncated evidence and no justified relaunch in this tick.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "origin_parity": "0/0",
+    "release_build": "PASS: 8 checksum-bearing artifacts for linux/amd64, linux/arm64, darwin/arm64, windows/amd64",
+    "release_authorization": "BLOCKED: .release-authorized absent, zero v* tags, zero GitHub Releases",
+    "ci": "GREEN: latest 3 main runs completed successfully; exact current HEAD 1744f75 run 40214693539 succeeded",
+    "board_validation": "OK with 187 legacy warnings",
+    "off_by_one": "none:verification-only no debugging"
+  },
+  "status": "blocked_no_dispatch",
+  "finished_at": "2026-10-25T17:22:16Z",
+  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-and-qa-collection-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-25-17-18-18.json test=go-build-vet-cmd-trouble-short-release-manifest-gh-run-list doc=none:not-needed prompt=none:tick evidence=.coding-hermes/board/events.jsonl#next witness=live:origin/main@1744f75 verdict=none:no-implementation-dispatch commit=none:no-source-change memory=/trouble/decisions"
+}

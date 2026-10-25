@@ -1,0 +1,9 @@
+{
+  "tick_id": "trouble-foreman-2026-10-25-17-46-10",
+  "status": "blocked_no_dispatch",
+  "finished_at": null,
+  "base": "9b0f12d368df4dede316b09d722d09392ba4f376",
+  "wave_budget": 8,
+  "tasks": [],
+  "reason": "No dispatchable implementation rows after classifying TRBL-049, RELEASE-009, and QA-TROUBLE-FOREMAN-1 as owner or QA-collection blockers."
+}

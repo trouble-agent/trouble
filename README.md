@@ -281,9 +281,20 @@ build anything:
 go version          # → go version go1.26.x <os>/<arch>
 ```
 
-A distro-packaged Go older than 1.26 also works with `GOTOOLCHAIN=auto` in the
-environment: the `go 1.26.0` directive in `go.mod` then makes the `go` command
-download and use a 1.26+ toolchain for this build automatically.
+A distro-packaged Go older than 1.26 can be used with `GOTOOLCHAIN=auto`, but do
+not rely on that setting to fetch the required toolchain on a fresh `HOME`. This
+module pins `go1.26.9` in `go.mod`; install its launcher and download it manually
+before running the `go install` commands below:
+
+```
+go install golang.org/dl/go1.26.9@latest
+go1.26.9 download
+```
+
+After that prerequisite, the `go install` commands below use the supported Go
+1.26 toolchain. The direct build path in [Build and test](#build-and-test)
+remains unchanged.
+
 
 **`make` is NOT required.** The Makefile's `bin` target is only two `go build`
 lines with version-stamp `-ldflags` variables — the direct equivalents appear in

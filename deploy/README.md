@@ -11,8 +11,8 @@ release process, then run the commands from that checkout.
 Prerequisites:
 
 - Go 1.26 or newer (`go.mod` declares `go 1.26.0`) — install it from
-  <https://go.dev/dl/> if `go version` is not already on `PATH`; `make` and a
-  POSIX shell.
+  <https://go.dev/dl/> if `go version` is not already on `PATH`; a POSIX shell.
+  `make` is optional.
 - `curl` for the readiness and first-event requests; `jq` for the ledger check.
 - A writable local filesystem for the state root. Do not use `/tmp`, `/var/tmp`,
   or a network mount.

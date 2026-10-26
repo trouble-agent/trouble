@@ -1,7 +1,8 @@
 {
   "tick_id": "trouble-foreman-2026-10-26-10-15-25",
-  "status": "blocked_no_dispatch",
+  "status": "recovered_no_workers",
   "base_sha": "fcc6a1480b21a298b583e36be56a5dd258349ac7",
+  "finished_at": "2026-10-26T16:41:54Z",
   "wave_budget": 12,
   "tasks": [],
   "mode": "serial fallback not entered; no actionable implementation rows after blocker classification",

@@ -1,0 +1,27 @@
+{
+  "tick_id": "trouble-foreman-2026-10-26-16-41-54",
+  "status": "blocked_no_dispatch",
+  "started_at": "2026-10-26T16:41:54Z",
+  "base_sha": "90c241cffd98d6cfc6f5387a9baaad89bc8cfe0b",
+  "wave_budget": 12,
+  "tasks": [],
+  "mode": "recovery completed; no implementation dispatch",
+  "census": {
+    "rows_total": 197,
+    "complete": 194,
+    "blocked": ["TRBL-049"],
+    "pending": ["RELEASE-009", "QA-TROUBLE-FOREMAN-1"],
+    "dispatchable": 0
+  },
+  "no_dispatch_reason": "The named unfinished wave had zero workers, branches, or worktrees. Current board rows remain TRBL-049 (owner/harness decision blocker), RELEASE-009 (owner release authorization blocker), and QA-TROUBLE-FOREMAN-1 (unverified truncated QA collection); no implementation row is dispatchable.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "head_before_closeout": "90c241cffd98d6cfc6f5387a9baaad89bc8cfe0b",
+    "origin_main_before_closeout": "90c241cffd98d6cfc6f5387a9baaad89bc8cfe0b",
+    "origin_parity_before_closeout": "0/0",
+    "gitreins": "not run: no implementation task dispatched",
+    "worker": "not dispatched",
+    "off_by_one": "none: verification-only no debugging"
+  },
+  "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"]
+}

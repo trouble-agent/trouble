@@ -180,7 +180,7 @@ root — the pair a container `HEALTHCHECK` and a second-instance probe need.
 
 The dashboard token plaintext is printed exactly once, by
 `trouble dashboard token create` / `rotate`, on stdout; it is unrecoverable
-afterwards because only `sha256(token)[:32]` is stored (SPEC-10 §3.2). Each
+afterwards because only the stored SHA-256 digest, represented as 64 hexadecimal characters, is retained (SPEC-10 §3.2). Each
 token verb accepts `--token-file PATH` (alias `--dashboard-token_file PATH`)
 to write or read a store other than the resolved `dashboard.token_file`: pass
 the daemon's own `--dashboard-token_file` value so the mint lands in the file

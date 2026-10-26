@@ -339,7 +339,7 @@ status is 400 because §2.2 and the §5 catalog say so; §7's test table calls t
 
 **Tokens live in a 0600 file, outside the state root.** `dashboard.token_file` owes nothing to the
 ledger's home, because a ledger backup must never carry credentials. Plaintext is `tdt_` + 43
-base64url characters, printed once by the CLI and stored only as `sha256(token)[:32]` hex. The store
+base64url characters, printed once by the CLI and stored only as a SHA-256 digest, represented as 64 hexadecimal characters. The store
 is stat'ed per request, so a CLI rotation reaches the running daemon without a restart; a parse or IO
 failure is fail-closed — every route except the loopback `/health.json` answers 503 +
 `TROUBLE-DASHBOARD-013`, with no last-known-good fallback. A wrong file mode refuses the boot

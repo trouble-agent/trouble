@@ -150,7 +150,7 @@ Exactly two carriers exist:
   non-loopback.
 
 A token's plaintext form is `tdt_` + 43 base64url characters (47 bytes); the
-store keeps only `sha256(token)[:32]` hex and looks it up constant-time. The
+store keeps only the SHA-256 digest, represented as 64 hexadecimal characters, and looks it up constant-time. The
 refusals:
 
 | Presented | Answer |

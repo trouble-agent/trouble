@@ -2,24 +2,33 @@
   "tick_id": "trouble-releng-2026-10-26-18-21-00",
   "status": "blocked_no_dispatch",
   "started_at": "2026-10-26T18:21:00Z",
+  "finished_at": "2026-10-26T23:24:29Z",
   "base_sha": "da3f20ac4e15a313b3dbaa36f7ac6cec91e3f366",
+  "recovery_base_sha": "7439da3e65dff6734ab9a4bacd398e8464db2b83",
   "wave_budget": 2,
   "tasks": [],
   "mode": "verification-only; no release cut",
   "census": {
     "repo": "trouble-agent/trouble",
-    "pending_release_row": "RELEASE-009 was closed by owner ruling; this tick filed RELEASE-012 as the current readiness blocker",
+    "pending_release_row": "RELEASE-012",
     "dispatchable": 0
   },
-  "no_dispatch_reason": "No explicit initial version or release-cut authorization is present. The repository has zero numeric tags and no GitHub Release object; tag-triggered CI is unwired. Current evidence supports NO-GO, so no tag, release object, registry push, or worker dispatch is authorized.",
+  "no_dispatch_reason": "The named unfinished wave had zero workers, branches, or worktrees. Recovery re-verified the empty task list, no associated worker branches/worktrees, current main gates, and current origin parity; release authorization remains absent and no release worker or cut is authorized.",
   "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "current_main": "7439da3e65dff6734ab9a4bacd398e8464db2b83",
+    "origin_main": "7439da3e65dff6734ab9a4bacd398e8464db2b83",
     "origin_parity": "0/0",
-    "make_release": "PASS: 8 checksum-bearing artifacts in /tmp/trouble-release-releng-20261026-1821",
-    "build_vet_selfcheck": "PASS",
-    "main_ci": "PASS: run 40362251066 on exact HEAD, per-job success",
-    "gitreins": "not clean release evidence: tier-1 baseline failures and host-sensitive test history",
-    "dogfood": "latest in-repo evidence is 2026-10-23 PROMISING-BUT-ROUGH with ack-to-close blocked and QA/install limitations",
-    "release_authorization": "MISSING: no explicit version/cut row; proposed default v0.1.0 recorded in RELEASE-012"
+    "build": "PASS",
+    "vet": "PASS",
+    "spec_selfcheck": "PASS",
+    "gitreins": "not run: no implementation task dispatched",
+    "worker": "not dispatched",
+    "off_by_one": "none:verification-only no debugging"
   },
-  "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"]
+  "residue_preserved": [
+    ".gitreins/tasks.yaml.corrupt-963c8d6c853e",
+    "resolved",
+    "trouble"
+  ]
 }

@@ -1,0 +1,34 @@
+{
+  "tick_id": "trouble-foreman-2026-10-26-10-15-25",
+  "status": "blocked_no_dispatch",
+  "base_sha": "fcc6a1480b21a298b583e36be56a5dd258349ac7",
+  "wave_budget": 12,
+  "tasks": [],
+  "mode": "serial fallback not entered; no actionable implementation rows after blocker classification",
+  "census": {
+    "rows_total": 197,
+    "complete": 194,
+    "blocked": ["TRBL-049"],
+    "pending": ["RELEASE-009", "QA-TROUBLE-FOREMAN-1"],
+    "dispatchable": 0
+  },
+  "no_dispatch_reason": "RELEASE-009 remains owner-gated on initial release authorization. QA-TROUBLE-FOREMAN-1 remains an unverified truncated collection: its required historical HEAD 9ae3822 is superseded by current main, the evidence still contains a TRUNCATED collect failure, and the named agent is absent from bunker-mvp. No implementation row is dispatchable.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "head": "fcc6a1480b21a298b583e36be56a5dd258349ac7",
+    "origin_main": "fcc6a1480b21a298b583e36be56a5dd258349ac7",
+    "origin_parity": "0/0",
+    "build": "PASS",
+    "vet": "PASS",
+    "spec_selfcheck": "PASS",
+    "cmd_trouble_test": "PASS",
+    "release_authorization": "BLOCKED: .release-authorized absent, zero v* tags, zero GitHub Releases",
+    "runtime_health": "UNAVAILABLE: 127.0.0.1:7644 refused",
+    "ci": "GREEN: latest three main runs completed success; current HEAD fcc6a14 exact-head run success",
+    "qa_collection": "UNVERIFIED: /tmp/bunker-qa-evidence-1792942470960-1.jsonl has 21 rows ending in FAIL battery TRUNCATED; agent 54bed8d6 absent"
+  },
+  "gitreins": "not run: no implementation task dispatched",
+  "worker": "not dispatched",
+  "off_by_one": "none: verification-only no debugging",
+  "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"]
+}

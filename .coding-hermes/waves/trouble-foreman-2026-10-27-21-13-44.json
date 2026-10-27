@@ -1,0 +1,36 @@
+{
+  "tick_id": "trouble-foreman-2026-10-27-21-13-44",
+  "status": "blocked_no_dispatch",
+  "started_at": "2026-10-27T21:13:44-05:00",
+  "base_sha": "914b8c04998e85a8508d038f75ca3be5ace9eed9",
+  "wave_budget": 7,
+  "tasks": [],
+  "mode": "no-dispatch verification-only audit",
+  "census": {
+    "rows_total": 206,
+    "complete": 202,
+    "closed": 1,
+    "blocked": ["TRBL-049"],
+    "pending": ["QA-TROUBLE-FOREMAN-1", "RELEASE-012"],
+    "dispatchable": 0
+  },
+  "no_dispatch_reason": "The only pending rows are verification/external-state blockers: QA-TROUBLE-FOREMAN-1 requires a fresh clean QA collection after a truncated battery, and RELEASE-012 remains a first-release readiness/authorization row with no version/tag or tag-triggered workflow. TRBL-049 is blocked on an external harness/owner decision. No implementation row is dispatchable, so no worker, wave, or GitReins lifecycle is started.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "current_main": "914b8c04998e85a8508d038f75ca3be5ace9eed9",
+    "origin_main": "914b8c04998e85a8508d038f75ca3be5ace9eed9",
+    "origin_parity": "0/0",
+    "build": "PASS: go build ./...",
+    "vet": "PASS: go vet ./...",
+    "spec_selfcheck": "PASS: python3 specs/tools/selfcheck.py",
+    "focused_test": "PASS: go test ./cmd/trouble -count=1 -short",
+    "board_validate": "OK with 194 legacy warnings",
+    "release_matrix": "PASS: make release wrote 8 artifacts for linux/amd64, linux/arm64, darwin/arm64, windows/amd64",
+    "qa_collection": "UNVERIFIED: evidence file remains the 2026-10-25 truncated collection; final chaos-errorpath cell absent and agent 54bed8d6 is gone",
+    "release_readiness": "NO-GO/PENDING: no .release-authorized marker, no v* tags, no GitHub Releases, and ci.yml has no tag trigger; release build and current main CI are green",
+    "ci": "GREEN: latest 3 main runs completed success; exact HEAD 914b8c04998e85a8508d038f75ca3be5ace9eed9 run 40498702408 succeeded"
+  },
+  "off_by_one": "none: verification-only; no non-trivial error debugged or fix designed",
+  "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"],
+  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-qa-release-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-27-21-13-44.json test=go-build+go-vet+spec-selfcheck+cmd-trouble-short+board-validate+release-matrix+gh-run-list+qa-evidence-probe doc=none:not-needed prompt=~/.hermes/skills/coding-hermes-foreman-trouble/SKILL.md evidence=live:origin/main@914b8c0+manifest+gh-run-40498702408 witness=live:origin/main@914b8c0 verdict=none:verification-only commit=none:board-closeout memory=/trouble/foreman-tick-trouble-foreman-2026-10-27-21-13-44"
+}

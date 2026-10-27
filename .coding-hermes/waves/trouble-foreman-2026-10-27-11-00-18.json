@@ -1,0 +1,35 @@
+{
+  "tick_id": "trouble-foreman-2026-10-27-11-00-18",
+  "status": "blocked_no_dispatch",
+  "started_at": "2026-10-27T11:00:18Z",
+  "finished_at": "2026-10-27T11:30:00Z",
+  "base_sha": "6a50c8bd1fcd941ca194c6cd5fc79b13551484d4",
+  "wave_budget": 3,
+  "tasks": [],
+  "mode": "recovery completed; no new implementation dispatch",
+  "census": {
+    "rows_total": 206,
+    "complete": 202,
+    "closed": 1,
+    "blocked": ["TRBL-049"],
+    "pending": ["QA-TROUBLE-FOREMAN-1", "RELEASE-012"],
+    "dispatchable": 0
+  },
+  "no_dispatch_reason": "The named unfinished wave's four implementations were already reachable from current main. Their stale branches/worktrees were verified and reaped. Remaining rows are blocked on owner/harness state, unverified QA collection, or release authorization/readiness; no implementation row is dispatchable.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "current_main": "6a50c8bd1fcd941ca194c6cd5fc79b13551484d4",
+    "origin_main": "6a50c8bd1fcd941ca194c6cd5fc79b13551484d4",
+    "origin_parity": "0/0",
+    "build": "PASS",
+    "vet": "PASS",
+    "spec_selfcheck": "PASS",
+    "document_acceptance": "PASS",
+    "board_validate": "OK with legacy warnings",
+    "full_go_test": "FAIL under host load; TestSingleEventIngestLatencyBeforeAfter received 429 and TestBootBatchBoundaryIsOneDurableCommit observed 2 commits; no code change made",
+    "ci": "recent main runs completed success; no new failure observed"
+  },
+  "off_by_one": "none:verification-only; no non-trivial error debugged",
+  "recovery_manifest": ".coding-hermes/waves/trouble-foreman-2026-10-26-23-21-25.json",
+  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-qa-release-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-27-11-00-18.json test=go-build+go-vet+spec-selfcheck+document-acceptance doc=none:not-needed prompt=~/.hermes/skills/coding-hermes-foreman-trouble/SKILL.md evidence=.coding-hermes/waves/trouble-foreman-2026-10-27-11-00-18.json witness=live:origin/main@6a50c8b verdict=none:verification-only commit=none:board-closeout-pending memory=none:not-saved"
+}

@@ -1,0 +1,81 @@
+{
+  "tick_id": "trouble-foreman-2026-10-26-23-21-25",
+  "status": "complete",
+  "started_at": "2026-10-26T23:21:25Z",
+  "finished_at": "2026-10-27T11:25:10Z",
+  "base_sha": "885c4f251c6f98e2420b7f7df679dede5e0fc2e6",
+  "wave_budget": 6,
+  "tasks": [
+    {
+      "id": "DOC-17",
+      "worktree": "/home/kara/worktrees/trouble-DOC-17",
+      "branch": "wt/DOC-17",
+      "status": "recovered_already_landed",
+      "commit": "80b5460d76122e9f72bb83c3de59460c22ee4190"
+    },
+    {
+      "id": "DOC-19",
+      "worktree": "/home/kara/worktrees/trouble-DOC-19",
+      "branch": "wt/DOC-19",
+      "status": "recovered_already_landed",
+      "commit": "a9d7430dc1883cfd5c7a9e8e18875eda115b1221"
+    },
+    {
+      "id": "README-6",
+      "worktree": "/home/kara/worktrees/trouble-README-6",
+      "branch": "wt/README-6",
+      "status": "recovered_already_landed",
+      "commit": "04e8bd77bd09c29f152029531377a381dfdf9c80"
+    },
+    {
+      "id": "README-7-R3",
+      "worktree": "/home/kara/worktrees/trouble-README-7-R3",
+      "branch": "wt/README-7-R3",
+      "status": "recovered_already_landed",
+      "commit": "2e0a7337bcdc6ed353d7c6cf2fa552243ad8af6d"
+    }
+  ],
+  "recovery_result": "All four selected implementations were already reachable from current main at recovery time. The stale-base rule therefore prohibited merging their obsolete branches. Acceptance probes passed on current main; the four worktrees and branches were reaped after verification.",
+  "additional_recovered_rows": [
+    {
+      "id": "DOC-18",
+      "commit": "ec6dcd2338f5468fe3cb2ab7bcbf856d4eafd94",
+      "status": "already_landed"
+    },
+    {
+      "id": "README-7",
+      "commit": "2e0a7337bcdc6ed353d7c6cf2fa552243ad8af6d",
+      "status": "superseded_by_README-7-R3"
+    },
+    {
+      "id": "README-7-R2",
+      "commit": "2e0a7337bcdc6ed353d7c6cf2fa552243ad8af6d",
+      "status": "superseded_by_README-7-R3"
+    },
+    {
+      "id": "DOC-20",
+      "commit": "6a50c8bd1fcd941ca194c6cd5fc79b13551484d4",
+      "status": "verification_passed"
+    }
+  ],
+  "current_main_after_recovery": "6a50c8bd1fcd941ca194c6cd5fc79b13551484d4",
+  "board_rule": "No selected branch mixed .coding-hermes/board paths with implementation paths.",
+  "gates": {
+    "go_build": "PASS",
+    "go_vet": "PASS",
+    "spec_selfcheck": "PASS",
+    "recovery_acceptance": "PASS",
+    "board_validate": "OK_with_legacy_warnings"
+  },
+  "remote_parity": "origin/main == main",
+  "reaped": [
+    "/home/kara/worktrees/trouble-DOC-17",
+    "/home/kara/worktrees/trouble-DOC-19",
+    "/home/kara/worktrees/trouble-README-6",
+    "/home/kara/worktrees/trouble-README-7-R3",
+    "wt/DOC-17",
+    "wt/DOC-19",
+    "wt/README-6",
+    "wt/README-7-R3"
+  ]
+}

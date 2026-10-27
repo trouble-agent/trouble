@@ -4,9 +4,9 @@
 
 Use this path before installing a systemd unit. It proves the checkout, config,
 listeners, generic JSON ingestion and ledger on the same host without modifying a
-system unit. This repository intentionally has no remote configured: start from
-an existing checkout or from a checkout supplied by your own source-transfer or
-release process, then run the commands from that checkout.
+system unit. The supported source repository is
+`github.com/trouble-agent/trouble`; clone it or start from an existing checkout,
+then run the commands from that checkout.
 
 Prerequisites:
 

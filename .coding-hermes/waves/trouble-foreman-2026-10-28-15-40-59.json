@@ -1,0 +1,45 @@
+{
+  "tick_id": "trouble-foreman-2026-10-28-15-40-59",
+  "created_at": "2026-10-28T16:07:00Z",
+  "finished_at": "2026-10-28T17:50:00Z",
+  "base_sha": "63fe28a7c5580dbfbf05b13c4304537c24f057c2",
+  "wave_budget": 6,
+  "mode": "serial-verification",
+  "workers_dispatched": 0,
+  "gitreins": "not-created: all touched rows are verification-only/owner-gated (no implementation commits to judge)",
+  "tasks": [
+    {
+      "id": "QA-TROUBLE-FOREMAN-1",
+      "outcome": "complete",
+      "battery": {
+        "action": "relaunched at HEAD 63fe28a (prior battery truncated by agent ENOSPC on 54bed8d6, agent destroyed)",
+        "evidence": "/tmp/bunker-qa-evidence-trouble-foreman1-20261028.jsonl",
+        "agent": "93b21474 (destroyed after collect)",
+        "collected": "rows=21, collect OK, 0 truncated markers, chaos-errorpath present OK",
+        "close_deviation": "AC1 literal same-repo-head (9ae3822) unsatisfiable — dead agent; fresh battery grades current HEAD, documented in row"
+      }
+    },
+    {
+      "id": "QA-TROUBLE-README-9",
+      "outcome": "complete",
+      "battery": {
+        "action": "relaunched to the row's exact evidence path (prior agent eabad791 lost with zero cells)",
+        "evidence": "/tmp/bunker-qa-evidence-1793168967489-1.jsonl",
+        "agent": "67f3122f (destroyed after collect)",
+        "collected": "rows=21, collect OK, 0 truncated markers, chaos-errorpath present OK",
+        "close_deviation": "AC1 literal same-repo-head (42cdc88) unsatisfiable — dead agent; documented in row"
+      }
+    },
+    {
+      "id": "RELEASE-012",
+      "outcome": "pending (owner-gated, evidence refreshed in row)",
+      "verified": ["no v* tags", "no releases", "no tags: trigger in ci.yml", "make release 8 artifacts rc=0 at 63fe28a", "selfcheck PASS", "0 open P0"]
+    },
+    {
+      "id": "QA-TROUBLE-23",
+      "outcome": "filed (pending) — perf-budget/load family recurrence, new member TestLifecycleStartRunStop (dev-box PASS + hosted CI green at same sha = clean-machine class)"
+    }
+  ],
+  "product_cells_note": "both batteries red on the load-scaled budget class at the same HEAD with overlapping member sets; filed as ONE family row per board adjudication (QA-TROUBLE-15/17 precedent)",
+  "no_dispatch_reason": "zero dispatchable implementation rows: 2 pending QA rows were battery-relaunch verification work (both closed), RELEASE-012 stays owner-gated"
+}

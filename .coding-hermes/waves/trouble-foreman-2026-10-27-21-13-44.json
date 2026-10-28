@@ -2,6 +2,7 @@
   "tick_id": "trouble-foreman-2026-10-27-21-13-44",
   "status": "blocked_no_dispatch",
   "started_at": "2026-10-27T21:13:44-05:00",
+  "finished_at": "2026-10-28T05:38:03Z",
   "base_sha": "914b8c04998e85a8508d038f75ca3be5ace9eed9",
   "wave_budget": 7,
   "tasks": [],
@@ -32,5 +33,11 @@
   },
   "off_by_one": "none: verification-only; no non-trivial error debugged or fix designed",
   "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"],
-  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-qa-release-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-27-21-13-44.json test=go-build+go-vet+spec-selfcheck+cmd-trouble-short+board-validate+release-matrix+gh-run-list+qa-evidence-probe doc=none:not-needed prompt=~/.hermes/skills/coding-hermes-foreman-trouble/SKILL.md evidence=live:origin/main@914b8c0+manifest+gh-run-40498702408 witness=live:origin/main@914b8c0 verdict=none:verification-only commit=none:board-closeout memory=/trouble/foreman-tick-trouble-foreman-2026-10-27-21-13-44"
+  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-qa-release-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-27-21-13-44.json test=go-build+go-vet+spec-selfcheck+cmd-trouble-short+board-validate+release-matrix+gh-run-list+qa-evidence-probe doc=none:not-needed prompt=~/.hermes/skills/coding-hermes-foreman-trouble/SKILL.md evidence=live:origin/main@914b8c0+manifest+gh-run-40498702408 witness=live:origin/main@914b8c0 verdict=none:verification-only commit=none:board-closeout memory=/trouble/foreman-tick-trouble-foreman-2026-10-27-21-13-44",
+  "recovery": {
+    "recovered_by_tick": "trouble-foreman-2026-10-28-05-32-15",
+    "recovered_at": "2026-10-28T05:38:03Z",
+    "verdict": "EMPTY_WAVE_CONFIRMED",
+    "evidence": "tasks=[] (zero workers dispatched); no branch or worktree was ever created under this tick id (git worktree list + git for-each-ref show no branch derived from base 914b8c0); main advanced to 9661649812a832f672d752d25c60e8645f3f7fd2 and every commit on main after 914b8c0 is board/manifest bookkeeping from the following tick; all four census rows re-verified live: 0 dispatchable, blocked=TRBL-049 (owner/harness), pending=QA-TROUBLE-FOREMAN-1 (truncated collection) + RELEASE-012 (no release authorization)."
+  }
 }

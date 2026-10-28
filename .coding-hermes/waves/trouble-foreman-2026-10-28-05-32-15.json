@@ -1,0 +1,55 @@
+{
+  "tick_id": "trouble-foreman-2026-10-28-05-32-15",
+  "status": "blocked_no_dispatch",
+  "started_at": "2026-10-28T05:32:15Z",
+  "finished_at": "2026-10-28T05:40:00Z",
+  "base_sha": "9661649812a832f672d752d25c60e8645f3f7fd2",
+  "wave_budget": 8,
+  "tasks": [],
+  "mode": "wave recovery (empty wave) completed; no new implementation dispatch",
+  "census": {
+    "rows_total": 206,
+    "complete": 202,
+    "closed": 1,
+    "blocked": ["TRBL-049"],
+    "pending": ["QA-TROUBLE-FOREMAN-1", "RELEASE-012"],
+    "dispatchable": 0,
+    "independent_pairs_available": 0
+  },
+  "no_dispatch_reason": "The named unfinished wave trouble-foreman-2026-10-27-21-13-44 dispatched zero workers (tasks=[], no branch/worktree derived from its base 914b8c0), so step-1 recovery was an explicit empty-wave confirmation rather than a merge. After recovery the board still yields zero dispatchable rows: QA-TROUBLE-FOREMAN-1 needs a fresh clean-machine QA collection (2026-10-25 evidence file ends on a TRUNCATED collect cell, agent 54bed8d6 gone), RELEASE-012 is an owner release-authorization/readiness row (no v* tag, no GitHub Release, ci.yml has no tags trigger, no .release-authorized marker), and TRBL-049 is blocked on an external agent-harness/owner decision. Zero independent pairs => no wave composed, no serial worker dispatched, no GitReins lifecycle started.",
+  "live_checks": {
+    "module": "module github.com/trouble-agent/trouble",
+    "current_main": "9661649812a832f672d752d25c60e8645f3f7fd2",
+    "origin_main": "9661649812a832f672d752d25c60e8645f3f7fd2",
+    "origin_parity": "0/0",
+    "build": "PASS: go build ./... (rc=0)",
+    "vet": "PASS: go vet ./... (rc=0)",
+    "spec_selfcheck": "PASS: python3 specs/tools/selfcheck.py (RESULT: PASS)",
+    "focused_test": "PASS: go test ./cmd/trouble -count=1 -short (ok 27.756s)",
+    "board_validate": "OK with 194 legacy warnings",
+    "qa_collection": "STILL TRUNCATED: /tmp/bunker-qa-evidence-1792942470960-1.jsonl ends with cell=collect status=FAIL 'battery TRUNCATED ... NONE is the final chaos-errorpath cell'; collect-OK count=0 => row stays pending",
+    "release_readiness": "NO-GO/PENDING unchanged: git tag --list 'v*' empty, gh release list empty, grep -c 'tags:' .github/workflows/ci.yml = 0",
+    "ci": "recent main runs completed success; exact HEAD 9661649812a832f672d752d25c60e8645f3f7fd2 run for 'foreman: record blocked trouble tick' succeeded (prior tick closeout)",
+    "branch_integrity": "wt/TRBL-099 (ahead=1) and wt/TRBL-105 (ahead=3) are unmerged branch tips but their rows are complete with shas reachable from origin/main (1703de8 toolchain go1.26.9 = main's 'toolchain go1.26.9'; 1b00cfa read-only status/verify = present in internal/ledger) => superseded duplicate paths, preserved as evidence, NOT re-judged"
+  },
+  "off_by_one": "none: verification-only; no non-trivial error debugged or fix designed",
+  "recovery_manifest": ".coding-hermes/waves/trouble-foreman-2026-10-27-21-13-44.json",
+  "recovery_actions": {
+    "empty_wave_confirmed": "trouble-foreman-2026-10-27-21-13-44.json: tasks=[], status=blocked_no_dispatch, no branch or worktree created from its base 914b8c0",
+    "reaped_worktrees": 13,
+    "reaped_branches": 13,
+    "reap_rule": "removed only worktrees whose HEAD is an ancestor of main (content landed) AND whose tracked tree is clean: wt/DOC-9, wt/DOC-10, wt/DOC-15, wt/DOC-18, wt/TRBL-097, wt/TRBL-098, wt/TRBL-100, wt/TRBL-101, wt/TRBL-103, wt/TRBL-106-R3, wt/TRBL-114, wt/TRBL-118, wt/TRBL-REVIEW-CLOSE-ERR",
+    "preserved": [
+      "wt/TRBL-099 (unmerged: go-directive bump superseded by main's toolchain line)",
+      "wt/TRBL-105 (unmerged: read-only contract landed via main commit 1b00cfa)",
+      "archive/INT-CI-3-discarded-dup (ahead=1, discarded duplicate kept as evidence)",
+      "repo .worktrees/** (kanban-era, gitignored - left alone per project law 4)",
+      "/home/kara/trouble-dogfood-20261026 (dogfood clone, detached)"
+    ]
+  },
+  "residual_findings": [
+    "Stale GitReins twin states on main: TRBL-115 and QA-TROUBLE-17-R2-R2 show status in_progress with no verdict artifact; TRBL-116 and TRBL-118 show in_progress although verdict artifacts exist (.gitreins/history/2026-10-22/d8f668f1, 2026-10-23/287688c0, 2026-10-23/b6b90edf) and are FAIL on the documented tier-1 baseline (gitleaks harness-state secrets arm + hardcoded full-suite tests arm). All four board rows are complete with landed commits. Not state-flipped this tick: a 'complete' flip would misrepresent a FAIL verdict, and re-running 'task complete' would duplicate a 15-25 min evaluator on an already-decided task. Left as an open reconciliation item."
+  ],
+  "residue_preserved": [".gitreins/tasks.yaml.corrupt-963c8d6c853e", "resolved", "trouble"],
+  "ch_trace": "ch:trace row=none:blocked-no-dispatch spec=none:owner-qa-release-blockers wave=.coding-hermes/waves/trouble-foreman-2026-10-28-05-32-15.json test=go-build+go-vet+spec-selfcheck+cmd-trouble-short+board-validate+qa-evidence-probe+release-surface-probe doc=none:not-needed prompt=~/.hermes/skills/coding-hermes-foreman-trouble/SKILL.md evidence=live:origin/main@9661649+recovery-manifest+reap-log+qa-evidence-probe witness=live:origin/main@9661649 verdict=none:verification-only commit=none:board-closeout memory=/trouble/foreman-tick-trouble-foreman-2026-10-28-05-32-15"
+}

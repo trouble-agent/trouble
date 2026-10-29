@@ -277,3 +277,106 @@ func TestGOMEMLIMITBytesIsReadable(t *testing.T) {
 		t.Errorf("GOMEMLIMITBytes() = 0: the runtime reports MaxInt64 for unset, never 0")
 	}
 }
+
+// TestTightestCeilingTable pins the QA-TROUBLE-23 resolution: the tightest
+// detected ceiling binds, sentinels and junk never gate, and a reported cap
+// always names its source.
+func TestTightestCeilingTable(t *testing.T) {
+	t.Run("no candidates is no ceiling", func(t *testing.T) {
+		if got, src := tightestCeiling(nil); got != -1 || src != "" {
+			t.Errorf("tightestCeiling(nil) = %d, %q; want -1, \"\"", got, src)
+		}
+	})
+	t.Run("sentinels and junk are dropped", func(t *testing.T) {
+		cands := []namedCeiling{
+			{0, "cgroup:v2:memory.max"},                       // impossible cap
+			{-5, "rlimit:RLIMIT_AS(ulimit -v)"},               // garbage
+			{9223372036854771712, "cgroup:v1:limit_in_bytes"}, // v1 unlimited sentinel
+			{1<<63 - 1, "rlimit:RLIMIT_DATA(ulimit -d)"},      // RLIM_INFINITY class
+		}
+		if got, src := tightestCeiling(cands); got != -1 || src != "" {
+			t.Errorf("tightestCeiling(sentinels) = %d, %q; want -1, \"\"", got, src)
+		}
+	})
+	t.Run("the tightest cap binds, whatever order the sources answer in", func(t *testing.T) {
+		cands := []namedCeiling{
+			{8 << 30, "cgroup:v2:memory.max"},
+			{3 << 30, "rlimit:RLIMIT_AS(ulimit -v)"},
+		}
+		got, src := tightestCeiling(cands)
+		if got != 3<<30 || !strings.Contains(src, "rlimit") {
+			t.Errorf("tightestCeiling = %d, %q; want the 3GiB rlimit named as rlimit", got, src)
+		}
+		// Reverse order: same answer (the harness cannot lose the tighter cap
+		// to a source's position in the walk).
+		got, src = tightestCeiling([]namedCeiling{cands[1], cands[0]})
+		if got != 3<<30 || !strings.Contains(src, "rlimit") {
+			t.Errorf("tightestCeiling(reversed) = %d, %q; want the 3GiB rlimit", got, src)
+		}
+	})
+	t.Run("a single cgroup cap answers exactly as before QA-TROUBLE-23", func(t *testing.T) {
+		got, src := tightestCeiling([]namedCeiling{{4 << 30, "cgroup:v2:memory.max"}})
+		if got != 4<<30 || src != "cgroup:v2:memory.max" {
+			t.Errorf("tightestCeiling = %d, %q; want 4GiB cgroup:v2:memory.max", got, src)
+		}
+	})
+}
+
+// TestRlimitMemCeilingShape probes the live rlimit source host-agnostically:
+// unlimited here (the fence's no-op branch) or a real cap that carries its
+// byte figure and names the resource. The QA harness's `ulimit -v 3145728`
+// leg is the capped branch; a dev box is the unlimited one.
+func TestRlimitMemCeilingShape(t *testing.T) {
+	n, src, ok := rlimitMemCeiling()
+	if !ok {
+		if n != 0 || src != "" {
+			t.Errorf("rlimitMemCeiling unlimited branch = %d, %q; want 0, \"\"", n, src)
+		}
+		return
+	}
+	if n <= 0 {
+		t.Errorf("rlimitMemCeiling cap = %d: a detected cap is positive", n)
+	}
+	if !strings.HasPrefix(src, "rlimit:RLIMIT_") {
+		t.Errorf("rlimitMemCeiling source = %q: a reported cap names its resource", src)
+	}
+	t.Logf("rlimit ceiling detected: %s (%s)", src, HumanBytes(n))
+}
+
+// TestPressureSkipReasonTable pins MissUnderPressure's decision table: the
+// load fence answers first (its text is the fence's own), a detected memory
+// ceiling answers with the measured cap and source named, and no pressure
+// means no skip — the verdict fails. Forced through the overrides so the
+// table is host-independent.
+func TestPressureSkipReasonTable(t *testing.T) {
+	t.Run("load fence fires as before", func(t *testing.T) {
+		t.Setenv(EnvLoadOverride, "")
+		reason, skip := pressureSkipReason("TestGate", "the miss", FenceLoadAvg)
+		if !skip || !strings.Contains(reason, "SKIP") || !strings.Contains(reason, "TestGate") {
+			t.Errorf("load-fenced miss = %q, %v; want a SKIP naming the gate", reason, skip)
+		}
+	})
+	t.Run("memory ceiling fires with the cap named (QA-TROUBLE-23)", func(t *testing.T) {
+		t.Setenv(EnvLoadOverride, "")
+		t.Setenv(EnvMemOverride, "3145728KB")
+		reason, skip := pressureSkipReason("TestAmortizedThroughput", "rate 12435 rec/s", 1.35)
+		if !skip {
+			t.Fatal("no skip under the 3145728KB ceiling: the chaos-resource miss is back to a red")
+		}
+		for _, want := range []string{"TestAmortizedThroughput", "SKIP", "3221225472", "3145728KB", "rate 12435 rec/s"} {
+			if !strings.Contains(reason, want) {
+				t.Errorf("cap skip text missing %q: %s", want, reason)
+			}
+		}
+	})
+	t.Run("no pressure: the verdict fails", func(t *testing.T) {
+		t.Setenv(EnvLoadOverride, "")
+		t.Setenv(EnvMemOverride, "")
+		if capBytes, _ := MemCap(); capBytes >= 0 {
+			t.Skip("host has a real cap; this row needs an uncapped reading")
+		}
+		if reason, skip := pressureSkipReason("TestGate", "the miss", 1.0); skip {
+			t.Errorf("pressureSkipReason skipped with no host pressure: %q", reason)
+		}
+	})
+}

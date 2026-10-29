@@ -150,8 +150,8 @@ func TestMissingRulesDirBootsToHealthOK(t *testing.T) {
 		t.Fatal("the absent-rules-dir boot signalled READY without handing over a daemon")
 	}
 
-	// --- AC1: /health.json is OK on this boot, and nothing sensor-shaped is
-	// named as the reason it might not be.
+	// --- AC1: /health.json reflects source coverage; an absent rules directory
+	// itself is informational and does not degrade a sensor.
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/health.json", dashPort))
 	if err != nil {
 		t.Fatalf("GET /health.json: %v", err)
@@ -173,8 +173,26 @@ func TestMissingRulesDirBootsToHealthOK(t *testing.T) {
 			t.Errorf("sensor %s is degraded with an absent rules.d (%s): SPEC-03 §3.7b keeps it up with the shipped defaults active", s.Sensor, s.Reason)
 		}
 	}
-	if health.Status != "ok" {
-		t.Errorf("status = %q on a first-run boot with no rules directory, want ok: %s", health.Status, body)
+	deadExpected := make(map[string]bool)
+	for _, source := range health.Sources {
+		if source.Expected && !source.Alive {
+			deadExpected[source.HostID+":"+source.Source] = true
+		}
+	}
+	if len(deadExpected) > 0 {
+		if health.Status == "ok" {
+			t.Errorf("status = ok with expected dead sources %v", deadExpected)
+		}
+		if got, _ := health.Detail["source_not_alive"].(string); !deadExpected[got] {
+			t.Errorf("detail.source_not_alive = %v, want one of %v", health.Detail["source_not_alive"], deadExpected)
+		}
+	} else {
+		if health.Status != "ok" {
+			t.Errorf("status = %q with all expected sources alive and no degraded sensors: %s", health.Status, body)
+		}
+		if _, present := health.Detail["source_not_alive"]; present {
+			t.Errorf("detail.source_not_alive present with all expected sources alive: %v", health.Detail)
+		}
 	}
 
 	// The condition is still VISIBLE: the inotify row names the absent directory.

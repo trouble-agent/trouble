@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/trouble-agent/trouble/internal/types"
@@ -25,6 +26,40 @@ func okInputs() types.HealthInputs {
 			{Name: "flow", Built: true},
 			{Name: "skills", Built: true},
 		},
+	}
+}
+
+func TestHealthExpectedSourceLivenessJSON(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		alive bool
+		want  string
+	}{
+		{
+			name:  "expected source is dead",
+			alive: false,
+			want:  `{"status":"degraded","version":"0.1.0","git_sha":"9c1f0ab","build_time":"","uptime_s":0,"ledger_last_seq":0,"ledger_last_ts":"","ledger_stall_s":0,"sensors":[{"sensor":"psi","enabled":true,"degraded":false,"reason":"","last_success_ts":"","last_event_ts":"","last_event_age_s":0,"events_total":0,"gaps":0,"dropped":0}],"sources":[{"host_id":"host-a","source":"journald","zone":"host","expected":true,"alive":false,"last_event_ts":"","last_event_age_s":0,"max_age_s":300}],"autonomy":{"mode":"","kill_switch":false,"allow_detect":false,"allow_research":false,"allow_play_mutate":false,"allow_agent":false,"allow_spawn":false,"allow_merge":false,"allow_promote":false,"allow_skill_accept":false,"grants":null,"changed_by":"","changed_ts":""},"breakers":null,"runtime_watermarks":{"binary_bytes":0,"rss_bytes":0,"rss_peak_bytes":0,"mem_high_bytes":0,"mem_max_bytes":0,"ledger_bytes":0,"spool_bytes":0,"spool_budget_bytes":0,"events_per_min":0,"groups_open":0,"incidents_open":0,"worktrees":0},"subsystems":[{"name":"sentinel","built":true,"refused":false},{"name":"issues","built":true,"refused":false},{"name":"research","built":true,"refused":false},{"name":"flow","built":true,"refused":false},{"name":"skills","built":true,"refused":false}],"detail":{"source_not_alive":"host-a:journald"}}`,
+		},
+		{
+			name:  "expected source is alive",
+			alive: true,
+			want:  `{"status":"ok","version":"0.1.0","git_sha":"9c1f0ab","build_time":"","uptime_s":0,"ledger_last_seq":0,"ledger_last_ts":"","ledger_stall_s":0,"sensors":[{"sensor":"psi","enabled":true,"degraded":false,"reason":"","last_success_ts":"","last_event_ts":"","last_event_age_s":0,"events_total":0,"gaps":0,"dropped":0}],"sources":[{"host_id":"host-a","source":"journald","zone":"host","expected":true,"alive":true,"last_event_ts":"","last_event_age_s":0,"max_age_s":300}],"autonomy":{"mode":"","kill_switch":false,"allow_detect":false,"allow_research":false,"allow_play_mutate":false,"allow_agent":false,"allow_spawn":false,"allow_merge":false,"allow_promote":false,"allow_skill_accept":false,"grants":null,"changed_by":"","changed_ts":""},"breakers":null,"runtime_watermarks":{"binary_bytes":0,"rss_bytes":0,"rss_peak_bytes":0,"mem_high_bytes":0,"mem_max_bytes":0,"ledger_bytes":0,"spool_bytes":0,"spool_budget_bytes":0,"events_per_min":0,"groups_open":0,"incidents_open":0,"worktrees":0},"subsystems":[{"name":"sentinel","built":true,"refused":false},{"name":"issues","built":true,"refused":false},{"name":"research","built":true,"refused":false},{"name":"flow","built":true,"refused":false},{"name":"skills","built":true,"refused":false}]}`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := okInputs()
+			in.Sources = []types.SourceLiveness{{
+				HostID: "host-a", Source: "journald", Zone: "host",
+				Expected: true, Alive: tc.alive, MaxAgeS: 300,
+			}}
+			got, err := json.Marshal(Health(*defaults(), in))
+			if err != nil {
+				t.Fatalf("marshal health response: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("health JSON = %s, want exact JSON %s", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -107,12 +142,16 @@ func TestHealthStalledBeatsSubsystemDegrade(t *testing.T) {
 	in := okInputs()
 	in.Stalled = true
 	in.Subsystems[0] = types.SubsystemHealth{Name: "sentinel", Refused: true, Code: string(types.CodeLifecycle001)}
+	in.Sources = []types.SourceLiveness{{HostID: "host-a", Source: "journald", Expected: true, Alive: false}}
 	h := Health(*defaults(), in)
 	if h.Status != "stalled" {
 		t.Fatalf("status = %q, want stalled", h.Status)
 	}
 	if h.Detail["subsystem_refused"] != string(types.CodeLifecycle001) {
 		t.Errorf("a stalled response still carries the refusal code in detail: %v", h.Detail)
+	}
+	if h.Detail["source_not_alive"] != "host-a:journald" {
+		t.Errorf("a stalled response still carries dead-source detail: %v", h.Detail)
 	}
 }
 

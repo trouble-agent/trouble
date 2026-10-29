@@ -310,3 +310,10 @@ Per-record fields worth knowing: `seq` (monotonic), `rec_id`, `sig` (identity),
   traps exist.
 * `docs/cmd.md`, `docs/operations.md`, `docs/sentinel-compat.md` — operator and
   compat references.
+
+
+## Latest real-use checkpoint (2026-10-29)
+
+At HEAD `50866ae`, build with `make bin` so the binaries carry the commit stamp. Use an isolated state root, config, environment file, and dashboard token file; passing only `state_root` does not isolate token storage. The documented workflow completed on loopback: health 200 with all five subsystems built, authenticated dashboard reads 200, and three generic JSON event posts 200 with durable event/group/incident records. The cold boot-to-health measurement was 1411ms; dashboard reads were 10–26ms and event posts were 290–430ms.
+
+The 2026-10-29 fresh-bunker attempt is not install proof: `bunker-qa.sh launch` spawned agent `ae53cc5e` but the launcher timed out before its launch cell, agent evidence was empty, and the agent was destroyed and verified absent.

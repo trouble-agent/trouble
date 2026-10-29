@@ -555,3 +555,12 @@ the 3G cap — the new surface shipped with a test that is load-sensitive on
    `X-Sentry-Error: TROUBLE-SENTINEL-0xx` in the HEADER (002/003/010/019/022 verified live), which is
    what SDKs and scripts match on. Dump full response headers before judging an error contract —
    `curl -D -` — and only then compare against the doc's code table.
+
+
+---
+
+## 2026-10-29 dogfood closeout
+
+The current-head real-use pass used a clean detached worktree at `50866ae`. `make bin` produced stamped `trouble` and `troubled` binaries. An isolated config/state/token setup booted on ports 17643/17644; `/health.json` returned `status=ok`, `git_sha=50866ae`, and all five subsystem rows reported `built=true, refused=false`. Authenticated dashboard routes `/incidents`, `/groups`, `/rules`, `/breakers`, and `/partials/budget` returned HTTP 200. Three generic JSON on-ramp requests returned HTTP 200 and their event, group, and incident records were present in the ledger.
+
+The required bunker helper launch reached a fresh `bunker-mvp` agent, but the launch call was terminated by the tool timeout before its launch cell was recorded. Agent-side evidence was empty; this is install evidence that is partial/unproven, not a pass. The run-owned agent was destroyed and verified absent.

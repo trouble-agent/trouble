@@ -18,5 +18,16 @@
     }
   ],
   "no_dispatch_reason": "one actionable implementation row was recovered from an existing worktree; serial merge and gate required",
-  "status": "in_progress"
+  "finished_at": "2026-10-29T16:05:00Z",
+  "status": "complete",
+  "ci": {
+    "head_sha": "c8d1433f1ef7de2a1fbee2365ceaa0c39ce9902f",
+    "status": "in_progress",
+    "conclusion": null
+  },
+  "gitreins": {
+    "task_id": "QA-TROUBLE-23",
+    "task_state": "complete",
+    "tier2": "running:job-cea69f1a635549fca6dac541f45da456"
+  }
 }

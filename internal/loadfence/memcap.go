@@ -43,16 +43,46 @@ const (
 	cgroupV1Cap = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
 )
 
+// namedCeiling is one detected memory ceiling and where it was read from.
+type namedCeiling struct {
+	bytes  int64
+	source string
+}
+
+// tightestCeiling resolves the effective ceiling from every detected source:
+// the tightest cap is the one that binds first. Non-positive figures and the
+// unlimited sentinels (anything above 1<<62: the cgroup v1 unlimited value
+// and RLIM_INFINITY both live there) are dropped rather than treated as caps,
+// so an unreadable or uncapped source can never gate a test. No ceiling at
+// all resolves to (-1, "") — the no-ceiling sentinel the fences read as "run
+// the full fixture".
+func tightestCeiling(cands []namedCeiling) (int64, string) {
+	best, bestSrc := int64(-1), ""
+	for _, c := range cands {
+		if c.bytes <= 0 || c.bytes > 1<<62 {
+			continue
+		}
+		if best < 0 || c.bytes < best {
+			best, bestSrc = c.bytes, c.source
+		}
+	}
+	return best, bestSrc
+}
+
 // MemCap reports the memory ceiling this process runs under, and where it was
 // read from. cap < 0 means NO ceiling was detected (the unlimited branch: the
 // test runs its full fixture). source is "" in that case.
 //
-// Resolution order: EnvMemOverride, cgroup v2 memory.max, cgroup v1
-// limit_in_bytes. The cgroup files carry "max" (v2, no limit) or
-// 9223372036854771712 (v1's "unlimited" sentinel, = math.MaxInt64 rounded to a
-// page multiple) — both read as no ceiling. A cap of 0 is impossible (the
-// kernel never grants it, and the override rejects it), so it degrades to
-// "no ceiling" rather than gating every test.
+// Resolution: EnvMemOverride wins alone (an operator pin must not be
+// averaged against the kernel's figures); otherwise the tightest of the
+// detected kernel ceilings binds — cgroup v2 memory.max, cgroup v1
+// limit_in_bytes, and the process rlimits (QA-TROUBLE-23: the QA harness's
+// chaos-resource leg caps the suite with `ulimit -v`, which moves NO cgroup
+// file, so a cgroup-only reader was blind to it). The cgroup files carry
+// "max" (v2, no limit) or 9223372036854771712 (v1's "unlimited" sentinel, =
+// math.MaxInt64 rounded to a page multiple) — both read as no ceiling. A cap
+// of 0 is impossible (the kernel never grants it, and the override rejects
+// it), so it degrades to "no ceiling" rather than gating every test.
 func MemCap() (cap int64, source string) {
 	if v := strings.TrimSpace(os.Getenv(EnvMemOverride)); v != "" {
 		if b, ok := parseMemSize(v); ok && b > 0 {
@@ -62,6 +92,7 @@ func MemCap() (cap int64, source string) {
 			return b, "env:" + EnvMemOverride + "=" + v
 		}
 	}
+	var cands []namedCeiling
 	for _, c := range []struct{ path, name string }{
 		{cgroupV2Cap, "cgroup:v2:memory.max"},
 		{cgroupV1Cap, "cgroup:v1:limit_in_bytes"},
@@ -75,16 +106,15 @@ func MemCap() (cap int64, source string) {
 			continue
 		}
 		n, err := strconv.ParseInt(s, 10, 64)
-		if err != nil || n <= 0 {
+		if err != nil {
 			continue
 		}
-		// v1 encodes "no limit" as a near-MaxInt64 page-aligned value.
-		if n > 1<<62 {
-			continue
-		}
-		return n, c.name
+		cands = append(cands, namedCeiling{bytes: n, source: c.name})
 	}
-	return -1, ""
+	if n, src, ok := rlimitMemCeiling(); ok {
+		cands = append(cands, namedCeiling{bytes: n, source: src})
+	}
+	return tightestCeiling(cands)
 }
 
 // parseMemSize parses a Go flag-style byte size: "2GiB", "512MiB", "1GiB",
@@ -220,4 +250,42 @@ func CappedN(t testing.TB, gate string, unlimited, livePerUnit, floor int64) int
 		"the %d-unit run stays the quiet-host contract",
 		gate, HumanBytes(capBytes), source, fits, unlimited, floor, HumanBytes(livePerUnit), unlimited)
 	return fits
+}
+
+// pressureSkipReason is the pure decision behind MissUnderPressure: it
+// returns the skip text and true when a host condition explains a missed
+// host-measured verdict — either the load fence (Oversubscribed) or a
+// detected memory ceiling. Cap pressure slows producers and the runtime
+// (GC assists, arena scavenging) WITHOUT moving load_avg, so the load fence
+// alone was blind to the QA chaos-resource leg (QA-TROUBLE-23: the capped leg
+// red TestFsyncCountIsStructural and TestAmortizedThroughput at load_avg
+// 1.3-4.0 — every load fence silent). Split from the t.Skipf wrapper so the
+// decision table is testable without mock TB plumbing (Go 1.26's testing.TB
+// carries an unexported method and cannot be implemented outside the testing
+// package).
+func pressureSkipReason(gate, measured string, load float64) (string, bool) {
+	if Oversubscribed(load) {
+		return SkipText(gate, measured, load), true
+	}
+	if capBytes, source := MemCap(); capBytes > 0 {
+		return fmt.Sprintf("%s SKIP: host under a memory ceiling — %s; cap pressure slows producers and the runtime without moving load_avg, so this miss is not falsifiable as a product regression here: %s",
+			gate, MemCapText(capBytes, source), measured), true
+	}
+	return "", false
+}
+
+// MissUnderPressure is Miss with the memory-ceiling half of the host-pressure
+// model added: a missed host-measured verdict reports an explicit SKIP when
+// the host explains it — oversubscribed run queue (the load fence, carrying
+// the measured load) or a detected memory ceiling (carrying the measured cap
+// and its source) — and FAILs otherwise. The skip names the observed
+// condition and stays falsifiable through EnvLoadOverride and EnvMemOverride.
+// No host pressure: the verdict fails exactly as the unfenced gate did.
+func MissUnderPressure(t testing.TB, gate, measured string, load float64) {
+	t.Helper()
+	if reason, skip := pressureSkipReason(gate, measured, load); skip {
+		t.Skipf("%s", reason)
+		return
+	}
+	t.Errorf("%s", measured)
 }

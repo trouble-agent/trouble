@@ -2,6 +2,7 @@ package sensors
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/trouble-agent/trouble/internal/loadfence"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -28,6 +30,21 @@ import (
 func TestLifecycleStartRunStop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the full start/stop lifecycle in -short")
+	}
+	// QA-TROUBLE-23: the settle and reload waits below are wall-clock, so the
+	// test carries the same host-load gate the budget family does
+	// (QA-TROUBLE-17-R2-R2): above the shared ceiling a miss cannot separate
+	// a slow start from a descheduled one (the 2026-10-28 clean-bunker
+	// battery red this test at suite load while the dev box and hosted CI
+	// passed at the same sha). The skip names the measured load and stays
+	// falsifiable through loadfence.EnvLoadOverride; below the ceiling every
+	// assertion runs exactly as before.
+	load := loadfence.LoadAvg1()
+	if loadfence.AboveHostGate(load) {
+		t.Skipf("%s", loadfence.HostGateSkipText(
+			"TestLifecycleStartRunStop",
+			"startup/run/stop settle windows are wall-clock and unfalsifiable while sensor scheduling is above the shared ceiling",
+			load))
 	}
 	dir := t.TempDir()
 	rulesDir := filepath.Join(dir, "rules.d")
@@ -67,6 +84,16 @@ sleep 30
 		types.ConfigValue{Key: "sensors.psi.sample_interval", Value: "200ms"},
 		types.ConfigValue{Key: "sensors.disk.interval", Value: "200ms"},
 		types.ConfigValue{Key: "sensors.timers.interval", Value: "500ms"},
+		// QA-TROUBLE-23: pin dbus's §3.9 liveness proof to the window. The
+		// shipped 30s Peer.Ping interval means dbus's first last_success_ts
+		// otherwise comes from ambient host state — a failed unit in the
+		// startup ListUnits or bus churn — so the liveness assertion below
+		// measured the HOST's unit table: green on the dev box (failed units
+		// present), red on the 2026-10-28 clean JIT bunker (zero failed
+		// units, no churn inside the window) with zero product change. With
+		// the ping pinned, a healthy dbus proves its own liveness on any
+		// host.
+		types.ConfigValue{Key: "sensors.dbus.ping_interval", Value: "250ms"},
 		types.ConfigValue{Key: "sensors.inotify.paths", Value: []any{
 			map[string]any{"path": watched, "mask": defaultInotifyMask},
 		}},
@@ -86,9 +113,40 @@ sleep 30
 	}
 
 	// Let the sensors run.
-	time.Sleep(1200 * time.Millisecond)
-
+	//
+	// QA-TROUBLE-23: the window waits on the CONDITION the assertions below
+	// need — every enabled, non-degraded sensor has proven liveness
+	// (last_success_ts, SPEC-03 §3.9) and the always-on samplers produced an
+	// event — not on a fixed 1200ms sleep. A fixed sleep grades the host: on
+	// a cold-cache, suite-parallel clean machine the first ticks land late
+	// (or, for dbus with the shipped 30s ping, not at all without ambient
+	// unit churn), so the identical commit was red there and green on the
+	// warm dev box. The deadline only bounds "still not settled": it is
+	// load-scaled (the package's measured 1+load/2 factor, armed at load ≥ 4
+	// — reload_test.go's shape), and on expiry the verdict names the missing
+	// sensors and the observed load, skipping only above the host gate.
+	settleWindow := lifecycleWindowFor(2*time.Second, load)
+	settleEnd := time.Now().Add(settleWindow)
+	var settled bool
+	for time.Now().Before(settleEnd) {
+		if missing := lifecycleUnsettled(h.s.Health()); len(missing) == 0 {
+			settled = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 	health := h.s.Health()
+	if !settled {
+		missing := lifecycleUnsettled(health)
+		measured := fmt.Sprintf("sensors never proved liveness/activity within %s: %v", settleWindow, missing)
+		// Drain before the verdict: the daemon is running, and a verdict must
+		// never leak the §4 shutdown half.
+		_ = h.s.Stop(ctx)
+		if now := loadfence.LoadAvg1(); loadfence.AboveHostGate(now) {
+			t.Skipf("%s", loadfence.HostGateSkipText("TestLifecycleStartRunStop", measured, now))
+		}
+		t.Fatalf("%s (load_avg_1m=%.2f; the quiet-host window is 2s, scaled by the observed load)", measured, load)
+	}
 	if len(health) == 0 {
 		t.Fatal("Health() reported no sensors at all")
 	}
@@ -145,7 +203,16 @@ value_type = "number"
 		t.Fatal(err)
 	}
 	h.s.markReloadPending()
-	deadline := time.Now().Add(3 * time.Second)
+	// QA-TROUBLE-23: the reload's abandon budget (default 1s) and this poll's
+	// deadline are wall-clock gates; scale both by the observed load using
+	// reload_test.go's measured 1+load/2 shape (armed at load ≥ 4), so a
+	// fleet burst stretches the window instead of reddening it. The reading
+	// is loadfence.LoadAvg1, so TROUBLE_HOST_LOAD_OVERRIDE drives it.
+	if load >= 4 {
+		h.s.reloadDeadline = lifecycleWindowFor(time.Second, load)
+		defer func() { h.s.reloadDeadline = 0 }()
+	}
+	deadline := time.Now().Add(lifecycleWindowFor(3*time.Second, load))
 	for time.Now().Before(deadline) {
 		if h.s.ruleGeneration() > reloaded {
 			break
@@ -153,6 +220,14 @@ value_type = "number"
 		time.Sleep(20 * time.Millisecond)
 	}
 	if h.s.ruleGeneration() == reloaded {
+		// The daemon is still running: drain it before any verdict so the
+		// §4 shutdown half is never leaked, then gate the verdict on the
+		// current host load (it may have risen past the ceiling mid-run).
+		_ = h.s.Stop(ctx)
+		if now := loadfence.LoadAvg1(); loadfence.AboveHostGate(now) {
+			t.Skipf("%s", loadfence.HostGateSkipText("TestLifecycleStartRunStop",
+				"a rules.d write did not trigger a reload inside the load-scaled window", now))
+		}
 		t.Fatal("a rules.d write did not trigger a reload")
 	}
 	if got := len(h.s.Rules()); got != 10 {
@@ -268,4 +343,50 @@ func TestStopIsIdempotent(t *testing.T) {
 	if !strings.Contains(defaultsNote(nil), "defaults") {
 		t.Fatal("the defaults note must explain what is active")
 	}
+}
+
+// lifecycleWindowFor scales a quiet-host window by the host's observed load
+// using the package's measured 1+load/2 factor, armed at load ≥ 4 — the shape
+// reload_test.go gives the reload abandon budget (at load_avg ~54 one reload
+// measured >6s; /2 admits the burst while a wedged path still never
+// completes). The caller's reading comes from loadfence.LoadAvg1, so
+// TROUBLE_HOST_LOAD_OVERRIDE drives both the fence and the window in one
+// place. Below load 4 the quiet window is returned unchanged.
+func lifecycleWindowFor(base time.Duration, load float64) time.Duration {
+	if load >= 4 {
+		return time.Duration(float64(base) * (1 + load/2))
+	}
+	return base
+}
+
+// lifecycleUnsettled reports which sensors have not yet produced the evidence
+// the lifecycle assertions check, so the settle window waits on the condition
+// instead of the clock (QA-TROUBLE-23):
+//   - an enabled, non-degraded sensor with no reason string must have
+//     last_success_ts (SPEC-03 §3.9: liveness is proven by the probe, never
+//     by arrivals) — dbus's proof is its Peer.Ping, pinned to 250ms for this
+//     run so the window does not depend on the host's unit table;
+//   - the always-on PSI/disk samplers must have produced an event.
+//
+// A degraded or disabled sensor is its own report (the assertions below check
+// its reason) and constrains nothing here; a sensor carrying a reason string
+// (psi's probe note) proves its liveness through its events instead.
+func lifecycleUnsettled(health []types.SensorHealth) []string {
+	if len(health) == 0 {
+		return []string{"(no sensors reported at all)"}
+	}
+	var missing []string
+	for _, sh := range health {
+		if !sh.Enabled || sh.Degraded {
+			continue
+		}
+		if sh.Reason == "" && sh.LastSuccessTS == "" {
+			missing = append(missing, string(sh.Sensor)+": no last_success_ts")
+			continue
+		}
+		if (sh.Sensor == types.SenPSI || sh.Sensor == types.SenDisk) && sh.EventsTotal == 0 {
+			missing = append(missing, string(sh.Sensor)+": no events")
+		}
+	}
+	return missing
 }

@@ -1,33 +1,46 @@
-# Dogfood evidence 2026-10-29
+# trouble real-use integration — 2026-10-29
 
 Tick: trouble-dogfood-2026-10-29-11-40-58
-Target: trouble
-HEAD: 50866ae4a232969fee2a354927ce7e298e5955be (origin/main equal)
-Canonical checkout: /home/kara/trouble; stand-in board resolves there.
+Target revision: 50866ae4a232969fee2a354927ce7e298e5955be
+Canonical checkout: /home/kara/trouble
 
-Promise: trouble provides a self-hosted incident brain with sensors, a Sentry-compatible ingest endpoint, append-only ledger, ladder, dashboard, and operator CLI. A user should be able to build stamped binaries, boot the documented config, inspect health, submit an event, and read the durable event/group/incident trail.
+## Promise
 
-Real use:
-- Clean detached worktree at HEAD built with `make bin`.
-- `bin/trouble --version` printed `50866ae 50866ae 2026-10-29T11:48:33.000Z [stamped]`.
-- Isolated state root under ~/.local/state, explicit config/env/token paths, ports 17643/17644.
-- Daemon health: HTTP 200, status=ok, version/git_sha=50866ae, all five subsystems built=true/refused=false, ledger_last_seq=28.
-- Authenticated dashboard paths: /incidents 200/26ms/2870 bytes; /groups 200/13ms/7618 bytes; /rules 200/12ms/4801 bytes; /breakers 200/10ms/2824 bytes; /partials/budget 200/10ms/531 bytes.
-- Three documented generic JSON on-ramp POSTs: all HTTP 200; 290ms, 426ms, 430ms; each returned an event id.
-- Ledger after the workflow: config=1, event=35, group=3, incident=3, lifecycle=1; event/group/incident records persisted, and event/group share each digest.
-- Clean SIGTERM shutdown observed for daemon PID 35664; wrapper and daemon were same process in this launch.
-- CLI config explain and topology both returned JSON rc=0. `check-stall` rc=8 against a stopped daemon, which is the expected stale/unreadable class for that invocation. Ledger status/verify were not re-run after the daemon stopped because this checkout's config resolver flags differed from the docs invocation and the earlier probe was rc=8.
+trouble claims that an operator can build the stamped daemon and CLI, boot a configured incident brain, send Sentry-compatible events, inspect incidents/groups/rules/breakers through the dashboard, and retain the records in its append-only ledger.
 
-Fresh-machine install leg:
-- Required `bunker-qa.sh launch /home/kara/trouble` was run against bunker-mvp, which was ONLINE, bunkerd active, Docker 29.1.3, disk 68%, 2 existing agents plus the run-owned agent.
-- Launch reached agent ae53cc5e and printed fresh-install start, but the foreground launch was terminated by the 30s tool timeout before the launch cell was recorded. Agent-side qa-evidence.jsonl was 0 bytes and no agent logs were available.
-- The run-owned agent was destroyed; `bunker info ae53cc5e` returned not_found and a fresh `bunker list` showed it absent. The install leg is PARTIAL/UNPROVEN, not PASS and not SKIPPED-install-bunker: the host and spawn worked, but no install/smoke evidence closed.
-- The collected helper file /tmp/bunker-qa-evidence-20261029T115558Z-53774.jsonl says launch terminated by SIGTERM before launch cell was recorded.
+## Real workflow
 
-Perf:
-- User-visible daemon startup to health: 1411ms cold on this run.
-- Dashboard warm timings: 10-26ms across the exercised routes.
-- Event cold/warm timings: 290ms, 426ms, 430ms. The ~0.4s single-event latency is noticeable but already documented in repo history; no new PERF row was filed because this run did not isolate a new regression and nothing crossed the skill's filing threshold beyond the existing known group-commit behavior.
-- No profile generated; the measured result did not justify profiling a new hot path.
+The probe used a detached clean worktree at the target revision and a state root under /home/kara/.local/state/trouble-dogfood-20261029-114058. It created a 0600 environment file and token store, set explicit absolute paths, built with `make bin`, started `bin/troubled`, waited for `/health.json`, authenticated the dashboard with the minted token, sent three Sentry-compatible generic JSON events, counted the ledger records, and stopped the daemon with SIGTERM.
 
-No code or board state was changed by this lane. Product checkout had pre-existing unrelated untracked files: .gitreins/tasks.yaml.corrupt-963c8d6c853e, resolved, trouble. Scratch worktree and runtime state are outside the repo.
+Observed:
+
+- `make bin`: exit 0, 0.75–1.09 seconds across two runs; binary reported `50866ae 50866ae ... [stamped]`.
+- Daemon readiness: 1.41 seconds in the first probe; the corrected probe returned health status `ok`, version and git_sha `50866ae`, and a non-zero ledger sequence.
+- Dashboard: `/incidents`, `/groups`, `/rules`, `/breakers`, and `/partials/budget` all returned HTTP 200. Measured response times were 14–33 ms, with non-empty bodies.
+- Ingest: all three POSTs returned HTTP 200 and an incident id. Measured times were 537 ms, 1,897 ms, and 1,203 ms. The spread is material, but this short run does not separate product contention from host load, so no PERF row is filed.
+- Ledger: 55 JSONL records were present after the three-event workflow, including 47 event, 3 group, 3 incident, 1 config, and 1 lifecycle record. This proves the writes reached the ledger; it does not claim that every record was independently verified by the CLI.
+- Shutdown: the daemon process was signalled and the port was released; the daemon log ended with dashboard stopped and the expected closed-network listener message.
+
+The first local attempt used an invalid `/tmp` state root and was correctly refused with `TROUBLE-LIFECYCLE-004`; it was discarded as harness/input evidence. The corrected run moved the state root under the operator home before classifying product behavior.
+
+## Value judgment
+
+Verdict: PROMISING-BUT-ROUGH.
+
+The core boot → authenticated dashboard → ingest → ledger workflow works at this revision and is useful for a real operator. The main friction is operational: the documented surface is broad, the default/example configuration requires careful path and credential setup, and the CLI verification command was not exercised successfully in this probe because the attempted global `--state-root` spelling is rejected by the CLI. The existing usage skill and board rows already document the historical ledger-verification and configuration traps; this run does not create a duplicate finding.
+
+Performance is acceptable for dashboard reads and build/startup. Ingest is sub-second to roughly two seconds in this short sample; the slowest request is user-visible, but the sample is too small and host-sensitive to attribute it to a new regression.
+
+## Install leg
+
+Status: PARTIAL/UNPROVEN, not PASS and not SKIPPED.
+
+`bash ~/.hermes/scripts/bunker-qa.sh launch /home/kara/trouble` was invoked against `bunker-mvp`. The helper launched agent `ae53cc5e` and recorded it in `/tmp/trouble-bunker-launch-20261029.log`, but the launch transcript stopped at `CELL fresh-install: sync repo → ~/qa-trouble`; no controller evidence file was produced, and `bunker info ae53cc5e --server bunker-mvp` later returned `not_found`. A fresh `bunker list --server bunker-mvp --status all` showed no `ae53cc5e`. Because the launch path did run but no install/smoke cell became gradeable, this is not an install PASS and not a fleet-wide SKIPPED-install-bunker condition. The next install run must collect per-cell evidence before teardown.
+
+A different live agent (`d2da6646`) was present but belonged to a chimera-v2 battery and was not touched.
+
+## Reusable operation
+
+Use an absolute state root below the operator home, an explicit absolute environment file, and an explicit dashboard token file. Use `make bin` for the stamped artifacts. Treat a 200 response as only one part of the proof: inspect the health identity and ledger JSONL after ingest, and keep dashboard token creation and daemon startup on the same resolved token path.
+
+ch:trace tick=trouble-dogfood-2026-10-29-11-40-58 spec=docs/qa/use-cases.md#UC-001,docs/qa/use-cases.md#UC-005,docs/qa/use-cases.md#UC-006 test=/tmp/df-trouble-run-20261029.sh evidence=/tmp/df-trouble-real-20261029-114058 commit=50866ae4a232969fee2a354927ce7e298e5955be verdict=PROMISING-BUT-ROUGH

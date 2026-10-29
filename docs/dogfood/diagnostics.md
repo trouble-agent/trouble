@@ -8,8 +8,14 @@ actually work?". Findings and their board rows are in
 `docs/dogfood/2026-09-17-integration.md`; this file explains the machinery
 behind them.
 
-Nothing here is a raw log dump. Each error is followed by the mechanism that
-produced it and the right way to do it.
+Nothing here is a raw log dump. Each error is followed by the mechanism
+that produced it and the right way to do it.
+
+## 2026-10-29 real-use pass
+
+At HEAD `50866ae`, a detached clean worktree drove the documented operator workflow: stamped `make bin`, daemon boot, token-authenticated dashboard reads, three generic Sentry-compatible event POSTs, ledger census, and SIGTERM shutdown. The corrected run used a state root under `/home/kara/.local/state`, because the product correctly refuses state under `/tmp` with `TROUBLE-LIFECYCLE-004`. Health returned `status=ok` with the matching build stamp; five dashboard routes returned HTTP 200; all three event POSTs returned HTTP 200; and the ledger ended at 55 JSONL records (47 event, 3 group, 3 incident, 1 config, 1 lifecycle). Dashboard requests took 14–33 ms; ingest requests took 537 ms, 1,203 ms, and 1,897 ms. The short, host-sensitive sample did not justify a PERF row. Full integration evidence is in `docs/dogfood/2026-10-29-real-use-integration.md`; raw evidence is in `/tmp/df-trouble-real-20261029-114058`.
+
+The bunker helper launch was attempted separately on `bunker-mvp` and reached agent `ae53cc5e`, but stopped after the fresh-install sync line without a gradeable evidence file; the agent was later absent. This is PARTIAL/UNPROVEN install evidence, not a silent pass and not a fleet-wide `SKIPPED-install-bunker`.
 
 ---
 

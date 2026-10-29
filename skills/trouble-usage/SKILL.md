@@ -6,7 +6,7 @@ description: >-
   ledger, and the four traps that stop a fresh user cold (example config does
   not parse, `~` token path 401s, no project = no ingest listener, no
   quickstart). Load this before touching ~/trouble.
-version: 1.4.2
+version: 1.4.3
 category: software-development
 ---
 
@@ -23,7 +23,9 @@ hand on 2026-09-17 (`c363daf`, go1.26.5). See
 `docs/dogfood/diagnostics.md` for why the traps exist. The 2026-10-20 pass
 re-verified every ledger verb at `d081f79`; its traps and evidence are in
 `docs/dogfood/2026-10-20-verify-hash-recurrence-and-writer-seat.md` (board rows
-TRBL-106-R2/112/113/114).
+TRBL-106-R2/112/113/114). The 2026-10-29 real-use pass at `50866ae` also
+verified the end-to-end dashboard and ingest workflow; its timing and install
+boundary are in `docs/dogfood/2026-10-29-real-use-integration.md`.
 
 ## Entry points
 

@@ -22,6 +22,16 @@ func Health(cfg Config, in types.HealthInputs) types.HealthResponse {
 		}
 	}
 
+	for _, s := range in.Sources {
+		if !s.Expected || s.Alive {
+			continue
+		}
+		if status != "stalled" {
+			status = "degraded"
+		}
+		detail["source_not_alive"] = s.HostID + ":" + s.Source
+	}
+
 	// Subsystems (SPEC-12 §3.3a): a subsystem the boot did not build is never
 	// reported as healthy. The `subsystems` block is the per-row truth; `detail`
 	// names one cause for the alarm line, exactly as sensor_degraded does.

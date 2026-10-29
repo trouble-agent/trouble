@@ -1,0 +1,22 @@
+{
+  "tick_id": "trouble-foreman-2026-10-29-10-47-26",
+  "created_at": "2026-10-29T15:47:26Z",
+  "base_sha": "072f28d5f8d7a2a46a408f9d6673f7879c607a44",
+  "wave_budget": 5,
+  "mode": "serial-salvage",
+  "workers_dispatched": 0,
+  "tasks": [
+    {
+      "id": "QA-TROUBLE-23",
+      "outcome": "salvaged existing worktree diff",
+      "worktree": "~/worktrees/trouble-QA-TROUBLE-23",
+      "branch": "wt/QA-TROUBLE-23",
+      "base_sha": "072f28d5f8d7a2a46a408f9d6673f7879c607a44",
+      "implementation_commit": "b17bdd4d724d67cc7294afef69d64671e5f12e45",
+      "remote_branch": "origin/wt/QA-TROUBLE-23",
+      "reason": "pending row had a coherent pre-existing implementation diff in its linked worktree; no duplicate worker dispatched"
+    }
+  ],
+  "no_dispatch_reason": "one actionable implementation row was recovered from an existing worktree; serial merge and gate required",
+  "status": "in_progress"
+}

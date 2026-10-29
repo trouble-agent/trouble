@@ -1,0 +1,18 @@
+{
+  "tick_id": "trouble-foreman-2026-10-29-22-19-17",
+  "created_at": "2026-10-29T22:19:17-05:00",
+  "base_sha": "c1afb6393a25cc2056e3e396598ae7cc6919cebc",
+  "origin_base_sha": "c1afb6393a25cc2056e3e396598ae7cc6919cebc",
+  "wave_budget": 8,
+  "mode": "serial",
+  "tasks": [
+    {
+      "id": "REVIEW-TROUBLE-2026-10-29-01",
+      "status": "selected",
+      "reason": "only actionable implementation row; RELEASE-012 is owner-gated"
+    }
+  ],
+  "no_dispatch_reason": "fewer than two independent actionable implementation rows; serial worker path",
+  "finished_at": null,
+  "status": "dispatched"
+}

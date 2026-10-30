@@ -1,0 +1,29 @@
+{
+  "tick_id": "trouble-foreman-2026-10-30-04-46-22",
+  "created_at": "2026-10-29T23:51:00-05:00",
+  "base_sha": "fd42fd5c8a9f7bdc08825a42ee387a4e3a5c5c0f",
+  "origin_base_sha": "fd42fd5c8a9f7bdc08825a42ee387a4e3a5c5c0f",
+  "wave_budget": 2,
+  "mode": "serial",
+  "tasks": [
+    {
+      "id": "INT-CI-6",
+      "status": "merged",
+      "worker_commit": "6b6aae81de0d13f7e7676db0445d281e0d372110",
+      "merge_commit": "650f6e181a64c475250b00bcb326c92e06f67e1f",
+      "local_gates": {"focused_app": "PASS", "lifecycle": "PASS", "build": "PASS", "vet": "PASS", "spec_selfcheck": "PASS"},
+      "gitreins": {"verdict": "FAIL_INCOMPLETE", "artifact": ".gitreins/history/2026-10-30/a8bb09b8/verdict.json", "reason": "tier1 known harness baseline; tier2 45m cap after focused tests pass"},
+      "ci": {"run_id": 41014716769, "status": "in_progress", "conclusion": null},
+      "reason": "only dispatchable implementation row; owner-gated RELEASE-012 and externally blocked TRBL-049 excluded",
+      "worktree": "/home/kara/worktrees/trouble-INT-CI-6",
+      "branch": "wt/INT-CI-6",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "zai-glm-default"
+    }
+  ],
+  "no_dispatch_reason": "No additional task: INT-CI-6 was the only dispatchable implementation row; RELEASE-012 remains owner-gated and TRBL-049 remains externally blocked.",
+  "finished_at": "2026-10-30T01:38:00-05:00",
+  "status": "finished",
+  "final_main": "650f6e181a64c475250b00bcb326c92e06f67e1f",
+  "origin_parity": "0/0"
+}

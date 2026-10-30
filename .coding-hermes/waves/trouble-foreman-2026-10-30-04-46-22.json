@@ -24,7 +24,7 @@
   "no_dispatch_reason": "No additional task: INT-CI-6 was the only dispatchable implementation row; RELEASE-012 remains owner-gated and TRBL-049 remains externally blocked.",
   "finished_at": "2026-10-30T01:38:00-05:00",
   "status": "finished",
-  "final_main": "2e36ae3f40ee6ad68182365a4a1d305266eefe6c",
+  "final_main": "98e9b4f8bdd100654a5adc5a8d1b1ff394e1b30d",
   "origin_parity": "0/0",
   "final_ci": {"status": "unverified", "run_id": null, "details": "No GitHub run was created for this board-only closeout commit; implementation commit run 41014716769 remains the relevant pending hosted CI witness."}
 }

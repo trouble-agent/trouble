@@ -13,6 +13,24 @@
     }
   ],
   "no_dispatch_reason": "fewer than two independent actionable implementation rows; serial worker path",
-  "finished_at": null,
-  "status": "dispatched"
+  "finished_at": "2026-10-29T23:50:31-05:00",
+  "status": "recovered",
+  "recovery": {
+    "result": "RECOVERED_MERGED_WORKER",
+    "workers_verified": 1,
+    "selected_task": "REVIEW-TROUBLE-2026-10-29-01",
+    "branch": "wt/REVIEW-TROUBLE-2026-10-29-01",
+    "worker_head": "9de715a17eea96375f092a4190af07833b1bec2d",
+    "implementation_reachable_from_main": true,
+    "current_main": "5b5391f244916cecec18ec48324e1267ca69fb9f",
+    "worktree_reaped": true,
+    "branch_reaped": true,
+    "merged_tree_gates": {
+      "go_build": "PASS",
+      "go_vet": "PASS",
+      "spec_selfcheck": "PASS",
+      "focused_acceptance": "FAIL: known health fixture mismatch tracked by INT-CI-6; expected dead journald source correctly yields degraded, legacy tests still expect ok"
+    },
+    "remote_parity_before_closeout": "0/0"
+  }
 }

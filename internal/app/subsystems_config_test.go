@@ -566,9 +566,13 @@ enabled = true
 }
 
 // TestShippedExampleConfiguredValidlyBootsOk is AC2's second half: the shipped
-// example's documented opt-in, applied to the shipped file itself, still boots
-// to /health.json status ok. The example is not edited — its bytes are read and
-// the documented keys appended, exactly as the file tells an operator to do.
+// example's documented opt-in, applied to the shipped file itself, boots every
+// subsystem row built and reads /health.json status ok whenever every expected
+// source is alive on this host; with an expected source dead (no events yet)
+// the source-coverage rule of SPEC-12 §3.3 degrades the status instead, and
+// the assertion below is coverage-aware either way. The example is not edited
+// — its bytes are read and the documented keys appended, exactly as the file
+// tells an operator to do.
 func TestShippedExampleConfiguredValidlyBootsOk(t *testing.T) {
 	stampBuildForTest(t)
 	path := shippedExampleConfigPath(t)
@@ -701,9 +705,13 @@ source_path = %q
 			t.Errorf("sensor %s is degraded (%s): the status assertion below would fail for a sensor reason", s.Sensor, s.Reason)
 		}
 	}
-	if health.Status != "ok" {
-		t.Errorf("status = %q with the example's documented opt-in applied, want ok: %s", health.Status, body)
-	}
+	// The status is graded against source coverage (SPEC-12 §3.3): an EXPECTED
+	// source that is dead on this host (journald/psi with no events yet) must
+	// degrade the boot and be named by detail.source_not_alive; with every
+	// expected source alive the opt-in boot reads ok. Grading the host's source
+	// traffic as a hard `ok` here would fail the documented opt-in for a reason
+	// it does not cause.
+	assertHealthSourceCoverageStatus(t, "the shipped example with its documented opt-in", health, []byte(body))
 	if len(calls()) == 0 {
 		t.Errorf("the configured duckbrain driver never reached the base_url the opt-in declared")
 	}

@@ -62,6 +62,43 @@ func stampBuildForTest(t *testing.T) {
 		"0.1.0", "767e537", "2026-09-18T00:00:00.000Z"
 }
 
+// assertHealthSourceCoverageStatus applies the source-coverage status rule of
+// SPEC-12 §3.3 to a boot's health response: an EXPECTED source that is dead on
+// this host (Expected && !Alive — e.g. a journald or psi source with no events
+// yet) must never read top-level status ok; the lifecycle assembly degrades
+// the response and names one dead source as host_id:source in
+// detail.source_not_alive (stalled keeps its precedence over degraded, which
+// is why the dead-source branch asserts "not ok" rather than a specific
+// string). With every expected source alive the response reads ok and carries
+// no source_not_alive key. The same contract is inlined in
+// missing_rules_dir_test.go; the deterministic both-branch proof of the
+// assembly itself lives in internal/lifecycle/health_test.go
+// (TestHealthExpectedSourceLivenessJSON).
+func assertHealthSourceCoverageStatus(t *testing.T, what string, health types.HealthResponse, body []byte) {
+	t.Helper()
+	deadExpected := make(map[string]bool)
+	for _, source := range health.Sources {
+		if source.Expected && !source.Alive {
+			deadExpected[source.HostID+":"+source.Source] = true
+		}
+	}
+	if len(deadExpected) > 0 {
+		if health.Status == "ok" {
+			t.Errorf("%s: status = ok with expected dead sources %v (SPEC-12 §3.3: an expected source with alive=false never reads ok)", what, deadExpected)
+		}
+		if got, _ := health.Detail["source_not_alive"].(string); !deadExpected[got] {
+			t.Errorf("%s: detail.source_not_alive = %v, want one of the expected dead sources %v", what, health.Detail["source_not_alive"], deadExpected)
+		}
+		return
+	}
+	if health.Status != "ok" {
+		t.Errorf("%s: status = %q with all expected sources alive: %s", what, health.Status, body)
+	}
+	if _, present := health.Detail["source_not_alive"]; present {
+		t.Errorf("%s: detail.source_not_alive present with all expected sources alive: %v", what, health.Detail)
+	}
+}
+
 // assertShippedSubsystemTable requires the shipped example's own bytes to carry
 // the LIVE declaration of one optional subsystem: the named block, the table
 // `[<name>]` as a real key (not a commented-out sketch), `enabled = false` as
@@ -509,10 +546,13 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	// --- TRBL-016 AC2/AC3: the shipped example ships the two optional
 	// subsystems OFF, deliberately and visibly (SPEC-09 §3.4a, SPEC-11 §2a), so
 	// this boot is COMPLETE rather than permanently degraded: every subsystem row
-	// is built, none is refused, and /health.json reads ok. Before the change the
-	// two shipped defaults failed their own validators, so the shipped example —
-	// the file docs/cmd.md and deploy/README.md tell a new operator to copy —
-	// booted permanently missing the issue desk and the skill loop.
+	// is built, none is refused, and /health.json reads ok whenever every
+	// expected source is alive on this host (a dead expected source degrades it
+	// instead, per SPEC-12 §3.3's source-coverage rule — asserted below). Before
+	// the change the two shipped defaults failed their own validators, so the
+	// shipped example — the file docs/cmd.md and deploy/README.md tell a new
+	// operator to copy — booted permanently missing the issue desk and the skill
+	// loop.
 	resp2, err := http.Get(base + "/health.json")
 	if err != nil {
 		t.Fatalf("GET /health.json after the on-ramp: %v", err)
@@ -535,11 +575,15 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 			t.Errorf("%s row = %+v, want built=true on the shipped-example boot", name, row)
 		}
 	}
-	// AC3's status half, with nothing left to explain the degraded branch away:
-	// no row refused/unbuilt, no subsystem key in detail, and no sensor degraded
-	// (a degraded sensor would make the status assertion fail for a reason this
-	// test is not about, so the sensor is named instead of the status being
-	// loosened).
+	// AC3's status half, with nothing left to explain a degraded branch away
+	// except source coverage: no row refused/unbuilt, no subsystem key in
+	// detail, and no sensor degraded (a degraded sensor would make the status
+	// assertion fail for a reason this test is not about, so the sensor is
+	// named instead of the status being loosened). The status itself is graded
+	// coverage-aware (SPEC-12 §3.3): an EXPECTED source with no events on this
+	// host must degrade the response and be named in detail.source_not_alive,
+	// so an unconditional `ok` assertion would be grading the host's journald/
+	// psi traffic rather than the shipped example.
 	for _, k := range []string{"subsystem_refused", "subsystem_unbuilt"} {
 		if v, ok := after.Detail[k]; ok {
 			t.Errorf("detail.%s = %v on a boot whose every subsystem row is built", k, v)
@@ -547,12 +591,10 @@ func TestShippedExampleConfigBootsToServe(t *testing.T) {
 	}
 	for _, s := range after.Sensors {
 		if s.Degraded {
-			t.Errorf("sensor %s is degraded on the shipped-example boot (%s): the AC3 ok assertion below would fail for a sensor reason, not a subsystem one", s.Sensor, s.Reason)
+			t.Errorf("sensor %s is degraded on the shipped-example boot (%s): the AC3 status assertion below would fail for a sensor reason, not a subsystem one", s.Sensor, s.Reason)
 		}
 	}
-	if after.Status != "ok" {
-		t.Errorf("status = %q on the shipped-example boot, want ok (every subsystem built, stamped build, healthy sensors): %s", after.Status, healthBody)
-	}
+	assertHealthSourceCoverageStatus(t, "the shipped-example boot", after, healthBody)
 
 	// AC2's file half: the opt-out is DECLARED in the shipped bytes as LIVE keys
 	// — the file an operator copies states the posture in a table the daemon

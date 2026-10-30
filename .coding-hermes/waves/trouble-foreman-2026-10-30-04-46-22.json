@@ -22,7 +22,7 @@
     }
   ],
   "no_dispatch_reason": "No additional task: INT-CI-6 was the only dispatchable implementation row; RELEASE-012 remains owner-gated and TRBL-049 remains externally blocked.",
-  "finished_at": "2026-10-30T01:38:00-05:00",
+  "finished_at": "2026-10-30T01:53:48-05:00",
   "status": "finished",
   "final_main": "d3da41156e6a99b06b5a8e79d62087f3199fd3eb",
   "origin_parity": "0/0",

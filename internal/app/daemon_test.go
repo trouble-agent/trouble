@@ -110,6 +110,14 @@ var bootPortPicker func(t *testing.T) (int, int)
 // bootDaemonWith re-runs this whole step per attempt instead of only
 // regenerating the config.
 func bootOnce(t *testing.T, so SubsystemOptions) (*harness, error) {
+	return bootOnceWithIntervals(t, so, "1s", "1s", "1s")
+}
+
+// bootOnceWithIntervals keeps the ordinary boot timings for the app suite while
+// allowing a test that measures one ledger boundary to remove unrelated
+// periodic writers from its measurement window. The heartbeat still writes its
+// initial file immediately; these intervals only defer later background work.
+func bootOnceWithIntervals(t *testing.T, so SubsystemOptions, heartbeatInterval, idleHeartbeatInterval, checkerInterval string) (*harness, error) {
 	root := stateBase(t)
 	dashPort, ingestPort := freePortPair(t)
 	if bootPortPicker != nil {
@@ -141,16 +149,16 @@ environment_file = %q
 
 [lifecycle]
 heartbeat_path = %q
-heartbeat_interval = "1s"
+heartbeat_interval = %q
 heartbeat_stale_after = "5s"
-idle_heartbeat_interval = "1s"
+idle_heartbeat_interval = %q
 drain_timeout = "5s"
 
 [stall]
 max_seq_age = "300s"
 
 [checker]
-interval = "1s"
+interval = %q
 confirm_runs = 2
 alarm_file = %q
 state_file = %q
@@ -162,6 +170,7 @@ bind = "127.0.0.1:%d"
 bind = "127.0.0.1:%d"
 token_file = %q
 `, root, dashPort, envFile, filepath.Join(root, "heartbeat.json"),
+		heartbeatInterval, idleHeartbeatInterval, checkerInterval,
 		filepath.Join(root, "checker.alarm"), filepath.Join(root, "checker.state.json"),
 		ingestPort, dashPort, tokenPath)
 
@@ -255,6 +264,10 @@ const maxBootAttempts = 5
 // re-running the whole boot step with a FRESH freePortPair (a fresh :0 pick
 // is the remedy — no sleep-poll), up to maxBootAttempts.
 func runBootAttempts(t *testing.T, so SubsystemOptions, failf func(string, ...any)) (*harness, error) {
+	return runBootAttemptsWithIntervals(t, so, failf, "1s", "1s", "1s")
+}
+
+func runBootAttemptsWithIntervals(t *testing.T, so SubsystemOptions, failf func(string, ...any), heartbeatInterval, idleHeartbeatInterval, checkerInterval string) (*harness, error) {
 	// The phase marks of a boot the preflight refuses stop at bind_preflight;
 	// clearing the observer between attempts means a retry's marks start from
 	// scratch instead of the phase table (bootphase_test) seeing the sequence
@@ -264,7 +277,7 @@ func runBootAttempts(t *testing.T, so SubsystemOptions, failf func(string, ...an
 		if attempt > 1 {
 			bootPhaseObserver = nil
 		}
-		h, err := bootOnce(t, so)
+		h, err := bootOnceWithIntervals(t, so, heartbeatInterval, idleHeartbeatInterval, checkerInterval)
 		if err == nil {
 			return h, nil
 		}
@@ -286,12 +299,18 @@ func runBootAttempts(t *testing.T, so SubsystemOptions, failf func(string, ...an
 // The harness retries only the TROUBLE-LIFECYCLE-003 bind-in-use race (see
 // runBootAttempts) and reports the last refusal loud after the final attempt.
 func bootDaemonWith(t *testing.T, so SubsystemOptions) *harness {
+	return bootDaemonWithIntervals(t, so, "1s", "1s", "1s")
+}
+
+// bootDaemonWithIntervals is the test-only timing seam for measurements that
+// must not share their ledger window with the heartbeat's idle tick.
+func bootDaemonWithIntervals(t *testing.T, so SubsystemOptions, heartbeatInterval, idleHeartbeatInterval, checkerInterval string) *harness {
 	t.Helper()
 	defer func() {
 		bootPortPicker = nil
 		bootPhaseObserver = nil
 	}()
-	h, err := runBootAttempts(t, so, t.Fatalf)
+	h, err := runBootAttemptsWithIntervals(t, so, t.Fatalf, heartbeatInterval, idleHeartbeatInterval, checkerInterval)
 	if err != nil {
 		// Unreachable: the injected t.Fatalf does not return (FailNow).
 		return nil

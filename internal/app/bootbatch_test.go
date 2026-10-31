@@ -56,12 +56,13 @@ func TestBootInstallsBatchBoundaryAndLadderBridge(t *testing.T) {
 	}
 }
 
+// ch:trace row=INT-CI-7 spec=SPEC-01-3.5a+SPEC-03-3.3a+SPEC-12-7b test=TestBootBatchBoundaryIsOneDurableCommit
 // TestBootBatchBoundaryIsOneDurableCommit is the boot-level arithmetic: the
 // installed boundary writes K records for ONE commit's worth of watermark
 // movement through the same writer the whole boot shares — the property that
 // collapses the reconcile's N windows (TRBL-044).
 func TestBootBatchBoundaryIsOneDurableCommit(t *testing.T) {
-	h := bootDaemon(t)
+	h := bootDaemonWithIntervals(t, SubsystemOptions{}, "1h", "1h", "1h")
 	d := h.d
 
 	const k = 6
@@ -81,7 +82,9 @@ func TestBootBatchBoundaryIsOneDurableCommit(t *testing.T) {
 		t.Fatalf("batch boundary: %v", err)
 	}
 	after := d.Ledger.Status()
-	if got := after.FsyncCalls - before.FsyncCalls; got != 1 {
+	got := after.FsyncCalls - before.FsyncCalls
+	t.Logf("FsyncCalls: before=%d after=%d delta=%d", before.FsyncCalls, after.FsyncCalls, got)
+	if got != 1 {
 		t.Fatalf("a K=%d batch through the boot's boundary cost %d durable commits, want 1", k, got)
 	}
 }

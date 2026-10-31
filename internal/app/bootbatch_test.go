@@ -56,6 +56,7 @@ func TestBootInstallsBatchBoundaryAndLadderBridge(t *testing.T) {
 	}
 }
 
+// ch:trace row=INT-CI-7 spec=SPEC-01-3.5a+SPEC-03-3.3a+SPEC-12-7b test=TestBootBatchBoundaryIsOneDurableCommit
 // TestBootBatchBoundaryIsOneDurableCommit is the boot-level arithmetic: the
 // installed boundary writes K records for ONE commit's worth of watermark
 // movement through the same writer the whole boot shares — the property that

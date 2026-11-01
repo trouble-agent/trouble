@@ -31,3 +31,8 @@ deploy/container/secrets/
 namespaces/
 .gitreins/logs/
 .gitreins/tasks.yaml.lock
+
+# Build artifacts from make bin / go build
+trouble
+troubled
+resolved

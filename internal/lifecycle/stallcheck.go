@@ -168,7 +168,17 @@ func stallCheck(ctx context.Context, cfg Config, client *http.Client, now time.T
 }
 
 func fetchHealth(ctx context.Context, cfg Config, client *http.Client) (types.HealthResponse, bool, error) {
-	url := "http://" + cfg.Dashboard.Bind + "/health.json"
+	// TRBL-124: honour the configured health URL. The `--health-url` flag sets
+	// cfg.HealthURL, but this function built the URL from Dashboard.Bind
+	// unconditionally — so `check-stall --health-url http://some-other-host`
+	// silently measured the LOCAL dashboard instead. Point it at a dead or
+	// remote endpoint and you got a green verdict for a URL that was never
+	// contacted: the operator believes they monitored one surface while the
+	// checker watched another.
+	url := strings.TrimSpace(cfg.HealthURL)
+	if url == "" {
+		url = "http://" + cfg.Dashboard.Bind + "/health.json"
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return types.HealthResponse{}, false, err

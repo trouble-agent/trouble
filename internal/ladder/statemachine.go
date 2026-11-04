@@ -64,8 +64,12 @@ var legal = []edge{
 	},
 	{
 		ID: "T03", From: anyOf(types.StRecorded), To: types.StPlayDrafted, Trigger: "rung_advance_play",
-		Stage:   true,
-		Emitted: []string{"transition", "rung", "play_runs"},
+		Stage: true,
+		// SPEC-05 §3.2b (amendment TRBL-123): the row names the play it drafted
+		// (name, version, source) beside the rung it entered, so the ledger
+		// evidence of a rung advance says WHICH play was picked up. The three
+		// keys are empty on an incident no play resolved for — never invented.
+		Emitted: []string{"transition", "rung", "play_runs", "play", "play_version", "play_source"},
 		Guard:   guardRungAtLeast(types.RungPlay),
 		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
 			if l.deps.PlayFor != nil {
@@ -1042,6 +1046,19 @@ func (l *Ladder) Advance(ctx context.Context, incID string, tr Transition) (type
 	payload["from"] = string(from)
 	payload["to"] = string(e.To)
 	payload["rung"] = string(st.Inc.Rung)
+	// SPEC-05 §3.2b (amendment TRBL-123): the rung an ACCEPTED transition
+	// ENTERS, named by that rung. `trouble ledger status` derives play_runs /
+	// agent_runs from this key (SPEC-01 §3.10a): one record per rung entry, so
+	// the operator counter counts entries the ledger actually recorded, never a
+	// sticky state field read back as if it were a history.
+	switch e.To {
+	case types.StPlayDrafted:
+		payload["rung_entry"] = string(types.RungPlay)
+	case types.StResRequested:
+		payload["rung_entry"] = string(types.RungResearch)
+	case types.StAgentRunning:
+		payload["rung_entry"] = string(types.RungAgent)
+	}
 	if e.Code != "" {
 		payload["error_code"] = string(e.Code)
 	}
@@ -1192,6 +1209,24 @@ func (l *Ladder) edgePayload(st *incState, e edge, tr Transition, from types.Lad
 			p[k] = st.SuppressedCount
 		case "play_runs":
 			p[k] = st.PlayRuns
+		case "play":
+			if st.Play != nil {
+				p[k] = st.Play.Name
+			} else {
+				p[k] = ""
+			}
+		case "play_version":
+			if st.Play != nil {
+				p[k] = st.Play.Version
+			} else {
+				p[k] = 0
+			}
+		case "play_source":
+			if st.Play != nil {
+				p[k] = st.Play.Source
+			} else {
+				p[k] = ""
+			}
 		case "agent_runs":
 			p[k] = st.AgentRuns
 		case "strikes":

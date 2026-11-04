@@ -12,25 +12,29 @@ import (
 //
 // Every key has a default and no fleet value is compiled in.
 type Config struct {
-	VerifyDefault         types.Duration
-	VerifyRetry           int
-	VerifyReopens         int
-	ResearchPlayExtra     int
-	PlayMaxRunsDefault    int
-	PlayMaxRunsCap        int
-	StabilizeDefault      types.Duration
-	AgentTimeout          types.Duration
-	AgentStrikesWindow    types.Duration
-	LeaseRecheck          types.Duration
-	LeaseGrace            types.Duration
-	LeaseRetry            types.Duration
-	KillSwitch            bool
-	AutonomyMode          types.AutonomyMode
-	AgentRunsPerDay       int64
-	PlayRunsPerDay        int64
-	ResearchPerDay        int64
-	SpawnsPerDay          int64
-	CanaryInterval        types.Duration
+	VerifyDefault      types.Duration
+	VerifyRetry        int
+	VerifyReopens      int
+	ResearchPlayExtra  int
+	PlayMaxRunsDefault int
+	PlayMaxRunsCap     int
+	StabilizeDefault   types.Duration
+	AgentTimeout       types.Duration
+	AgentStrikesWindow types.Duration
+	LeaseRecheck       types.Duration
+	LeaseGrace         types.Duration
+	LeaseRetry         types.Duration
+	KillSwitch         bool
+	AutonomyMode       types.AutonomyMode
+	AgentRunsPerDay    int64
+	PlayRunsPerDay     int64
+	ResearchPerDay     int64
+	SpawnsPerDay       int64
+	CanaryInterval     types.Duration
+	// DriveInterval is the rung driver's cadence (SPEC-05 §4.4a): how often the
+	// composition root's loop calls ResumePending then Drive. It is NOT the
+	// canary cadence, which is CanaryInterval above.
+	DriveInterval         types.Duration
 	QuietClose            bool
 	ReopenMax             int
 	ReopenWindow          types.Duration
@@ -74,6 +78,7 @@ func DefaultConfig() Config {
 		ResearchPerDay:        30,
 		SpawnsPerDay:          5,
 		CanaryInterval:        "5m",
+		DriveInterval:         "30s",
 		QuietClose:            true,
 		ReopenMax:             100,
 		ReopenWindow:          "24h",
@@ -123,6 +128,7 @@ func (c Config) WithDefaults() Config {
 	fillInt64(&c.ResearchPerDay, d.ResearchPerDay)
 	fillInt64(&c.SpawnsPerDay, d.SpawnsPerDay)
 	fillDur(&c.CanaryInterval, d.CanaryInterval)
+	fillDur(&c.DriveInterval, d.DriveInterval)
 	if !c.QuietClose {
 		// quiet_close defaults to TRUE, so an unset value must not read as false.
 		// A caller that wants it OFF expresses that through ladder.quiet_close
@@ -228,6 +234,8 @@ func FromValues(vals []types.ConfigValue) (Config, *Error) {
 			c.SpawnsPerDay = int64(asIntValue(v.Value, int(c.SpawnsPerDay)))
 		case "ladder.canary_interval":
 			c.CanaryInterval = asDurationValue(v.Value, c.CanaryInterval)
+		case "ladder.drive_interval":
+			c.DriveInterval = asDurationValue(v.Value, c.DriveInterval)
 		case "ladder.quiet_close":
 			c.QuietClose = asBoolValue(v.Value, c.QuietClose)
 		case "ladder.reopen_max":

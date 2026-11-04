@@ -116,7 +116,13 @@ type Daemon struct {
 	// sentinelLn is the ingest listener while the sentinel server owns it.
 	sentinelLn net.Listener
 
-	rulesOnce   sync.Once
+	rulesOnce sync.Once
+	// playsOnce is deliberately SEPARATE from rulesOnce: they used to be the
+	// same sync.Once, so the first rule lookup (which every admission performs
+	// to read the rule's entry rung) consumed the once and the plays directory
+	// was never read — the play rung degraded to T09 on every incident and
+	// `PlayFor` never resolved (TRBL-123).
+	playsOnce   sync.Once
 	rules       map[string]types.Rule
 	plays       map[string]types.Play
 	playsByName map[string]types.Play
@@ -460,6 +466,16 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	}
 
 	phase("ladder")
+	// The ladder's own keys (SPEC-05 §4.3) resolve through the same registry as
+	// every other plane, so `ladder.drive_interval` is a key the loop below
+	// actually reads instead of a documented no-op. An unknown `ladder.*` key is
+	// already a resolution refusal; FromValues repeats the check for a caller
+	// that builds the values list by hand.
+	ladderCfg, cerr := ladder.FromValues(res.Values)
+	if cerr != nil {
+		d.bootFailure(ctx, types.CodeLifecycle001, cerr)
+		return nil, cerr
+	}
 	d.Ladder, err = ladder.New(ladder.Deps{
 		Ledger:     d.Store,
 		Index:      d.Store,
@@ -468,7 +484,7 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		Outlets:    deskOutlet{desk: d.Subsystems.issues(), flow: d.Subsystems.flow()},
 		Clock:      NewClock(started),
 		Eval:       NewEvaluator(),
-		Cfg:        ladder.DefaultConfig(),
+		Cfg:        ladderCfg,
 		Notify:     Notifier{Store: d.Store, Log: log},
 		Rules:      d.ruleLookup,
 		PlayFor:    d.playLookup,
@@ -480,6 +496,17 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	if err != nil {
 		d.bootFailure(ctx, types.CodeLifecycle003, err)
 		return nil, err
+	}
+
+	// 10c. SPEC-05 §4.4's boot leg: after the index is rebuilt and the gates are
+	// loaded (ladder.New did both), one resume pass re-evaluates the transitions
+	// a previous process refused. A resume failure is logged, never a boot
+	// refusal: the ladder is authoritative and its pending set is derived, so the
+	// cadence loop below retries it.
+	if resumed, rerr := d.Ladder.ResumePending(ctx); rerr != nil {
+		log.Warn("ladder resume", "err", rerr)
+	} else {
+		log.Info("ladder resume", "resumed", len(resumed))
 	}
 
 	// 11. sensors run only after the ladder exists: the first fired rule must
@@ -578,6 +605,14 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 		// The flow's own drain (SPEC-08 §3.9a). Before §3.9a the comment above
 		// claimed this loop while the flow ran neither half of it.
 		go d.Subsystems.Flow.Run(ctx)
+	}
+	// 13e. the ladder's rung driver (SPEC-05 §4.4a). One goroutine owns one
+	// ticker and exits with the daemon's context — the pass itself is bounded by
+	// the open-incident set, so there is no goroutine per incident. Each tick
+	// resumes the transitions a freeze refused, then drives every open incident
+	// still waiting for its first rung.
+	if d.Ladder != nil {
+		go d.ladderDriveLoop(ctx, ladderCfg.DriveInterval.Std())
 	}
 
 	// 14. heartbeat + watchdog, then READY.
@@ -860,28 +895,90 @@ func (d *Daemon) ruleLookup(name string) (types.Rule, bool) {
 	return r, ok
 }
 
-// playLookup resolves the play a rule drafts from the state root's plays
-// directory (SPEC-06 §3.7: `registry.plays_dir` defaults to <state_root>/plays,
-// files are `plays/<name>@<version>.toml`). The registry owns the parser
+// ladderDriveLoop is the rung driver's cadence (SPEC-05 §4.4a). One goroutine
+// owns one ticker and exits on ctx.Done; each tick resumes the transitions a
+// freeze refused and then drives every open incident still in `recorded`, so an
+// incident admitted while nobody is watching leaves the first state on its own.
+//
+// The pass is bounded by the open-incident set (max_open_incidents) and is the
+// ladder's own: the loop adds a cadence, never a second write path.
+func (d *Daemon) ladderDriveLoop(ctx context.Context, interval time.Duration) {
+	if d.Ladder == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = ladder.DefaultConfig().DriveInterval.Std()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if resumed, err := d.Ladder.ResumePending(ctx); err != nil {
+				if ctx.Err() == nil {
+					d.log.Warn("ladder resume", "err", err)
+				}
+			} else if len(resumed) > 0 {
+				d.log.Info("ladder resume", "resumed", len(resumed))
+			}
+			rep, err := d.Ladder.Drive(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					d.log.Warn("ladder drive", "err", err)
+				}
+				continue
+			}
+			if len(rep.Advanced) > 0 {
+				d.log.Info("ladder drive", "advanced", len(rep.Advanced), "incidents", rep.Advanced)
+			}
+		}
+	}
+}
+
+// playLookup resolves the play a rule drafts from the plays directory
+// (SPEC-06 §3.7: `registry.plays_dir` defaults to <state_root>/plays, files are
+// `plays/<name>@<version>.toml`). The registry owns the parser
 // (registry.LoadPlay), so this is a directory lookup, not a second dialect.
 //
 // A rule with no play on disk drafts none, and the ladder degrades through its
-// own T09 edge — that is a visible, recorded outcome, not a silent skip.
+// own T09 edge — that is a visible, recorded outcome, not a silent skip. The one
+// exception is a rule-less incident: a sentinel-born group carries no rule name
+// (§3.7a), so it drafts the play named `default` when the directory ships one.
 func (d *Daemon) playLookup(rule string) (types.Play, bool) {
-	d.rulesOnce.Do(func() { d.loadPlays() })
+	d.playsOnce.Do(d.loadPlays)
 	if p, ok := d.plays[rule]; ok {
 		return p, true
 	}
 	if p, ok := d.playsByName[rule]; ok {
 		return p, true
 	}
+	if rule == "" {
+		if p, ok := d.plays["default"]; ok {
+			return p, true
+		}
+		if p, ok := d.playsByName["default"]; ok {
+			return p, true
+		}
+	}
 	return types.Play{}, false
+}
+
+// playsDir is the resolved `registry.plays_dir` (SPEC-06 §3.7). The default is
+// derived from the resolved state root, so an operator who moves the state root
+// moves the plays with it; an explicitly configured directory wins.
+func (d *Daemon) playsDir() string {
+	if d.Cfg.Registry.PlaysDir != "" {
+		return d.Cfg.Registry.PlaysDir
+	}
+	return filepath.Join(d.Cfg.StateRoot, "plays")
 }
 
 func (d *Daemon) loadPlays() {
 	d.plays = map[string]types.Play{}
 	d.playsByName = map[string]types.Play{}
-	dir := filepath.Join(d.Cfg.StateRoot, "plays")
+	dir := d.playsDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
@@ -897,6 +994,11 @@ func (d *Daemon) loadPlays() {
 		play, err := registry.LoadPlay(filepath.Join(dir, e.Name()))
 		if err != nil {
 			d.log.Warn("play skipped", "file", e.Name(), "err", err)
+			continue
+		}
+		// SPEC-06 §3.7: duplicate (name, version) resolves to the highest
+		// version. ReadDir is lexical, so "@10" would otherwise lose to "@2".
+		if prev, ok := d.plays[name]; ok && prev.Version > play.Version {
 			continue
 		}
 		d.plays[name] = play

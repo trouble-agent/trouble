@@ -312,6 +312,9 @@ type Ladder struct {
 	lease    *leaseTable
 	booted   bool
 	draining bool
+	// drive is the rung driver's own trace (SPEC-05 §4.4a). It records what
+	// THIS process called, never what the ledger holds.
+	drive driveCounters
 }
 
 type suppression struct {

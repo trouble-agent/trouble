@@ -411,6 +411,35 @@ Rules, and what stays record-only:
    a path out of `acknowledged`, and nothing makes `acknowledged` reachable from work, verification or a
    terminal state (R14).
 
+### 3.2b Amendment TRBL-123 — rung-entry attribution on the transition record
+
+The transition table's rows say which rung an edge enters, but the RECORD did not: a `T03`
+(`rung_advance_play`) row carried `rung: play` and `play_runs: 0`, so an operator reading the ledger
+could not tell which play the ladder had drafted, and `trouble ledger status` had no per-rung fact to
+count. This amendment adds two payload facts to every accepted transition. Neither changes a state,
+a guard, a refusal or an edge's legality; both are record-side attribution.
+
+| Key | Written when | Value |
+|---|---|---|
+| `rung_entry` | the accepted edge's target is `play:drafted` / `research:requested` / `agent:running` | `play` / `research` / `agent` — the rung the record ENTERED |
+| `play`, `play_version`, `play_source` | a `T03` record (declared on that row's `Emitted` list) | the resolved play's name, version and origin (`module-default`, `agent-draft`, `skill:<id>`); empty when no play resolved |
+
+Rules:
+
+1. **Entry, not state.** `rung_entry` is written by `Advance` from the edge's TARGET, never by a stage
+   effect and never from the incident's sticky `rung` field. A record that folds an arrival, records a
+   refusal or carries a counter (`play_runs`, `agent_runs`) without entering a rung has no
+   `rung_entry`, so a reader cannot mistake it for a run.
+2. **Every rung entry counts.** `T03`, `T13` (retry), `T22` (research short-circuit) and `T39` (window
+   failed, back to play) all land in `play:drafted`, so all four are play-rung entries; `T05`, `T16`,
+   `T23`, `T24`, `T25`, `T31` and `T34` land in `agent:running` and are agent-rung entries. The
+   counter is the ledger fold of that key (SPEC-01 §3.10a), not a second bookkeeping table.
+3. **No play is named that was not resolved.** The three `play*` keys are empty on an incident whose
+   `PlayFor` lookup found nothing (T03's `Apply` leaves `st.Play` nil): the record says "the play rung
+   was entered" and does not invent a play name.
+4. **The refusal path is unchanged.** `refuseLocked` writes its own payload (§3.3) and never carries
+   `rung_entry`.
+
 ### 3.3 Refused transitions — TROUBLE-LADDER-001
 
 A refusal appends `I⟨refused:true, from, to, illegal:true, error_code:TROUBLE-LADDER-001⟩`, increments the
@@ -936,6 +965,7 @@ reverse, which is what keeps the build order of SPEC-INDEX §4.1 acyclic.
 | `ladder.kill_switch` / `ladder.autonomy_mode` | `false` / `shadow` | operator state (SPEC-12 precedence, `config` record) |
 | `ladder.agent_runs_per_day` / `play_runs_per_day` / `research_per_day` / `spawns_per_day` | `20` / `50` / `30` / `5` | §3.7 |
 | `ladder.canary_interval` | `5m` | canary cadence (SPEC-03/04 inject; the ladder observes) |
+| `ladder.drive_interval` | `30s` | the §4.4a rung driver's cadence (NOT the canary cadence); read by the composition root's tick loop |
 | `ladder.quiet_close` | `true` | whether a silent suppression window resolves |
 | `ladder.reopen_max` | `100` | reopen cap per incident before a new incident opens |
 | `ladder.merge_allow_globs` | `[]` | full-mode merge-by-policy allowlist; empty denies |
@@ -999,6 +1029,55 @@ Boot: rebuild the index → load `AutonomyGates` from config → `ReAdopt` → r
 SIGTERM/upgrade: stop admissions → `Park` → `Flush` → exit. Ledger sequence stall (`/health.json`
 `ledger_stall_s` above `60s`, SPEC-12's external checker): the ladder marks any open verify window
 `invalid` at close rather than trusting a possibly frozen index (T41).
+
+### 4.4a The rung driver — the composition root advances a rung without a human
+
+§4.4's boot order ends with "resume pending transitions", and `ResumePending` only re-evaluates a set
+that a freeze already filled. Nothing in v0.1 advanced an incident that nothing had refused: an
+admitted incident stayed in `recorded` until a person clicked the dashboard, so a play on disk was
+never drafted and the remediation half of the product was inert end to end.
+
+The driver is the missing production caller. `Ladder.Drive(ctx)` walks the open incidents that are in
+`recorded`, and `Ladder.DriveOne(ctx, inc)` advances one of them to the FIRST rung its ceiling admits,
+in ladder order play → research → agent. Both are table-driven, not hand-rolled:
+
+| Driver step | Table row it calls | Target |
+|---|---|---|
+| play | `T03` `rung_advance_play` | `play:drafted` |
+| research | `T04` `rung_advance_research` | `research:requested` |
+| agent | `T05` `rung_advance_agent` | `agent:running` |
+
+Rules:
+
+1. **The table decides.** The driver resolves each rung by the row's `Trigger` column and calls
+   `Advance` with that row's id, so the kill-switch (§3.4), the scope breakers (§3.8), the per-day
+   budgets (§3.7), the ceiling guard, the lease (§3.6) and the illegal-transition accounting (§3.3)
+   all run exactly as they do for the dashboard. The driver has no private transition, no direct
+   state write and no second refusal path.
+2. **The ceiling is the scope.** An incident whose ceiling is `record` is the audit-only rung: the
+   driver leaves it in `recorded` rather than forcing a play the rule never asked for. T06's
+   outlets-only path stays the way such an incident moves, and it is not a rung advance.
+3. **A refusal is not an error.** A rung the guards refuse is recorded by the ladder's own refusal
+   path; the driver reads the code, and only two codes hold the whole incident — `TROUBLE-LADDER-010`
+   (kill-switch) and `TROUBLE-LADDER-014` (open scope breaker). Any other refusal means "this rung is
+   unavailable" and the next rung in ladder order is attempted. A refused rung never mutates state.
+4. **Bounded.** One pass is O(open incidents) (`max_open_incidents`), holds no lock across a
+   transition, and returns in a deterministic incident-id order. There is no goroutine per incident.
+5. **Boot and cadence.** The composition root calls `ResumePending` once after the ladder exists and
+   the gates are loaded (§4.4), then starts ONE goroutine that on each `ladder.drive_interval` tick
+   calls `ResumePending` and then `Drive`, and exits on the daemon context. A resume failure or a
+   driven-incident failure is logged, never a boot refusal: the ledger is authoritative and the next
+   tick re-derives the same set.
+6. **Degenerate configurations degrade through the table.** No plays directory, no `ResearchPort`, no
+   `AgentPort` and a handler that returns its own error are the table's own outcomes: `T03` drafts no
+   play when none resolves, `T04` refuses with `TROUBLE-LADDER-009` (§5) and the driver moves on, and
+   an agent stage with no port refuses at the stage entry (`TROUBLE-LADDER-021`). Nothing panics and
+   nothing fails the boot.
+
+`Ladder.DriveStats()` exposes the process-local seam counters (`ResumeCalls`, `DriveCalls`,
+`Advanced`) so a boot test can prove the boot leg ran without waiting for a tick. It is a trace of
+this process, never a health surface: the authoritative answer to "how much remediation happened" is
+the ledger's `play_runs` / `agent_runs` fold (SPEC-01 §3.10a).
 
 ## 5. Errors
 

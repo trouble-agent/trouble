@@ -199,6 +199,7 @@ func (l *Ladder) Pending(ctx context.Context) ([]PendingItem, error) {
 // runs the ones the gates now allow. There is no queue of commands, so resume is
 // deterministic and idempotent (§3.4.6).
 func (l *Ladder) ResumePending(ctx context.Context) ([]string, error) {
+	l.drive.resumeCalls.Add(1)
 	items, err := l.Pending(ctx)
 	if err != nil {
 		return nil, err

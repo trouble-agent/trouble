@@ -108,6 +108,30 @@ type Config struct {
 		DedupWindow types.Duration `toml:"dedup_window"`
 	} `toml:"sentinel"`
 
+	// Registry is the SPEC-06 §4.3 key surface internal/registry decodes from
+	// the resolved values. `plays_dir` is registered here because the ladder's
+	// play lookup reads the SAME resolved row (SPEC-06 §3.7): one value, two
+	// consumers, so an operator cannot point the registry and the ladder at
+	// different directories.
+	Registry struct {
+		// PlaysDir is where plays live (`plays/<name>@<version>.toml`). Empty
+		// here means "derive it from the resolved state root" — postResolve
+		// fills it, exactly as it does for sensors.rules.dir.
+		PlaysDir string `toml:"plays_dir"`
+	} `toml:"registry"`
+
+	// Ladder is the SPEC-05 ladder's own key surface (SPEC-12 §3.1e pattern:
+	// one registered leaf per ladder key, so each resolves with ordinary
+	// precedence and appears in `trouble config explain`). internal/app builds
+	// ladder.Config from these resolved values with ladder.FromValues, so a key
+	// registered here is a key the ladder actually reads.
+	Ladder struct {
+		// DriveInterval is the rung driver's cadence (SPEC-05 §4.4a). It is not
+		// the canary cadence; that one is `ladder.canary_interval`, which the
+		// canary injector reads through the ladder's own Config.
+		DriveInterval types.Duration `toml:"drive_interval"`
+	} `toml:"ladder"`
+
 	Dashboard DashboardConfig `toml:"dashboard"`
 
 	// Sensors is the SPEC-03 §4 detection-plane surface, resolved here key by
@@ -554,6 +578,11 @@ func defaults() *Config {
 	// `0` is the documented OFF. This default MUST match internal/sentinel's
 	// own compiled default — both sides pin it so a drift is caught.
 	c.Sentinel.DedupWindow = "2m"
+	// SPEC-05 §4.4a: the ladder's rung driver ticks every 30s by default. The
+	// default MUST match internal/ladder's own DefaultConfig — both sides pin
+	// it, so a drift between the daemon's loop and the ladder's documented
+	// default is caught on whichever side moved.
+	c.Ladder.DriveInterval = "30s"
 	// SPEC-03 §4/§3.1e: the rest of the detection plane's defaults, copied from
 	// internal/sensors' own compiled defaults (its defaultConfig()). The two
 	// sides are pinned by tests in both packages, so a host that declares no
@@ -1457,6 +1486,12 @@ func registry(c *Config) []keyMeta {
 			return err
 		}},
 		{"health_url", "", "health_url", c.HealthURL, func(cfg *Config, v any) error { s, err := asString(v); cfg.HealthURL = s; return err }},
+		// SPEC-06 §3.7: the plays directory. Its default is DERIVED from the
+		// resolved state root in postResolve (the registry starts from the empty
+		// marker), and internal/registry decodes the same row from the resolved
+		// values, so one key feeds both the registry and the ladder's play
+		// lookup.
+		{"registry.plays_dir", "registry", "plays_dir", c.Registry.PlaysDir, func(cfg *Config, v any) error { s, err := asString(v); cfg.Registry.PlaysDir = s; return err }},
 		{"projects", "", "projects", "", setProjects},
 		{"issues", "", "issues", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.IssuesTable, "issues", v) }},
 		{"skills", "", "skills", SubsystemTable{}, func(cfg *Config, v any) error { return setSubsystemTable(&cfg.SkillsTable, "skills", v) }},
@@ -1671,6 +1706,16 @@ func registry(c *Config) []keyMeta {
 		{"sentinel.dedup_window", "sentinel", "dedup_window", c.Sentinel.DedupWindow, func(cfg *Config, v any) error {
 			d, err := asDuration(v)
 			cfg.Sentinel.DedupWindow = d
+			return err
+		}},
+		// SPEC-05 §4.4a: the ladder's rung-driver cadence, registered leaf by
+		// leaf like every other plane so it resolves with ordinary precedence
+		// (flag > env > file > default) and shows up in `config explain`. The
+		// daemon hands the resolved values to ladder.FromValues, so the key is
+		// read by the loop it names — not a documented key that does nothing.
+		{"ladder.drive_interval", "ladder", "drive_interval", c.Ladder.DriveInterval, func(cfg *Config, v any) error {
+			d, err := asDuration(v)
+			cfg.Ladder.DriveInterval = d
 			return err
 		}},
 		// SPEC-13 §2.1/§2.1.1 `[server]` surface. The profile and the two
@@ -2082,6 +2127,11 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 			// path (what the sensors package will watch), never the empty
 			// marker the registry started from.
 			cv.Value = resolved.Config.Sensors.Rules.Dir
+		case "registry.plays_dir":
+			// SPEC-06 §3.7: same derivation shape as sensors.rules.dir — the
+			// row carries the directory the ladder's play lookup and the
+			// registry both open, never the empty marker.
+			cv.Value = resolved.Config.Registry.PlaysDir
 		case "ingest.advertised_host":
 			// SPEC-12 §3.1g: the registry starts from the empty marker and
 			// postResolve derives the loopback name from the resolved bind, so
@@ -2180,6 +2230,13 @@ func postResolve(c Config) Config {
 	}
 	if c.Checker.AlarmFile == "" {
 		c.Checker.AlarmFile = filepath.Join(c.StateRoot, "checker.alarm")
+	}
+	// SPEC-06 §3.7: the plays directory is derived from the RESOLVED state root
+	// (`<state_root>/plays`), so a scratch boot cannot read the operator's real
+	// plays. An explicitly configured `registry.plays_dir` is non-empty here and
+	// wins.
+	if c.Registry.PlaysDir == "" {
+		c.Registry.PlaysDir = filepath.Join(c.StateRoot, "plays")
 	}
 	// SPEC-12 §3.1g: with no declared host the DSN host is the loopback name,
 	// and that is a value the sentinel ACCEPTS only because this derivation is

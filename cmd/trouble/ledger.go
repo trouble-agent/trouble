@@ -192,7 +192,11 @@ func cmdLedgerStatus(args []string) int {
 func printLedgerStatus(st types.LedgerStatus) {
 	fmt.Printf("ledger: last_seq=%d last_ts=%s stall_s=%.0f loss_window_ms=%d\n", st.LastSeq, st.LastTS, st.StallS, st.LossWindowMS)
 	fmt.Printf("day:    %s gen=%d part=%d file=%s bytes=%d records=%d\n", st.Day, st.Gen, st.Part, st.File, st.Bytes, st.Records)
-	fmt.Printf("queue:  depth=%d cap=%d backpressure_total=%d\n", st.QueueDepth, st.QueueCap, st.BackpressureTotal)
+	// SPEC-01 §3.5b: refusals and the records that account for them sit on ONE
+	// line, so an operator can compare refused with recorded at a glance and
+	// see immediately when data was lost without a record.
+	fmt.Printf("queue:  depth=%d cap=%d backpressure_total=%d gap_records=%d est_lost_total=%d\n",
+		st.QueueDepth, st.QueueCap, st.BackpressureTotal, st.GapRecords, st.EstLostTotal)
 	fmt.Printf("writer: pid=%d lock_held=%t version=%s\n", st.WriterPID, st.WriterLockHeld, st.WriterVersion)
 	fmt.Printf("disk:   bytes=%d budget=%d (%.1f%%)\n", st.DiskBytes, st.DiskBudgetBytes,
 		100*float64(st.DiskBytes)/float64(max64(st.DiskBudgetBytes, 1)))

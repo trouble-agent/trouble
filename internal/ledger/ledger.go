@@ -684,6 +684,9 @@ func (l *Ledger) Status() types.LedgerStatus {
 	st.QueueCap = l.opts.Rotation.QueueCapRecords
 	st.QueueDepth = l.w.queueDepth()
 	st.BackpressureTotal = l.w.backpressure.Load()
+	// §3.5b: GapRecords / EstLostTotal arrive with the writer snapshot, credited
+	// only when a fold's bytes are durable. The read-only path derives the same
+	// numbers from the day files, so both status paths answer alike.
 	st.WriterVersion = l.opts.Writer.Version
 	st.DiskBudgetBytes = l.opts.Retention.DiskBudgetBytes
 	st.DiskBytes = l.diskBytes()

@@ -190,6 +190,10 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 	var seqHoles int
 	var prevSeq uint64
 	var playRuns, agentRuns int64
+	// SPEC-01 §3.5b: the recorded backpressure surface, derived from the day's
+	// partitions exactly like the §3.10a rung counters — a read-only status must
+	// see a fold the writer persisted, and must agree with the live writer.
+	var gapRecords, estLost int64
 
 	for _, p := range files {
 		path := filepath.Join(root, p.File)
@@ -216,6 +220,10 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 				playRuns++
 			case "agent":
 				agentRuns++
+			}
+			if n, ok := backpressureFold(rec); ok {
+				gapRecords++
+				estLost += n
 			}
 			if rec.Seq > lastSeq {
 				lastSeq = rec.Seq
@@ -246,6 +254,11 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 	st.PlayRuns = playRuns
 	st.AgentRuns = agentRuns
 
+	// SPEC-01 §3.5b: likewise the recorded backpressure surface. Both status
+	// paths answer the same numbers for the same ledger.
+	st.GapRecords = gapRecords
+	st.EstLostTotal = estLost
+
 	st.DiskBytes = diskBytes(root)
 
 	if seqHoles > 0 {
@@ -269,6 +282,27 @@ func rungEntry(payload map[string]any) string {
 	}
 	s, _ := payload["rung_entry"].(string)
 	return s
+}
+
+// backpressureFold reports whether rec is a boundary-refusal fold (SPEC-01
+// §3.5b) and, if so, how many refusals it carries. A fold is identified by the
+// gap it declares — cause=backpressure over scope=ledger:queue — so a sensor
+// dropout that happens to mention backpressure is not counted, and a fold whose
+// est_lost is missing or negative contributes 0 rather than a lie.
+func backpressureFold(rec *types.Record) (int64, bool) {
+	if rec == nil || rec.Kind != types.KGap || rec.Payload == nil {
+		return 0, false
+	}
+	cause, _ := rec.Payload["cause"].(string)
+	scope, _ := rec.Payload["scope"].(string)
+	if cause != ReasonBackpressure || scope != "ledger:queue" {
+		return 0, false
+	}
+	n := int64(asNum(rec.Payload["est_lost"]))
+	if n < 0 {
+		n = 0
+	}
+	return n, true
 }
 
 // ReadVerify returns a VerifyReport for the ledger at the given root without

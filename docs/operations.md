@@ -289,6 +289,30 @@ and the in-process flow/issue subsystem.
 dialect. A protected play never loads: a task whose literal args name a do-not-touch path or unit is
 refused at load time with `TROUBLE-REGISTRY-007`.
 
+The directory is the `registry.plays_dir` key, default `<state_root>/plays` (SPEC-06 §3.7), so the
+operator line for a host that keeps its plays elsewhere is
+
+    registry.plays_dir = "/srv/trouble/plays"
+
+in the config file (`--registry-plays_dir <dir>` / `TROUBLE_REGISTRY_PLAYS_DIR` resolve the same key,
+and `trouble config explain registry.plays_dir` prints where the value came from). The ladder reads
+the same resolved row, so the daemon cannot run plays out of a different directory than the one the
+registry validates them in.
+
+**Which play an incident drafts.** The file is named after the rule that admitted the incident:
+`plays/<rule>@<version>.toml`, highest version wins (SPEC-06 §3.7). A rule-less incident — a
+sentinel-born group carries no rule name — drafts `plays/default@<version>.toml` when one is
+installed; with no such file it drafts nothing and the ladder records its own `T09`
+(`no_runnable_task`) row instead of pretending it ran something. `examples/plays/` ships both shapes
+(`self_memory_pressure@1.toml`, `default@1.toml`), each read-only so it is safe to draft in shadow
+mode.
+
+**The ladder drafts the play without being asked.** The rung driver (SPEC-05 §4.4a) runs on
+`ladder.drive_interval` (default `30s`): every tick it resumes the transitions a freeze refused and
+advances each open incident still in `recorded` to the first rung its ceiling admits (play →
+research → agent), through the transition table's own rows. Nothing about a rung advance needs the
+dashboard; the dashboard's ack/close actions remain the human overrides they always were.
+
 **Do-not-touch cannot be weakened.** The compiled-in floor (`/etc/shadow`, `/etc/sudoers`,
 `/etc/ssh/**`, `/etc/polkit-1/**`, `/boot/**`, `/usr/**`, the state root, the daemon's own unit, …)
 is always applied; a file that sets `mandatory = false` or carries `remove = [...]` is refused with

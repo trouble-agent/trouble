@@ -1,0 +1,31 @@
+# trouble shipped example play (SPEC-06 §3.7) — examples only, no host-specific values.
+#
+# Install as <state_root>/plays/default@1.toml (the `registry.plays_dir` default,
+# SPEC-06 §3.7). This is the fallback play a RULE-LESS incident drafts: a
+# sentinel-born group carries no rule name (§3.7a), so `default` is the only name
+# the ladder can resolve for it. A rule-driven incident never reaches this file —
+# it drafts `plays/<rule>@<version>.toml`.
+#
+# Both tasks are read-only (`proc.top` and `proc.connections` are `pure` modules
+# with check_mode), so the play is safe to draft and run in shadow mode.
+schema_version = 1
+name = "default"
+version = 1
+source = "module-default"
+max_runs = 2
+
+[[task]]
+name = "top-processes"
+tool = "proc.top"
+args = { sort = "cpu", n = 5 }
+register = "top"
+retries = 0
+on_fail = "abort"
+
+[[task]]
+name = "count-connections"
+tool = "proc.connections"
+args = { proto = "all", limit = 50 }
+register = "conns"
+retries = 0
+on_fail = "continue"

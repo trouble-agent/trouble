@@ -506,6 +506,28 @@ with a conflict record (`Play.Source` set from where it was loaded: `module-defa
 `skill:<sk_id>`). A play whose static targets hit do-not-touch, whose `when:` fails to parse, or whose
 tools are unknown never loads.
 
+### 3.7a Which play an incident drafts — the rule-name convention (amendment TRBL-123)
+
+§3.7 says where plays live and how a `(name, version)` pair resolves. It does not say how a caller
+picks the pair for an incident, and the ladder needs exactly one answer.
+
+| Incident | Play name resolved | Why |
+|---|---|---|
+| born from a rule (`Observation.Rule` non-empty) | `plays/<rule>@<version>.toml` | the rule that admitted the incident names its play; the file name before `@` is the lookup key, highest version wins (§3.7) |
+| rule-less (a sentinel-born group carries no rule name) | `plays/default@<version>.toml` | there is no rule name to resolve, and a `default` play is the only unambiguous fallback the directory can offer |
+| a rule with no play on disk | none | the ladder records its own `T09` (`no_runnable_task`) row and does NOT draft an unrelated play |
+
+Rules:
+
+1. **The `default` fallback is for the rule-less incident only.** A rule that has no play must degrade
+   through the ladder's own row; silently substituting `default` for a named rule would run a play
+   that rule never asked for.
+2. **No templating.** A play's task args are literals (§3.7's closed schema), so a play that targets a
+   unit or a path names it. The rule-name convention is what keeps a play generic: one play per rule,
+   not one per incident.
+3. **The ladder reads the same resolved directory the registry does** (`registry.plays_dir`, default
+   `<state_root>/plays`), so validation and drafting cannot disagree about which file is a play.
+
 ### 3.8 Shipped modules — descriptors
 
 | Module | ver | Scopes | Idem | check_mode | mutating | timeout_s | capability default |

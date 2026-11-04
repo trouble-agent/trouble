@@ -1,0 +1,31 @@
+# trouble shipped example play (SPEC-06 §3.7) — examples only, no host-specific values.
+#
+# Install as <state_root>/plays/self_memory_pressure@1.toml (the `registry.plays_dir`
+# default, SPEC-06 §3.7). The ladder drafts the play NAMED AFTER THE RULE that
+# admitted the incident, so `self_memory_pressure` is the rule this file answers
+# (examples/rules/10-defaults.toml).
+#
+# Both tasks are read-only (`proc.top` and `proc.connections` are `pure` modules
+# with check_mode), so the play is safe to draft and run in shadow mode: the
+# ladder records what it would do and mutates nothing.
+schema_version = 1
+name = "self_memory_pressure"
+version = 1
+source = "module-default"
+max_runs = 2
+
+[[task]]
+name = "top-memory-processes"
+tool = "proc.top"
+args = { sort = "rss", n = 5 }
+register = "top"
+retries = 0
+on_fail = "abort"
+
+[[task]]
+name = "count-connections"
+tool = "proc.connections"
+args = { proto = "all", limit = 50 }
+register = "conns"
+retries = 0
+on_fail = "continue"

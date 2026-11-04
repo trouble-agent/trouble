@@ -29,6 +29,13 @@ configured value, and `docs_test.go` fails CI if this paragraph drifts from that
 the same files the writer is appending to, excludes a torn final line, and reports rather than
 repairs.
 
+**Gating CI on trouble.** The CLI has no one-shot run verb, so there is nothing to invoke that boots
+the ladder and reports pass/fail. A job gates on the read-only commands that already carry exit
+codes: `trouble check-stall` against a running daemon (0 ok, 8 liveness surface stale/unreadable, 9
+ledger sequence stall), `trouble ledger verify` against its state root (non-zero on holes or
+corruption), and `trouble install --check` on the host itself (13 on any refusable condition).
+`make docs-check` fails the build if this page names a verb the CLI does not dispatch.
+
 ## 3. Recovery
 
 * **Torn last line** (process killed mid-write, ENOSPC during a batch write): the fragment is
@@ -241,8 +248,8 @@ shows up in five places.
 **One incident per signature.** Admission is an idempotent upsert: an open incident for the same
 `sig` collects arrivals (a fold, never a second incident), two signatures that share an `inKey`
 share one incident across planes, and a recurrence after `resolved` reopens the *same* incident id
-up to `ladder.reopen_max` times. `trouble incidents` (SPEC-12's CLI) therefore shows one row per
-problem, not one per arrival path.
+up to `ladder.reopen_max` times. The dashboard's `/incidents` page (SPEC-10) therefore shows one row
+per problem, not one per arrival path.
 
 **Verification is evidence, not absence.** A window is only `passed` when a canary landed, every
 expected source was alive inside the window, no gap record overlaps it and zero events were
@@ -328,8 +335,10 @@ enforcement. Configuration can widen the deny set, never narrow it.
 on the configured unit allowlist (`registry.service_units`), from a local session. Without it the
 probe reports `capability=policy_refused` and `service.reload`/`service.restart` refuse at authorize
 with `TROUBLE-REGISTRY-006` (`reason=polkit_missing_policy`) — never a retry, always an escalation
-carrying the install command. `trouble registry policy` prints the probe's verdict and
-`contrib/polkit`'s install state.
+carrying the install command. The verdict is a ledger record, not a command: the reserved
+`registry.capability-probe` module appends one `tool_call` record whose `result.output` carries
+`polkit_authorized`, `polkit_rules_file`, `rules_file_present`, `verbs_allowed` and `units_allowed`,
+so `contrib/polkit`'s install state is the `rules_file_present` field of that record.
 
 **Conformance gates every module.** `make conformance` runs the §2.4 commands: the whole package
 with `-race`, plus the three named tests that prove the harness *rejects* a deliberately
@@ -895,13 +904,21 @@ Three runbook facts that surprise people:
    request budget. The driver's `requests_per_day` (200) is deliberately above the
    ladder's `research_per_day` (30), so the policy gate is always the binding one.
 
-Operating it:
+What to look at, in order — there is no research verb in the CLI today, so the records are the
+surface:
 
-```
-trouble research status            # driver, capability, cooldown, fence, queue depth
-trouble research outcomes <sig>    # the rung history for a signature, newest first
-trouble research prompt <res_id>   # the prompt the agent would have seen (and its digest)
-```
+* the `research` records in the ledger day files (`<state_root>/ledger/*.jsonl`, one JSON object per
+  line): `res_id`, `state`, `error_code`, `degraded_reason`, `skip_reason`, `corpus_grep_hit`,
+  `corpus_path`, `cost`;
+* the incident page's research panel on the dashboard (`/incidents/{id}`), which names the `res_id`
+  and the last recorded `state` for that incident;
+* the `research` row of `GET /health.json` (`subsystems`), which says whether the rung was built and,
+  when it was refused, the code and reason.
+
+The three research subcommands this page used to list (`status`, `outcomes`, `prompt`) were never
+dispatched by the shipped binary: an operator following the runbook mid-incident got an unknown-verb
+error. Nothing in the CLI replaced them, so read the day files above — `make docs-check` now fails
+the build if this page names a verb the CLI does not dispatch.
 
 The class table (`research.table`) is configuration. A malformed table is a
 **config-load** refusal, never a rung failure: if a hot reload is rejected, the
@@ -940,8 +957,9 @@ Invariants worth memorising, because each one is a fleet failure class:
    worktree carries a hard ban on `git fetch`/`gc`/`prune`/`worktree` mutation.
 5. **A spawn failure is never silent.** `requested` is written before the router
    call; no acknowledgement becomes `spawn_pending` plus a durable-queue entry;
-   the reconciled pending count is the first number of the dashboard's budget
-   panel. Retries are bounded (5s/15s/45s/2m/5m); a permanent refusal is terminal
+   the reconciled pending count is `QueueDepth()` in `internal/flow`, which has no
+   `/health.json` field and no budget-panel row today. Retries are bounded
+   (5s/15s/45s/2m/5m); a permanent refusal is terminal
    with its reason recorded.
 6. **The 60s trigger→spawn budget is measured per spawn** (`trig_to_spawn_ms`,
    `budget_exceeded`), not asserted once. Over budget, the run still completes and
@@ -957,16 +975,25 @@ What to look at:
 | `state` | `spawn` record | `requested` → `accepted`/`spawn_pending` → `leased` → `promoted`/`discarded` |
 | `worktree_mode` | `spawn` record | `owner_created`, or `owner_serialized` for a `worktree_exempt` repo |
 | `brief_sha256` | `spawn` record | proves what the foreman was told |
-| `QueueDepth()` | dashboard budget panel | spawn requests still pending on the durable queue |
+| `QueueDepth()` | `internal/flow` only — no `/health.json` field, no budget-panel row, no CLI verb today | spawn requests still pending on the durable queue |
 
-Operating it:
+Operating it — the CLI has no flow verb, so the records are the surface:
 
-```
-trouble flow reconcile             # worktrees-meta vs the router registry vs the boards
-trouble flow hotfix status --json  # lanes, leases, queue depth, budget hits
-trouble flow explain <sig>         # which rows, leases and dispatches this sig produced
-trouble flow promote <sp_id>       # the human decision: merges through the repo's own PR
-```
+* `flow` records in the ledger day files, one per decision (`created`, `commented`, `dispatched`,
+  `skipped`, `failed`, `promoted`, `discarded`, `pending_human`) with `stage`, `task_id` and the
+  board validator's `validate_rc`/`validate_findings`;
+* `spawn` records, `requested` → `accepted`/`spawn_pending` → `leased` → `promoted`/`discarded`,
+  carrying `spawn_id`, `brief_sha256`, `worktree_mode`, `decision` and `pr_url`;
+* the incident page's spawn panel on the dashboard (`/incidents/{id}`), which names the `spawn_id`,
+  the promotion `decision` and the `pr_url` when one exists.
+
+Promotion is a recorded decision, not a command: the `promote` record plus the PR URL the repo owns
+is the whole artifact, and the merge itself happens in the repo's own PR. Under
+`flow.hotfix.promote=human` no shipped verb or dashboard route records that decision — the record
+comes from the desk's post-verify outlet — so a `pending_human` row is work for the board owner.
+
+The four flow subcommands this page used to list (`reconcile`, `hotfix status`, `explain`,
+`promote`) were never dispatched by the shipped binary.
 
 `flow.hotfix.enabled` defaults to **false** and the default is printed by
 `trouble config explain`. Turning it on is a per-host decision, and `flow.hotfix.
@@ -1009,10 +1036,12 @@ sets the anchor through a `result=replayed` record. Everything dropped (TTL, att
 writes **both** a `gap` (`cause=queue_overflow`) and an `issue{op:drop}` record, so the loss is
 visible in the ledger rather than inferred.
 
-**Day one checks.** `trouble issues health --json` (cap counters per driver, spool depth, driver
-health). A `TROUBLE-ISSUES-003` means the token file's mode or owner is wrong — the desk made no
-outbound call, so nothing was filed and nothing was lost. A `TROUBLE-ISSUES-005` on a full spool is
-the one case where work is refused rather than queued: entries younger than
+**Day one checks.** The `issues` row of `GET /health.json` (`subsystems`: built, or refused with its
+code and reason) plus the desk's own `issue` and `healthcheck` records in the ledger day files — the
+`op=cap` decisions, the recorded drops, and one `healthcheck` record per failed driver probe. There
+is no issues verb in the CLI. A `TROUBLE-ISSUES-003` means the token file's mode or owner is wrong —
+the desk made no outbound call, so nothing was filed and nothing was lost. A `TROUBLE-ISSUES-005` on
+a full spool is the one case where work is refused rather than queued: entries younger than
 `spool_min_retention` are never evicted, by design.
 
 **The token never appears anywhere but the wire.** It is read from a 0600 file (or the configured
@@ -1060,14 +1089,18 @@ the host is not running the version.
 **Boot re-verification is the tamper detector.** Every boot re-reads each installed artifact and its
 play and compares the canonical digests; a mismatch moves the tree to `quarantine/`, marks the row
 `refused`, records `TROUBLE-SKILLS-002` and never executes it. The process stays green on `/health`
-while `trouble skills status` reports it.
+while the `TROUBLE-SKILLS-002` refusal record and the `quarantine/` tree carry it — the CLI has no
+skills status verb, and the `skills` row of `/health.json` only says whether the subsystem was built.
 
 **Canary first, then the per-host approve policy.** With `canary_host_id` set, a non-canary host
 holds a version (`TROUBLE-SKILLS-012`) until a green canary from that host exists inside
 `canary_validity`; a **failed** canary is terminal for the version. `approve=review` (the default)
-parks a pulled version in `pending/` until `trouble skills approve <name>@<v>`; `approve=never`
-refuses everything pulled; `approve=auto` installs, and installation is still not authority — in
-`shadow` an `auto` host runs mutating skill plays as `check_mode` downstream.
+parks a pulled version in `pending/` with state `pending_review`; `approve=never` refuses everything
+pulled; `approve=auto` installs, and installation is still not authority — in `shadow` an `auto` host
+runs mutating skill plays as `check_mode` downstream. There is no approve verb in the shipped CLI:
+`Puller.Approve` in `internal/skills` performs the promotion and nothing reaches it, so a host on
+`approve=review` has no supported way to accept a parked version today (the `skills` row of
+`/health.json` cannot promote it either).
 
 ## 18. Lifecycle, config and the watchdog chain (SPEC-12)
 

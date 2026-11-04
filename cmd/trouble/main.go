@@ -51,6 +51,7 @@ usage:
   trouble hub dedup --key KEY [--json]
   trouble hub drain [--timeout DURATION]
   trouble sensors probe [--json] [--timeout DURATION]
+  trouble board integrity
   trouble --version
 
 --token-file PATH (alias --dashboard-token_file PATH) is how the dashboard token

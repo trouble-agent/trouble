@@ -169,6 +169,15 @@ group → incident, about three windows — which measured about 0.65 s end to e
 sequential single-event ingests (TRBL-084). Low-volume deployments that feed events one at a time,
 the common case, therefore see roughly 650 ms per event, not the 1.94 µs headline.
 
+A refused append is not a silent one. When the queue is full and `ledger.max_enqueue_wait` expires,
+the producer gets `TROUBLE-LEDGER-001 reason=backpressure` and the writer folds that drain window's
+refusals into one `gap{cause="backpressure", scope="ledger:queue"}` record — with `est_lost`, the
+window's `from_ts`/`to_ts`, and the queue cap and wait in `cause_detail` — so the sum of `est_lost`
+over those records equals the refusals they account for (SPEC-01 §3.5b, AC-35).
+`trouble ledger status` prints `gap_records`/`est_lost_total` beside `backpressure_total`, so
+"refused" and "recorded" can be compared at a glance; a crash inside one drain window is the only
+loss edge, and it is stated in the spec rather than hidden.
+
 ## Ledger file layout
 
 ```

@@ -23,6 +23,7 @@ configured value, and `docs_test.go` fails CI if this paragraph drifts from that
 | no holes or corruption | `trouble ledger verify` | non-zero exit; the report names the files |
 | disk inside budget | `trouble ledger status --json` | `disk_bytes` approaching `disk_budget_bytes` (default 2 GiB) |
 | index healthy | `trouble ledger status --json` | `index.degraded=true` with a reason, or cold evictions climbing |
+| refusals are accounted for | `trouble ledger status --json` (`backpressure_total`, `gap_records`, `est_lost_total`) | `est_lost_total` short of `backpressure_total` on a ledger whose writer is alive: refusals happened that no `gap` record can account for (SPEC-01 §3.5b). `backpressure_total` is an in-process counter, so it resets with the daemon while `gap_records`/`est_lost_total` are ledger facts |
 
 `trouble ledger verify` opens **no** lock: it is always safe to run against a live ledger. It reads
 the same files the writer is appending to, excludes a torn final line, and reports rather than
@@ -87,7 +88,10 @@ When `ledger/` exceeds `disk_budget_bytes`, escalation is ordered and each step 
 4. only if even that cannot be written (ENOSPC) do producers get `TROUBLE-LEDGER-001`
    `reason=backpressure`.
 
-Records are still written at every step: the audit chain never develops a hole.
+Records are still written at every step: the audit chain never develops a hole. Step 4 is the one path
+that refuses *data*, and it leaves evidence: the writer folds the window's refusals into one
+`gap{cause="backpressure"}` record (SPEC-01 §3.5b), so a refusal is visible in `trouble ledger status`
+(`gap_records`, `est_lost_total`) and to `trouble ledger verify`, never only in a log line.
 
 ## 6. Single-writer and satellites
 

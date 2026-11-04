@@ -202,6 +202,9 @@ func printLedgerStatus(st types.LedgerStatus) {
 	if r := st.Index.DegradedReason; r != "" {
 		fmt.Printf("index degraded: %s\n", r)
 	}
+	// SPEC-01 §3.10a: the ladder's ledger-derived rung counters, so an operator
+	// can tell remediation from detection without opening the ledger.
+	fmt.Printf("runs:   play_runs=%d agent_runs=%d (rung entries in the day's records)\n", st.PlayRuns, st.AgentRuns)
 }
 
 func max64(a, b int64) int64 {

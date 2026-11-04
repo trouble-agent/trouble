@@ -181,7 +181,7 @@ index (SPEC-10 §2.9's no-scan rule) and uses a token to continue a long list, n
 
 | Command | Behaviour | Exit codes |
 |---|---|---|
-| `trouble ledger status --json` | prints `LedgerStatus` (durable watermark, queue depth, index stats, loss window) | 0 ok, 1 degraded |
+| `trouble ledger status --json` | prints `LedgerStatus` (durable watermark, queue depth, index stats, loss window, the §3.10a rung counters) | 0 ok, 1 degraded |
 | `trouble ledger verify [--day D]` | read-only walk: seq continuity, line parse, payload hash, tombstone totals; opens **no** lock | 0 ok, 1 findings, 2 unreadable |
 | `trouble ledger compact --day D [--dry-run]` | dry-run prints a `CompactionResult` with `ToFile` and byte deltas and writes nothing; the active UTC day is refused before the writer seat is taken (§2.4a) | 0 ok, 1 failed |
 | `trouble ledger reindex [--rebuild-store]` | re-runs the boot index build; `--rebuild-store` is meaningful only under the SQLite tier (§3.8) and is a no-op otherwise | 0 ok, 1 failed |
@@ -788,6 +788,8 @@ type LedgerStatus struct {
     WriterVersion     string    `json:"writer_version"`
     DiskBytes         int64     `json:"disk_bytes"`
     DiskBudgetBytes   int64     `json:"disk_budget_bytes"`
+    PlayRuns          int64     `json:"play_runs"`   // §3.10a: rung entries recorded
+    AgentRuns         int64     `json:"agent_runs"`  // §3.10a: rung entries recorded
     Index             IndexStats `json:"index"`
 }
 
@@ -895,6 +897,35 @@ type CompactionResult struct {
 {"host_id":"7f3a91c2d4e5b607","source":"sentinel:payment-worker","zone":"loopback","last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"last_seq":41207,"events_total":6401,"events_24h":6401,"gaps_24h":0,"dropped_24h":0,"redactions_24h":3,"canary_seen":true,"canary_last_ts":"2026-09-16T09:13:00.000Z"}
 {"group_id":"grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH","sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","digest":"9f2c1d3e4b5a6c7d0123456789abcdef0123456789abcdef0123456789abcdef","merge_key":"bcc48494f2190f4f","source":"sentinel","title":"queue wedge: pool exhausted","count":6401,"rate_1m":18.4,"rate_5m":12.1,"rate_60m":6.7,"trend":0.52,"first_seen_ts":"2026-09-16T06:00:00.000Z","last_seen_ts":"2026-09-16T09:14:03.221Z","incident_id":"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE","counters":{"events":6401,"suppressed":0,"redacted_values":3,"dropped_events":0,"sample_rate":1},"cold":false}
 ```
+
+### 3.10a Operator rung counters — `play_runs` / `agent_runs` (amendment TRBL-123)
+
+`trouble ledger status` answers one product question the rest of the status stanza cannot: did the
+ladder REMEDIATE, or did it only detect and audit? Two counters carry that answer.
+
+| Field | JSON | Derived from |
+|---|---|---|
+| `PlayRuns` | `play_runs` | the number of records in the day's partitions whose payload carries `rung_entry: "play"` |
+| `AgentRuns` | `agent_runs` | the number of records in the day's partitions whose payload carries `rung_entry: "agent"` |
+
+`rung_entry` is written by the ladder on every accepted transition that ENTERS a rung (SPEC-05
+§3.2b): `play:drafted` for the play rung, `agent:running` for the agent rung, `research:requested` for
+the research rung. The counters therefore count rung entries the ledger actually holds, and the
+derivation has three properties a live gauge cannot claim:
+
+1. **Read-only.** The counters are computed by the same `ReadStatus` walk that counts records (§2.4),
+   in the same pass, without taking the writer seat and without writing anything. A CLI on a host
+   whose daemon is running reports the same numbers the daemon's ledger would.
+2. **Durable.** They survive a restart because they are a fold over the day files, not an in-memory
+   counter. After a boot with no incidents the answer is zero, never a leftover from the previous
+   process.
+3. **Attributed, not inferred.** A record that merely mentions the counter fields (`play_runs`,
+   `agent_runs`) is not a rung entry: the ladder's own incident records carry those fields by default
+   (SPEC-05 §3.12), so presence alone would report runs that never happened. Only `rung_entry` counts.
+
+The absent case is zero, and it is meaningful: `play_runs: 0` on a ledger with incidents is the
+signature of detection without remediation. `--json` stays additive: every pre-existing field keeps
+its name and meaning, and both counters are appended beside `disk_budget_bytes`.
 
 ## 4. Wiring
 

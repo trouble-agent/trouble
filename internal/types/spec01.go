@@ -61,28 +61,35 @@ type IndexStats struct {
 
 // LedgerStatus is printed by `trouble ledger status --json` (SPEC-01 §3.10).
 type LedgerStatus struct {
-	LastSeq           uint64     `json:"last_seq"`
-	LastSeqPending    uint64     `json:"last_seq_pending"`
-	LastTS            string     `json:"last_ts"`
-	StallS            float64    `json:"stall_s"`
-	LossWindowMS      int        `json:"loss_window_ms"`
-	Day               string     `json:"day"`
-	Gen               int        `json:"gen"`
-	Part              int        `json:"part"`
-	File              string     `json:"file"`
-	Bytes             int64      `json:"bytes"`
-	Records           int64      `json:"records"`
-	FsyncCalls        int64      `json:"fsync_calls"`
-	FsyncPerRecord    float64    `json:"fsync_per_record"`
-	QueueDepth        int        `json:"queue_depth"`
-	QueueCap          int        `json:"queue_cap"`
-	BackpressureTotal uint64     `json:"backpressure_total"`
-	WriterPID         int        `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
-	WriterLockHeld    bool       `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
-	WriterVersion     string     `json:"writer_version"`
-	DiskBytes         int64      `json:"disk_bytes"`
-	DiskBudgetBytes   int64      `json:"disk_budget_bytes"`
-	Index             IndexStats `json:"index"`
+	LastSeq           uint64  `json:"last_seq"`
+	LastSeqPending    uint64  `json:"last_seq_pending"`
+	LastTS            string  `json:"last_ts"`
+	StallS            float64 `json:"stall_s"`
+	LossWindowMS      int     `json:"loss_window_ms"`
+	Day               string  `json:"day"`
+	Gen               int     `json:"gen"`
+	Part              int     `json:"part"`
+	File              string  `json:"file"`
+	Bytes             int64   `json:"bytes"`
+	Records           int64   `json:"records"`
+	FsyncCalls        int64   `json:"fsync_calls"`
+	FsyncPerRecord    float64 `json:"fsync_per_record"`
+	QueueDepth        int     `json:"queue_depth"`
+	QueueCap          int     `json:"queue_cap"`
+	BackpressureTotal uint64  `json:"backpressure_total"`
+	WriterPID         int     `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
+	WriterLockHeld    bool    `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
+	WriterVersion     string  `json:"writer_version"`
+	DiskBytes         int64   `json:"disk_bytes"`
+	DiskBudgetBytes   int64   `json:"disk_budget_bytes"`
+	// PlayRuns and AgentRuns are the ledger-derived rung counters (SPEC-01
+	// §3.10a): the number of records in the day's partitions that carry
+	// payload.rung_entry == "play" / "agent", i.e. the rung entries the ladder
+	// actually recorded. They are read-only facts about the ledger, not a live
+	// in-memory gauge, so `ledger status` answers them without the writer seat.
+	PlayRuns  int64      `json:"play_runs"`
+	AgentRuns int64      `json:"agent_runs"`
+	Index     IndexStats `json:"index"`
 }
 
 // GroupStat is one row of TopGroups (SPEC-01 §3.10).

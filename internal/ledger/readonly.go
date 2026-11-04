@@ -189,6 +189,7 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 	var records int64
 	var seqHoles int
 	var prevSeq uint64
+	var playRuns, agentRuns int64
 
 	for _, p := range files {
 		path := filepath.Join(root, p.File)
@@ -205,6 +206,17 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 				return nil
 			}
 			records++
+			// SPEC-01 §3.10a: the ladder's rung counters are derived in this
+			// same pass. A ladder record that entered a rung names it in
+			// payload.rung_entry (SPEC-05 §3.2b), so the counters count rung
+			// entries the ledger actually holds — not records that merely
+			// mention a counter field.
+			switch rungEntry(rec.Payload) {
+			case "play":
+				playRuns++
+			case "agent":
+				agentRuns++
+			}
 			if rec.Seq > lastSeq {
 				lastSeq = rec.Seq
 			}
@@ -229,6 +241,11 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 		st.Records = records
 	}
 
+	// SPEC-01 §3.10a: the rung counters are a property of the day files, not of
+	// the HEAD hint, so they are published even on a ledger whose HEAD is behind.
+	st.PlayRuns = playRuns
+	st.AgentRuns = agentRuns
+
 	st.DiskBytes = diskBytes(root)
 
 	if seqHoles > 0 {
@@ -241,6 +258,17 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 	st.DiskBudgetBytes = DefaultDiskBudgetBytes
 
 	return st, nil
+}
+
+// rungEntry reads the ladder's rung attribution from a record payload
+// (SPEC-05 §3.2b): "" when the record is not a rung entry. The value is written
+// by the ladder as a plain string, and a decoded ledger payload keeps it as one.
+func rungEntry(payload map[string]any) string {
+	if payload == nil {
+		return ""
+	}
+	s, _ := payload["rung_entry"].(string)
+	return s
 }
 
 // ReadVerify returns a VerifyReport for the ledger at the given root without

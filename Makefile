@@ -45,7 +45,7 @@ HOST_MEASURED_GATES = TestAmortizedThroughput|TestPerLineRegression|TestDeriveNe
 HOST_GATE_PKGS = ./internal/ledger/... ./internal/research/... ./internal/sentinel/...
 HOST_GATE_NAMES = TestAmortizedThroughput TestPerLineRegression TestDeriveNeverBlocks TestCollectorLongLineIsTruncated
 
-.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host smoke smoke-e2e upgrade-cross-version ac-matrix clean
+.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host docs-check smoke smoke-e2e upgrade-cross-version ac-matrix clean
 
 all: build
 
@@ -148,8 +148,18 @@ check:
 	python3 specs/tools/selfcheck.py
 	$(MAKE) schema-check
 	$(MAKE) vet
+	$(MAKE) docs-check
 	$(GO) test -count=1 ./internal/...
 	$(MAKE) check-host
+
+# The runbook is part of the operator surface, so it is gated like one: every
+# `trouble <verb>` named in docs/operations.md must be a verb the shipped CLI
+# dispatches (TRBL-128). The checker extracts verbs from the document's code
+# surface only, builds ./cmd/trouble once, and requires both a `--help` usage
+# line and a non-`unknown command` answer for each. A documented verb that does
+# not resolve fails the step by name.
+docs-check:
+	bash scripts/docs_check.sh
 
 # The host-measured gates, verbosely, with their fence verdicts echoed. A failure
 # below the fence exits non-zero; an explicit SKIP (host past the fence) exits 0 —

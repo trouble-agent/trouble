@@ -77,11 +77,21 @@ type LedgerStatus struct {
 	QueueDepth        int     `json:"queue_depth"`
 	QueueCap          int     `json:"queue_cap"`
 	BackpressureTotal uint64  `json:"backpressure_total"`
-	WriterPID         int     `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
-	WriterLockHeld    bool    `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
-	WriterVersion     string  `json:"writer_version"`
-	DiskBytes         int64   `json:"disk_bytes"`
-	DiskBudgetBytes   int64   `json:"disk_budget_bytes"`
+	// GapRecords and EstLostTotal are the RECORDED side of the same event
+	// (SPEC-01 §3.5b): BackpressureTotal counts refusals in this process, and
+	// these say how many of them the ledger actually carries. Every refusal is
+	// folded into one gap record per drain window, so the obligation an
+	// operator can check at a glance is
+	// est_lost_total == backpressure_total for the refusals the writer managed
+	// to record — a crash inside a drain window is the only bounded edge, and
+	// a mismatch means loss the ledger cannot account for.
+	GapRecords      int64  `json:"gap_records"`
+	EstLostTotal    int64  `json:"est_lost_total"`
+	WriterPID       int    `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
+	WriterLockHeld  bool   `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
+	WriterVersion   string `json:"writer_version"`
+	DiskBytes       int64  `json:"disk_bytes"`
+	DiskBudgetBytes int64  `json:"disk_budget_bytes"`
 	// PlayRuns and AgentRuns are the ledger-derived rung counters (SPEC-01
 	// §3.10a): the number of records in the day's partitions that carry
 	// payload.rung_entry == "play" / "agent", i.e. the rung entries the ladder

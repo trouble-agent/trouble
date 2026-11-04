@@ -26,6 +26,11 @@ type pending struct {
 	batch []types.Record
 	done  chan error // nil for ledger-authored housekeeping records
 	house bool       // written to the trail, nobody waits
+	// drops is the number of backpressure refusals a housekeeping gap record
+	// folds (SPEC-01 §3.5b). It is non-zero only on the writer's own folded
+	// `gap{cause:"backpressure"}` record, and it is credited to the recorded
+	// drop counters only once that record is durable.
+	drops uint64
 }
 
 // headFile is the HEAD hint (SPEC-01 §3.4 rule 7): never a source of truth.
@@ -97,6 +102,20 @@ type writer struct {
 	records      atomic.Int64
 	backpressure atomic.Uint64
 	depth        atomic.Int64
+
+	// The refusal fold (SPEC-01 §3.5b). A refusal cannot write its own record —
+	// the queue that refused is the queue the record would need — so it only
+	// tallies here: no allocation, no I/O, no blocking. The flush goroutine
+	// drains the tally at a batch boundary and folds it into ONE gap record per
+	// drain window. gapRecords / estLost count folds that actually became
+	// durable (credited in flushBatch, never at fold time).
+	dropMu   sync.Mutex
+	dropN    uint64
+	dropFrom time.Time
+	dropTo   time.Time
+
+	gapRecords atomic.Uint64
+	estLost    atomic.Uint64
 
 	errMu sync.Mutex
 	werr  error
@@ -195,7 +214,19 @@ func (w *writer) run() {
 		select {
 		case p, ok := <-w.ch:
 			if !ok {
+				// Shutdown tail (SPEC-01 §3.5b): a fold still open here would
+				// otherwise be swallowed by the close. The partial batch is
+				// flushed on its own first — beforeBatch must never run
+				// mid-batch, because rotation is legal only between batches —
+				// and the shutdown housekeeping (rotation, holes, the open
+				// refusal fold) then gets a batch of its own.
 				flush()
+				w.beforeBatch()
+				if len(w.house) > 0 {
+					batch = append(batch, w.house...)
+					w.house = nil
+					flush()
+				}
 				w.closeCurrent()
 				return
 			}
@@ -266,6 +297,13 @@ func (w *writer) beforeBatch() {
 		}))
 	}
 	w.holes = nil
+	// SPEC-01 §3.5b: fold the refusals accumulated since the last boundary into
+	// one gap record. This is the ONLY place a backpressure gap is created, and
+	// it runs on the writer goroutine — the refusing caller never re-enters the
+	// queue, so the record cannot re-refuse and cannot deadlock.
+	if p := w.takeDropFold(now); p != nil {
+		w.house = append(w.house, p)
+	}
 }
 
 // checkDiskBudget drives the §3.7 escalation: once the ledger directory is over
@@ -458,6 +496,78 @@ func (w *writer) housePending(op string, payload map[string]any) *pending {
 	return &pending{rec: rec, house: true}
 }
 
+// noteRefusal tallies one refusal (SPEC-01 §3.5b). It deliberately does NOT
+// write: the refusing caller must not re-enter the queue that just refused, so
+// it only records that a drop happened, when it happened, and how many. Cheap
+// by construction — one short lock, no allocation, no syscall.
+func (w *writer) noteRefusal(now time.Time) {
+	w.dropMu.Lock()
+	if w.dropN == 0 {
+		w.dropFrom = now
+	}
+	w.dropN++
+	w.dropTo = now
+	w.dropMu.Unlock()
+}
+
+// takeDropFold drains the refusal tally into ONE housekeeping gap record
+// (SPEC-01 §3.5b). It runs on the writer goroutine only, from a batch boundary,
+// and returns nil when no refusal has happened since the previous fold, so a
+// quiet ledger pays nothing. Folding (rather than one record per refusal) is the
+// house pattern for bounded record volume — SPEC-03 §3.8a does the same for
+// sampled observations — and it keeps the invariant exact: every refused call
+// contributes exactly 1 to the fold that carries it, so the sum of est_lost
+// over backpressure gap records equals the number of refusals they record.
+func (w *writer) takeDropFold(now time.Time) *pending {
+	w.dropMu.Lock()
+	n, from, to := w.dropN, w.dropFrom, w.dropTo
+	w.dropN, w.dropFrom, w.dropTo = 0, time.Time{}, time.Time{}
+	w.dropMu.Unlock()
+	if n == 0 {
+		return nil
+	}
+	rec := types.Record{
+		RecID:         types.NewID(types.PEv),
+		TS:            types.FormatUTC(now),
+		Kind:          types.KGap,
+		SchemaVersion: SchemaVersionV1,
+		Origin:        w.l.origin("ledger"),
+		Actor:         w.l.opts.Writer,
+	}
+	rec.Payload = map[string]any{
+		// The §3.9 gap member set (SPEC-03), so a boundary refusal is a
+		// first-class gap: index.applyGapLocked derives a types.GapRecord
+		// from this payload and ledger.Query().Gaps / ladder.Verify consume
+		// it exactly like a sensor dropout.
+		"id":       rec.RecID,
+		"sensor":   "ledger",
+		"scope":    "ledger:queue",
+		"from_ts":  types.FormatUTC(from),
+		"to_ts":    types.FormatUTC(to),
+		"est_lost": int(n),
+		"cause":    ReasonBackpressure,
+		"cause_detail": fmt.Sprintf("queue cap %d reached and max_enqueue_wait %s expired; %d refused append(s) folded",
+			w.l.opts.Rotation.QueueCapRecords, w.l.opts.Rotation.MaxEnqueueWait, n),
+		"subsystem": "ledger:queue",
+		"kind":      "gap",
+		"sig_keyed": false,
+		"fire":      false,
+	}
+	return &pending{rec: rec, house: true, drops: n}
+}
+
+// creditDrops publishes folds that just became durable. Counters move only
+// after the write is on disk, so the recorded surface never claims a record the
+// ledger does not carry.
+func (w *writer) creditDrops(batch []*pending) {
+	for _, p := range batch {
+		if p.drops > 0 {
+			w.gapRecords.Add(1)
+			w.estLost.Add(p.drops)
+		}
+	}
+}
+
 // selfAppend writes a ledger-authored record from a non-writer goroutine.
 func (w *writer) selfAppend(kind types.RecordKind, payload map[string]any) error {
 	_, err := w.enqueue(context.Background(), types.Record{
@@ -501,6 +611,7 @@ func (w *writer) enqueue(ctx context.Context, rec types.Record) (types.Record, e
 		case w.ch <- p:
 		case <-t.C:
 			w.backpressure.Add(1)
+			w.noteRefusal(w.l.now())
 			return types.Record{}, ledgerErr(types.CodeLedger001, ReasonBackpressure,
 				fmt.Sprintf("queue cap %d reached and max_enqueue_wait %s expired",
 					w.l.opts.Rotation.QueueCapRecords, wait), nil)
@@ -564,6 +675,7 @@ func (w *writer) enqueueBatch(ctx context.Context, recs []types.Record) ([]types
 		case w.ch <- p:
 		case <-t.C:
 			w.backpressure.Add(1)
+			w.noteRefusal(w.l.now())
 			return recs, ledgerErr(types.CodeLedger001, ReasonBackpressure,
 				fmt.Sprintf("queue cap %d reached and max_enqueue_wait %s expired",
 					w.l.opts.Rotation.QueueCapRecords, wait), nil)
@@ -634,6 +746,8 @@ func (w *writer) snapshot() types.LedgerStatus {
 		Records:        st.records,
 		FsyncCalls:     w.fsyncCalls.Load(),
 		WriterPID:      os.Getpid(),
+		GapRecords:     int64(w.gapRecords.Load()),
+		EstLostTotal:   int64(w.estLost.Load()),
 	}
 }
 
@@ -664,6 +778,10 @@ func (w *writer) flushBatch(batch []*pending) {
 		for _, p := range batch {
 			if len(p.batch) == 0 {
 				w.writeOne(p)
+				if w.err() == nil {
+					// §3.5b: the fold is durable only if this write was.
+					w.creditDrops([]*pending{p})
+				}
 				continue
 			}
 			// Per-line mode is the test-only §7 diagnostic (one fdatasync per
@@ -744,6 +862,7 @@ func (w *writer) flushBatch(batch []*pending) {
 	w.mu.Unlock()
 	w.l.idx.applyBatch(recs)
 	w.l.idx.fileAppended(w.cur.day, w.cur.gen, w.cur.part, int64(buf.Len()), int64(len(recs)), last.Seq)
+	w.creditDrops(batch)
 	w.maybeWriteHead(w.l.now())
 	for _, p := range batch {
 		if p.done != nil {

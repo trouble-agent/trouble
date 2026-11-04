@@ -25,6 +25,7 @@ const maxTitleRunes = 200
 type incidentRow struct {
 	Inc      string
 	Title    string
+	Subject  string // human-readable subject: the unit/scope plus its message (TRBL-126)
 	Severity types.Severity
 	State    types.LadderState
 	Rung     types.Rung
@@ -262,6 +263,7 @@ func fmtAge(s float64, ok bool) string {
 func cleanIncident(inc types.Incident) types.Incident {
 	inc.ID = clean(inc.ID)
 	inc.Sig = clean(inc.Sig)
+	inc.Subject = clean(inc.Subject)
 	inc.GroupID = clean(inc.GroupID)
 	inc.State = types.LadderState(clean(string(inc.State)))
 	inc.EntryRung = types.Rung(clean(string(inc.EntryRung)))
@@ -373,6 +375,7 @@ func (s *server) incidentRow(inc types.Incident, now time.Time, titles map[strin
 	row := incidentRow{
 		Inc:      clean(inc.ID),
 		Title:    truncRunes(s.incidentTitle(inc, titles)),
+		Subject:  truncRunes(clean(inc.Subject)),
 		Severity: inc.Severity,
 		State:    inc.State,
 		Rung:     inc.Rung,

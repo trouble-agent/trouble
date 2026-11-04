@@ -3,6 +3,7 @@
 <h2>incident {{.Incident.ID}}</h2>
 <dl class="detail">
 <dt>sig</dt><dd>{{.Incident.Sig}}</dd>
+<dt>subject</dt><dd>{{if .Incident.Subject}}{{.Incident.Subject}}{{else}}—{{end}}</dd>
 <dt>state</dt><dd>{{.Incident.State}}</dd>
 <dt>rung</dt><dd>{{.Incident.Rung}} (entry {{.Incident.EntryRung}})</dd>
 <dt>severity</dt><dd>{{.Incident.Severity}}</dd>

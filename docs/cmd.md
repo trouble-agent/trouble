@@ -143,7 +143,7 @@ heartbeat with `stage="shutdown"`, close the listeners, exit 0 within
 ```
 trouble --version                       version git_sha build_time (and whether the build is stamped)
 trouble config explain [--key K] [--json]   every resolved key with its winning source
-trouble topology [--json]               the T1..T5 decisions for this configuration
+trouble topology [--json]               the T1..T5 decisions for this configuration, plus the open incidents by subject (text only)
 trouble check-stall [--health-url URL] [--state-root DIR] [--json]   the external stall checker: exit 0 / 8 / 9
 trouble install [--scope user|system] [--check] [--dry-run] [--root DIR] [--force]
 trouble upgrade [--to PATH] [--rollback] [--wait DURATION]

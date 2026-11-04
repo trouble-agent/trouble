@@ -130,6 +130,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
   overflow-wrap: anywhere;
 }
 .rows th { color: var(--dim); font-weight: 600; font-size: 13px; }
+/* the incident subject: the unit/scope plus the message that produced the
+   signal, rendered under its title so an operator never opens the ledger to
+   learn WHICH unit failed (SPEC-10 §2.1.2, TRBL-126) */
+.rows td .subject { color: var(--dim); font-size: 13px; margin-top: 2px; }
 
 .detail { margin: 0; }
 .detail dt { color: var(--dim); font-size: 13px; margin-top: 8px; }

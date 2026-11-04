@@ -669,6 +669,16 @@ correlation:
   The idempotency key inside the fold is the arriving `ev_` event id: replaying the same arrival yields one
   record and one counter increment. **Never a duplicate** — one incident, one group, one issue, one board
   row for a given sig at any time (INV-1).
+  T01 records the incident's **subject** — `<identifier>: <message>`, where the identifier is the merge
+  subject of this section (the unescaped unit name for `unit`, `unit:<name>`/`project:<id>` for `app`, the
+  `sensor|scope` pair for `resource`) and the message is the source's own text (`detail.msg` for journald
+  and psi) or, for a D-Bus unit arrival that publishes no log line, the state transition it reported
+  (`unit_substate=<s> via <arrival_path>`). An identifier with no message records the identifier alone, a
+  message with no identifier records the message alone, and a signal with neither records none — every
+  surface then falls back to the group title / sig id it already carries. The subject is a projection
+  field (`Incident.Subject`, SPEC-TYPES §3.7), rehydrated on a boot rebuild exactly like `state`/`grp`,
+  and it is rendered by the dashboard incident row (SPEC-10 §2.1.2) and by `trouble topology`
+  (SPEC-12 §3.7) so an operator never opens the ledger to learn which unit failed (TRBL-126).
 - **Secondary key `inKey`** (the cross-plane link for AC-22):
   `inKey = "ink_" + hex(sha256(source_class + US + subject + US + taxonomy + US + app_kind))[:16]`
   where `source_class` ∈ {`app` (sentinel, collector, generic), `unit` (journald, dbus),

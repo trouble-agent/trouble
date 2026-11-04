@@ -251,6 +251,14 @@ share one incident across planes, and a recurrence after `resolved` reopens the 
 up to `ladder.reopen_max` times. The dashboard's `/incidents` page (SPEC-10) therefore shows one row
 per problem, not one per arrival path.
 
+**Every incident names its subject.** The admission record carries
+`<unit-or-scope>: <message>` — for a `dbus_unit_failed` signal, the failing systemd unit and the
+`unit_substate=<s> via <arrival_path>` the D-Bus signal reported; for journald, the unit and the
+masked log line. It is rendered on the dashboard's incident row and on the page, and `trouble
+topology` prints the open incidents with their subjects, so "which unit failed?" is answered without
+opening the ledger. An incident with no subject (an anonymous signal) shows the group title / `sig`
+instead — no surface invents a unit name (TRBL-126).
+
 **Verification is evidence, not absence.** A window is only `passed` when a canary landed, every
 expected source was alive inside the window, no gap record overlaps it and zero events were
 observed. A canary that did not land is `invalid` (`TROUBLE-LADDER-006`) — a flat graph because

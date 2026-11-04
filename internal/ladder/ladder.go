@@ -547,10 +547,15 @@ func (l *Ladder) newIncidentLocked(ctx context.Context, obs Observation, sig, in
 	now := types.FormatUTC(l.now())
 	rung, ceiling := l.rungsFor(obs.Rule)
 	id := types.NewID(types.PInc)
+	// TRBL-126: the incident records its subject — the unit/scope identifier
+	// plus the originating message — so no surface has to open the ledger to
+	// learn which unit failed.
+	subject := incidentSubjectText(l.subjectFor(obs), obs.Detail)
 	st := &incState{
 		Inc: types.Incident{
 			ID:        id,
 			Sig:       sig,
+			Subject:   subject,
 			GroupID:   types.NewID(types.PGrp),
 			State:     types.StRecorded,
 			EntryRung: rung,
@@ -581,6 +586,7 @@ func (l *Ladder) newIncidentLocked(ctx context.Context, obs Observation, sig, in
 		"entry_rung":          string(rung),
 		"rung":                string(rung),
 		"rule":                obs.Rule,
+		"subject":             subject, // TRBL-126: the T01 record names the unit + message
 		"inKey":               inKey,
 		"sigs":                st.Sigs,
 		"arrival_paths":       st.ArrivalPaths,

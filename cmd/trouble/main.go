@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/trouble-agent/trouble/internal/dashboard"
+	"github.com/trouble-agent/trouble/internal/ledger"
 	"github.com/trouble-agent/trouble/internal/lifecycle"
 	"github.com/trouble-agent/trouble/internal/scrub"
 	"github.com/trouble-agent/trouble/internal/types"
@@ -528,7 +529,45 @@ func cmdTopology(args []string) int {
 	fmt.Printf("\ningest.bind=%s (zone %s) dashboard.bind=%s (zone %s)\n",
 		cfg.Ingest.Bind, lifecycle.ZoneOf(cfg.Ingest.Bind, "ingest", lifecycle.AuthToken),
 		cfg.Dashboard.Bind, lifecycle.ZoneOf(cfg.Dashboard.Bind, "dashboard", lifecycle.AuthLoopback))
+	printOpenIncidents(res)
 	return 0
+}
+
+// topologyIncidentLimit bounds the incident tail: the operator's next question
+// after "what is this host" is "what is broken right now", and the tail is a
+// console, not a page (TRBL-126).
+const topologyIncidentLimit = 10
+
+// printOpenIncidents renders the open incidents of this host's ledger by their
+// subject, so the unit a failure is about is named in the same console that
+// answers the topology question — no ledger read required of the operator.
+//
+// It is deliberately TEXT-ONLY: `trouble topology --json` is the documented
+// []TopologyDecision machine contract (SPEC-12 §3.7) and adding a second shape
+// to that array would break its consumers. Every failure to read is stated,
+// never rendered as "no incidents": an empty list and an unreadable ledger are
+// different facts.
+func printOpenIncidents(res lifecycle.Resolved) {
+	rootInfo, err := lifecycle.CheckStateRoot(res.Config)
+	if err != nil {
+		fmt.Printf("\nincidents: unreadable state root (%v)\n", err)
+		return
+	}
+	incs, err := ledger.ReadOpenIncidents(filepath.Join(rootInfo.Path, "ledger"), topologyIncidentLimit)
+	if err != nil {
+		fmt.Printf("\nincidents: unreadable (%v)\n", err)
+		return
+	}
+	fmt.Printf("\nincidents open (%d, newest first — subject names the unit and its message)\n", len(incs))
+	for _, inc := range incs {
+		subject := inc.Subject
+		if subject == "" {
+			// A signal that is not unit-scoped has no subject to compose; the
+			// raw signature is the honest fallback every surface already carries.
+			subject = "(no subject) " + inc.Sig
+		}
+		fmt.Printf("  %s  %-8s %-14s %-6s  %s\n", inc.ID, inc.Severity, inc.State, inc.Rung, subject)
+	}
 }
 
 func cmdCheckStall(args []string) int {

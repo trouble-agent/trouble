@@ -269,6 +269,7 @@ const (
 type Incident struct {
 	ID          string            `json:"id"`
 	Sig         string            `json:"sig"`
+	Subject     string            `json:"subject,omitempty"` // human-readable subject: the unit/scope the signal is about plus its message (TRBL-126)
 	GroupID     string            `json:"grp"`
 	State       LadderState       `json:"state"`
 	EntryRung   Rung              `json:"entry_rung"`

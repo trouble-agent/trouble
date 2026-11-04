@@ -32,7 +32,10 @@ namespaces/
 .gitreins/logs/
 .gitreins/tasks.yaml.lock
 
-# Build artifacts from make bin / go build
-trouble
-troubled
-resolved
+# Build artifacts from make bin / go build. Root-anchored on purpose: a bare
+# `trouble` also matches the cmd/trouble/ DIRECTORY, which hides new files in the
+# CLI package from `git add` (the binary lives at ./trouble, ./troubled,
+# ./resolved; bin/ is ignored above).
+/trouble
+/troubled
+/resolved

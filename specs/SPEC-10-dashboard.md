@@ -97,7 +97,7 @@ root element always carries the stale-render guard attributes of §2.6.
 | Partial | Root element returned |
 |---|---|
 | `/partials/health` | `<div id="health-strip" data-seq data-stall-s data-status data-mode data-kill data-denied data-csrf data-rl hx-get="/partials/health" hx-trigger="every 1s" hx-swap="outerHTML" hx-sync="this:replace">ok · seq 41207 · stall 1.2s · shadow · kill off · denied 3 / csrf 0 / rl 0</div>` |
-| `/partials/incidents` | `<tbody id="incident-rows" data-seq data-count data-stall-s>` + one `<tr>` per open incident: `<td><a href="/incidents/inc_…">title</a></td><td>severity</td><td>state</td><td>rung</td><td>age</td>` |
+| `/partials/incidents` | `<tbody id="incident-rows" data-seq data-count data-stall-s>` + one `<tr>` per open incident: `<td><a href="/incidents/inc_…">title</a>{{if subject}}<div class="subject">subject</div>{{end}}</td><td>severity</td><td>state</td><td>rung</td><td>age</td>`. The subject is the incident's `Subject` (`SPEC-05 §3.9`, TRBL-126: the unit/scope plus the message that produced the signal), truncated at the 200-rune layout limit; an incident with no subject renders no element and the title/sig fallback stands alone. Six columns are unchanged |
 | `…/{id}/timeline` | `<ol id="incident-timeline" data-seq>` + one `<li>` per ledger record: `<li data-kind="tool_call" data-actor="dash-write@laptop">09:14:03 tool_call config.set check_mode · diff 1 entry</li>` |
 | `/partials/groups` | `<tbody id="group-rows" data-seq>` + `<tr>` per group: sig short, title, count, rate/min, last seen, release range |
 | `/partials/rules` | `<tbody id="rule-rows" data-seq>` + `<tr>` per rule: name, source, entry rung, last fire, suppressed, breaker state |
@@ -483,7 +483,7 @@ type pageData struct {                               // shell + page model
     ReadOnly bool
     Error *dashError
 }
-type incidentRow struct { Inc string; Title string; Severity Severity; State LadderState; Rung Rung; AgeS float64; Sig string }
+type incidentRow struct { Inc string; Title string; Subject string; Severity Severity; State LadderState; Rung Rung; AgeS float64; Sig string }
 type groupRow struct { ID, Sig, Title string; Count uint64; RateMin float64; LastSeenTS string; ReleaseRange []string }
 type ruleRow struct { Name string; Source SigSource; EntryRung Rung; LastFireTS string; Suppressed uint64; Breaker BreakerState }
 type breakerRow struct { Scope string; State BreakerState; OpenUntil string; Trips int; Reason string }

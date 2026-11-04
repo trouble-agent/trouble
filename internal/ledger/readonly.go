@@ -305,6 +305,43 @@ func backpressureFold(rec *types.Record) (int64, bool) {
 	return n, true
 }
 
+// ReadOpenIncidents returns the ledger's open incidents (newest-updated first)
+// for the given root without taking the writer seat: it walks the authoritative
+// day files and projects the incident records through the SAME apply path the
+// daemon's boot rebuild uses, so a verb that reads a live ledger reports what the
+// daemon would report. It is the read side of `trouble topology`'s incident tail
+// (SPEC-12 §3.7, TRBL-126) and it writes nothing, locks nothing.
+func ReadOpenIncidents(root string, limit int) ([]types.Incident, error) {
+	files, _, err := authoritativeFilesRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	ix := newIndex(DefaultIndexOptions(), root, "loopback", SchemaVersionV1)
+	for _, p := range files {
+		f, oerr := os.Open(filepath.Join(root, p.File))
+		if oerr != nil {
+			continue
+		}
+		werr := walkLines(f, func(line []byte, _ int64, _ bool) error {
+			if len(bytes.TrimSpace(line)) == 0 {
+				return nil
+			}
+			rec, derr := decodeRecord(line, true)
+			if derr != nil || rec == nil || rec.Kind != types.KIncident {
+				return nil
+			}
+			ix.applyLocked(rec)
+			return nil
+		})
+		_ = f.Close()
+		if werr != nil {
+			return nil, werr
+		}
+	}
+	d := &dashReader{l: &Ledger{idx: ix}}
+	return d.OpenIncidents(limit), nil
+}
+
 // ReadVerify returns a VerifyReport for the ledger at the given root without
 // taking any locks or writing anything. It walks day files, checks seq
 // monotonicity, validates torn/corrupt lines, and verifies payload hashes.

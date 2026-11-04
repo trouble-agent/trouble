@@ -1302,6 +1302,13 @@ func (ix *index) applyIncidentLocked(rec *types.Record, ts time.Time) {
 	if v, ok := rec.Payload["grp"].(string); ok && v != "" {
 		inc.GroupID = v
 	}
+	// TRBL-126: the admission record names the incident's subject (the unit and
+	// the message that produced it). It is rehydrated here like every other
+	// scalar the projection carries, so a boot rebuild and a live append render
+	// the same subject instead of dropping it on restart.
+	if v, ok := rec.Payload["subject"].(string); ok && v != "" {
+		inc.Subject = v
+	}
 	if v, ok := rec.Payload["severity"].(string); ok && v != "" {
 		inc.Severity = types.Severity(v)
 	}

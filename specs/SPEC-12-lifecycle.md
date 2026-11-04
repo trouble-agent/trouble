@@ -41,7 +41,7 @@ AC coverage: **AC-14/AC-18** are exercised by the bind matrix, the forward path 
 | `trouble install [--scope user\|system] [--root DIR] [--check] [--dry-run] [--force]` | Render + write `lifecycle.unit_name` and the escalate unit into the configured unit dir; `--root DIR` writes into a temp unit root for tests. On a real scope: `systemctl daemon-reload`, `enable --now` (unless `--dry-run`). Exit 13 on any refusable condition. |
 | `trouble upgrade [--to PATH\|VERSION] [--rollback] [--wait DURATION]` | §3.6. Never truncates a live binary. Refuses while a park is impossible. |
 | `trouble config explain [--key K] [--json]` | The resolved-config dump: `[]ConfigValue`, one row per resolved key, with `source` + `source_ref`. `--json` is the machine form; default is an aligned table. Secret-class keys print `[REDACTED:config]`. There is no reveal flag. |
-| `trouble topology` | Prints `[]TopologyDecision` for the configured topology plus the derived zone table. |
+| `trouble topology` | Prints `[]TopologyDecision` for the configured topology plus the derived zone table. In text mode it also prints the ledger's open incidents (bounded, newest first) with their **subject** — the unit/scope the signal is about and the message that produced it (`SPEC-05 §3.9`, TRBL-126) — read from the day files without taking the writer seat. `--json` stays `[]TopologyDecision`: the incident tail is an operator console, never a second machine shape. |
 | `trouble check-stall [--health-url URL] [--state-root DIR] [--json]` | The external stall checker (§3.3). Exit 0 ok · 8 liveness-surface stale/unreadable · 9 ledger sequence stall. Writes only `checker.alarm` and stdout. |
 | `trouble escalate --unit NAME` | Invoked by `trouble-escalate@.service` only. Reads systemd state + journal for NAME, delivers via `escalate.channels`. Touches no ledger, no state-root write path, no socket. |
 | `trouble --version` + `troubled --version` | `version git_sha build_time` triple from §3.4. |
@@ -1129,6 +1129,12 @@ the exact class of bug the judges measured in this fleet.
 ```json
 {"from":"T2","to":"T3","decision":"one forwarding protocol: the sentinel envelope wire format carries forwarded records; there is no second hub/satellite dialect","config_keys":["hub.mode","hub.url","hub.forward_project_id","hub.protocol_version","spool.budget_bytes"]}
 ```
+
+The text form appends the host's open incidents, newest first, each on one line as
+`<incident id>  <severity> <state> <rung>  <subject>`; an incident with no subject
+prints its raw `sig` after `(no subject)`, and a ledger that cannot be read prints
+`incidents: unreadable (<reason>)` rather than an empty list. `--json` never grows
+this tail (the array is the documented machine contract).
 
 **The forward path (satellite → hub).** The satellite is a full daemon in `hub.mode=satellite`: it samples,
 ingests and records locally, then forwards. Its local store **is** the spool: `spool/forward/NNNNNNNNNN.fwd`,

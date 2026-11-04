@@ -720,6 +720,12 @@ func eventSeqSet(lines map[uint64]struct{}, consumed []seqSpan) uint64 {
 }
 
 // VerifyReport is the read-only walk result (SPEC-01 §2.2).
+//
+// The three collection members are ALWAYS arrays on the wire — empty when the
+// walk found nothing, never null (SPEC-01 §2.2, TRBL-130). A nil slice marshals
+// to null, and null reads the same as "not computed": that is the same defect as
+// a fabricated zero, one field over. normalize() enforces it on every report a
+// constructor returns.
 type VerifyReport struct {
 	Day                   string              `json:"day"`
 	Files                 []string            `json:"files"`
@@ -733,6 +739,20 @@ type VerifyReport struct {
 	Counts                types.GroupCounters `json:"counts"`
 	OK                    bool                `json:"ok"`
 	Errors                []string            `json:"errors"`
+}
+
+// normalize replaces every nil collection member with an empty one. A clean
+// verification must say "clean" (`"seq_holes": []`), not "unknown" (null).
+func (r *VerifyReport) normalize() {
+	if r.SeqHoles == nil {
+		r.SeqHoles = []SeqHole{}
+	}
+	if r.Files == nil {
+		r.Files = []string{}
+	}
+	if r.Errors == nil {
+		r.Errors = []string{}
+	}
 }
 
 // Verify walks the day's authoritative files read-only: seq continuity, line
@@ -874,6 +894,7 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) {
 	}
 	rep.OK = rep.TornLines == 0 && rep.CorruptLines == 0 && len(rep.SeqHoles) == 0 &&
 		rep.PayloadHashMismatches == 0 && rep.TombstoneMismatches == 0 && len(rep.Errors) == 0
+	rep.normalize()
 	return rep, nil
 }
 

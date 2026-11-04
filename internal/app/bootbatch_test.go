@@ -82,8 +82,8 @@ func TestBootBatchBoundaryIsOneDurableCommit(t *testing.T) {
 		t.Fatalf("batch boundary: %v", err)
 	}
 	after := d.Ledger.Status()
-	got := after.FsyncCalls - before.FsyncCalls
-	t.Logf("FsyncCalls: before=%d after=%d delta=%d", before.FsyncCalls, after.FsyncCalls, got)
+	got := fsyncCalls(t, after) - fsyncCalls(t, before)
+	t.Logf("FsyncCalls: before=%d after=%d delta=%d", fsyncCalls(t, before), fsyncCalls(t, after), got)
 	if got != 1 {
 		t.Fatalf("a K=%d batch through the boot's boundary cost %d durable commits, want 1", k, got)
 	}
@@ -113,4 +113,17 @@ func probeBatchBoundary(d *Daemon) func(context.Context, []types.RecordDraft) ([
 
 func sigForTest(scope string, n int) string {
 	return types.NewSig(types.SigSource("psi"), "sha256", 1, []byte(scope+strings.Repeat("x", n+1))).String()
+}
+
+// fsyncCalls reads the live writer's measured fdatasync counter and fails when
+// the status path did not measure it: the boot tests assert on the COUNT of
+// group commits, and a zero that means "not measured" must never satisfy that
+// arithmetic (SPEC-01 §3.10b, TRBL-130).
+func fsyncCalls(t *testing.T, st types.LedgerStatus) int64 {
+	t.Helper()
+	n, ok := st.FsyncCount()
+	if !ok {
+		t.Fatalf("status did not measure fsync_calls (unmeasured=%v); the writer seat always does", st.Unmeasured)
+	}
+	return n
 }

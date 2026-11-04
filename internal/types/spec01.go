@@ -60,23 +60,51 @@ type IndexStats struct {
 }
 
 // LedgerStatus is printed by `trouble ledger status --json` (SPEC-01 §3.10).
+//
+// Its members are two kinds of measurement, and the JSON shape keeps them
+// distinguishable (SPEC-01 §3.10b, TRBL-130): the numbers a reader DERIVES from
+// the ledger files (the lock-free ReadStatus walk `trouble ledger status`
+// takes) and the numbers only the process holding the writer seat can take
+// (the fdatasync counter, the enqueue queue, refusals, the allocated-not-yet-
+// durable watermark). A member a status path could not measure is OMITTED from
+// that path's JSON and named in Unmeasured with its reason — never reported as
+// 0, because a 0 an operator cannot tell from "clean" is a lie. Go callers read
+// such members through the accessors below, which return ok=false instead of a
+// fabricated zero.
 type LedgerStatus struct {
-	LastSeq           uint64  `json:"last_seq"`
-	LastSeqPending    uint64  `json:"last_seq_pending"`
-	LastTS            string  `json:"last_ts"`
-	StallS            float64 `json:"stall_s"`
-	LossWindowMS      int     `json:"loss_window_ms"`
-	Day               string  `json:"day"`
-	Gen               int     `json:"gen"`
-	Part              int     `json:"part"`
-	File              string  `json:"file"`
-	Bytes             int64   `json:"bytes"`
-	Records           int64   `json:"records"`
-	FsyncCalls        int64   `json:"fsync_calls"`
-	FsyncPerRecord    float64 `json:"fsync_per_record"`
-	QueueDepth        int     `json:"queue_depth"`
-	QueueCap          int     `json:"queue_cap"`
-	BackpressureTotal uint64  `json:"backpressure_total"`
+	LastSeq uint64 `json:"last_seq"`
+	// LastSeqPending is the writer's allocated-not-yet-durable watermark: a
+	// writer-seat measurement, absent from the read-only path.
+	LastSeqPending *uint64 `json:"last_seq_pending,omitempty"`
+	LastTS         string  `json:"last_ts"`
+	// StallS is seconds since the durable watermark. Both paths measure it (the
+	// read-only one from last_ts and the current clock); it is absent only when
+	// the ledger holds no record to be stalled since.
+	StallS       *float64 `json:"stall_s,omitempty"`
+	LossWindowMS int      `json:"loss_window_ms"`
+	Day          string   `json:"day"`
+	Gen          int      `json:"gen"`
+	Part         int      `json:"part"`
+	File         string   `json:"file"`
+	Bytes        int64    `json:"bytes"`
+	Records      int64    `json:"records"`
+	// FsyncCalls is the writer's in-process fdatasync counter. Only the process
+	// that owns the writer seat can read it: Ledger.Status() sets it,
+	// ReadStatus() leaves it nil (see Unmeasured).
+	FsyncCalls *int64 `json:"fsync_calls,omitempty"`
+	// FsyncPerRecord is FsyncCalls/Records and shares its presence, plus one
+	// extra absence: with no records the rate has no denominator and is
+	// "no_records", not 0.
+	FsyncPerRecord *float64 `json:"fsync_per_record,omitempty"`
+	// QueueDepth is the live writer queue's occupancy: writer seat only.
+	QueueDepth *int `json:"queue_depth,omitempty"`
+	// QueueCap is the configured queue cap (a policy default, not a
+	// measurement), so both paths report it.
+	QueueCap int `json:"queue_cap"`
+	// BackpressureTotal counts this process's refusals (SPEC-01 §3.5b): writer
+	// seat only. GapRecords/EstLostTotal are the ledger-side answer and both
+	// paths derive them.
+	BackpressureTotal *uint64 `json:"backpressure_total,omitempty"`
 	// GapRecords and EstLostTotal are the RECORDED side of the same event
 	// (SPEC-01 §3.5b): BackpressureTotal counts refusals in this process, and
 	// these say how many of them the ledger actually carries. Every refusal is
@@ -85,13 +113,18 @@ type LedgerStatus struct {
 	// est_lost_total == backpressure_total for the refusals the writer managed
 	// to record — a crash inside a drain window is the only bounded edge, and
 	// a mismatch means loss the ledger cannot account for.
-	GapRecords      int64  `json:"gap_records"`
-	EstLostTotal    int64  `json:"est_lost_total"`
-	WriterPID       int    `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
-	WriterLockHeld  bool   `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
-	WriterVersion   string `json:"writer_version"`
-	DiskBytes       int64  `json:"disk_bytes"`
-	DiskBudgetBytes int64  `json:"disk_budget_bytes"`
+	GapRecords   int64 `json:"gap_records"`
+	EstLostTotal int64 `json:"est_lost_total"`
+	// Unmeasured names every member this status path did not measure, and why
+	// (field -> reason: "in_process_counter" | "no_records"). Absent when the
+	// path measured everything; a nil map and an empty "{}" both mean "nothing
+	// was missing".
+	Unmeasured      map[string]string `json:"unmeasured,omitempty"`
+	WriterPID       int               `json:"writer_pid"`       // -1 means no verified holder PID; WriterLockHeld distinguishes unknown identity from no writer.
+	WriterLockHeld  bool              `json:"writer_lock_held"` // true means the kernel lock is held, even if writer_pid is unavailable.
+	WriterVersion   string            `json:"writer_version"`
+	DiskBytes       int64             `json:"disk_bytes"`
+	DiskBudgetBytes int64             `json:"disk_budget_bytes"`
 	// PlayRuns and AgentRuns are the ledger-derived rung counters (SPEC-01
 	// §3.10a): the number of records in the day's partitions that carry
 	// payload.rung_entry == "play" / "agent", i.e. the rung entries the ladder
@@ -100,6 +133,79 @@ type LedgerStatus struct {
 	PlayRuns  int64      `json:"play_runs"`
 	AgentRuns int64      `json:"agent_runs"`
 	Index     IndexStats `json:"index"`
+}
+
+// Reasons a status member can be absent (SPEC-01 §3.10b). They are wire values:
+// a caller reads them from `unmeasured`.
+const (
+	// UnmeasuredInProcess is the reason for a member that lives in the writer
+	// process: another process cannot read its counters, and no reader may
+	// invent one.
+	UnmeasuredInProcess = "in_process_counter"
+	// UnmeasuredNoRecords is the reason for a rate whose denominator is empty:
+	// the quantity is undefined on this ledger, not zero.
+	UnmeasuredNoRecords = "no_records"
+)
+
+// MarkUnmeasured records that this status could not measure field, and why.
+func (s *LedgerStatus) MarkUnmeasured(field, reason string) {
+	if s.Unmeasured == nil {
+		s.Unmeasured = map[string]string{}
+	}
+	s.Unmeasured[field] = reason
+}
+
+// The accessors below are the only safe way for Go callers to read a measured
+// member: ok=false means "this status path did not measure it", which a zero
+// cannot say.
+
+// FsyncCount returns the measured fdatasync count and whether it was measured.
+func (s LedgerStatus) FsyncCount() (int64, bool) {
+	if s.FsyncCalls == nil {
+		return 0, false
+	}
+	return *s.FsyncCalls, true
+}
+
+// FsyncRate returns fsyncs per record and whether the rate was measured.
+func (s LedgerStatus) FsyncRate() (float64, bool) {
+	if s.FsyncPerRecord == nil {
+		return 0, false
+	}
+	return *s.FsyncPerRecord, true
+}
+
+// PendingSeq returns the allocated-not-yet-durable watermark and whether it was
+// measured.
+func (s LedgerStatus) PendingSeq() (uint64, bool) {
+	if s.LastSeqPending == nil {
+		return 0, false
+	}
+	return *s.LastSeqPending, true
+}
+
+// QueueLen returns the writer queue's measured occupancy.
+func (s LedgerStatus) QueueLen() (int, bool) {
+	if s.QueueDepth == nil {
+		return 0, false
+	}
+	return *s.QueueDepth, true
+}
+
+// Refusals returns the measured in-process refusal count.
+func (s LedgerStatus) Refusals() (uint64, bool) {
+	if s.BackpressureTotal == nil {
+		return 0, false
+	}
+	return *s.BackpressureTotal, true
+}
+
+// StallSeconds returns the measured stall and whether it was measured.
+func (s LedgerStatus) StallSeconds() (float64, bool) {
+	if s.StallS == nil {
+		return 0, false
+	}
+	return *s.StallS, true
 }
 
 // GroupStat is one row of TopGroups (SPEC-01 §3.10).

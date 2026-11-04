@@ -174,9 +174,12 @@ the producer gets `TROUBLE-LEDGER-001 reason=backpressure` and the writer folds 
 refusals into one `gap{cause="backpressure", scope="ledger:queue"}` record — with `est_lost`, the
 window's `from_ts`/`to_ts`, and the queue cap and wait in `cause_detail` — so the sum of `est_lost`
 over those records equals the refusals they account for (SPEC-01 §3.5b, AC-35).
-`trouble ledger status` prints `gap_records`/`est_lost_total` beside `backpressure_total`, so
-"refused" and "recorded" can be compared at a glance; a crash inside one drain window is the only
-loss edge, and it is stated in the spec rather than hidden.
+`trouble ledger status` prints `gap_records`/`est_lost_total` on the queue line, so
+"recorded" can be compared at a glance with the refusals the writer counted; a crash inside one drain
+window is the only loss edge, and it is stated in the spec rather than hidden. A number the command did
+not measure is never printed as a zero: the read-only path omits the writer-seat counters (`fsync_calls`,
+`queue_depth`, `backpressure_total`, …) and names them in `unmeasured`, while `ledger verify --json` always
+answers `seq_holes` as an array — `[]` when clean, never `null` (SPEC-01 §3.10b, AC-36).
 
 ## Ledger file layout
 

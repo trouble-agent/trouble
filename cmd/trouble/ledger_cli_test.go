@@ -383,6 +383,80 @@ func TestLedgerVerifyExitCodesSpec01Section24(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// SPEC-01 §3.10b / §2.2 — no fabricated zeros, no null collections (TRBL-130).
+// `ledger status --json` takes the READ-ONLY path, so the writer-seat counters
+// must be ABSENT and named in `unmeasured`; `ledger verify --json` on a clean day
+// must say "seq_holes": [] rather than null.
+// ---------------------------------------------------------------------------
+
+func TestLedgerJSONCarriesNoFabricatedZeroOrNullSpec01Section310b(t *testing.T) {
+	bin := buildTrouble(t)
+	base := ledgerTestRoot(t)
+	cfg, stateRoot := writeLedgerConfig(t, base)
+	led := filepath.Join(stateRoot, "ledger")
+	if err := os.MkdirAll(led, 0o700); err != nil {
+		t.Fatalf("ledger root: %v", err)
+	}
+	writeDayFixture(t, led, "2026-06-01", 3)
+
+	code, out, errOut := runCLI(t, bin, cfg, "ledger", "status", "--json")
+	if code != 0 {
+		t.Fatalf("status --json exit = %d, want 0\nstdout=%s\nstderr=%s", code, out, errOut)
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(out), &members); err != nil {
+		t.Fatalf("status --json is not a JSON object: %v\n%s", err, out)
+	}
+	writerSeat := []string{"fsync_calls", "fsync_per_record", "queue_depth", "last_seq_pending", "backpressure_total"}
+	for _, key := range writerSeat {
+		if raw, present := members[key]; present {
+			t.Errorf("status --json reports %s=%s; this is the read-only path and that counter lives in the writer process", key, raw)
+		}
+	}
+	var reasons map[string]string
+	if err := json.Unmarshal(members["unmeasured"], &reasons); err != nil {
+		t.Fatalf("status --json has no readable unmeasured block (%v): an absent measurement must carry its reason\n%s", err, out)
+	}
+	for _, key := range writerSeat {
+		if got := reasons[key]; got != types.UnmeasuredInProcess {
+			t.Errorf("unmeasured[%s] = %q, want %q", key, got, types.UnmeasuredInProcess)
+		}
+	}
+	// What the walk CAN measure is still there — this is not "drop the stanza".
+	for _, key := range []string{"last_seq", "records", "stall_s", "gap_records", "est_lost_total"} {
+		if _, present := members[key]; !present {
+			t.Errorf("status --json dropped the measured member %s (read-only derivation), so the fix over-reached\n%s", key, out)
+		}
+	}
+
+	// The human form says the same thing in words, never a zero.
+	code, textOut, textErr := runCLI(t, bin, cfg, "ledger", "status")
+	if code != 0 {
+		t.Fatalf("status exit = %d, want 0 (stderr: %s)", code, textErr)
+	}
+	if !strings.Contains(textOut, "unmeasured") {
+		t.Errorf("text status never says a writer-seat counter is unmeasured, so the operator reads a zero:\n%s", textOut)
+	}
+
+	// verify --json: a clean day's hole list is an ARRAY (empty), not null.
+	code, vOut, vErr := runCLI(t, bin, cfg, "ledger", "verify", "--day", "2026-06-01", "--json")
+	if code != 0 {
+		t.Fatalf("verify --json exit = %d, want 0\nstdout=%s\nstderr=%s", code, vOut, vErr)
+	}
+	if strings.Contains(vOut, `"seq_holes": null`) {
+		t.Fatalf("verify --json reports a null seq_holes: 'clean' and 'not computed' must not read alike\n%s", vOut)
+	}
+	if !strings.Contains(vOut, `"seq_holes": []`) {
+		t.Fatalf("verify --json on a clean day does not carry an empty seq_holes array:\n%s", vOut)
+	}
+	for _, key := range []string{`"files": [`, `"errors": []`} {
+		if !strings.Contains(vOut, key) {
+			t.Errorf("verify --json does not carry %s: every collection member must be an array\n%s", key, vOut)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // SPEC-01 §2.4 row 3 — compact: 0 ok (the --dry-run prints the
 // CompactionResult with ToFile and byte deltas and writes NOTHING; a real
 // compact produces the gen file and unlinks the part), 1 failed (the library's

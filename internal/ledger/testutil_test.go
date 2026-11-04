@@ -253,3 +253,25 @@ func mandatoryScan(b []byte) error { return scrub.MandatoryScan(context.Backgrou
 
 // prefilterAllows exposes scrub's performance prefilter to the conformance test.
 func prefilterAllows(b []byte) bool { return scrub.PrefilterAllows(b) }
+
+// fsyncCount and refusalCount read the WRITER-SEAT measurements a test needs,
+// and fail the test when the status path did not measure them: an arithmetic
+// assertion must never be satisfied by a zero that means "not measured"
+// (SPEC-01 §3.10b, TRBL-130).
+func fsyncCount(t *testing.T, st types.LedgerStatus) int64 {
+	t.Helper()
+	n, ok := st.FsyncCount()
+	if !ok {
+		t.Fatalf("status did not measure fsync_calls (unmeasured=%v); the writer seat always does", st.Unmeasured)
+	}
+	return n
+}
+
+func refusalCount(t *testing.T, st types.LedgerStatus) uint64 {
+	t.Helper()
+	n, ok := st.Refusals()
+	if !ok {
+		t.Fatalf("status did not measure backpressure_total (unmeasured=%v); the writer seat always does", st.Unmeasured)
+	}
+	return n
+}

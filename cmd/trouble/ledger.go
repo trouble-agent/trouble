@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	ledger "github.com/trouble-agent/trouble/internal/ledger"
@@ -189,14 +190,31 @@ func cmdLedgerStatus(args []string) int {
 // index line whose degraded flag is the §2.4 exit-1 condition and whose §3.8
 // trigger values §4.5 promises beside their thresholds. The JSON form is the
 // machine contract.
+//
+// A member this status path did not measure prints as "unmeasured" instead of a
+// zero (SPEC-01 §3.10b, TRBL-130): `ledger status` is the read-only path, so the
+// writer-seat counters are absent by construction, and the operator must not read
+// a 0 that means "this process never looked". The JSON carries the same fact as
+// omitted keys plus the `unmeasured` reasons.
 func printLedgerStatus(st types.LedgerStatus) {
-	fmt.Printf("ledger: last_seq=%d last_ts=%s stall_s=%.0f loss_window_ms=%d\n", st.LastSeq, st.LastTS, st.StallS, st.LossWindowMS)
+	stall, stallOK := st.StallSeconds()
+	fmt.Printf("ledger: last_seq=%d last_ts=%s stall_s=%s loss_window_ms=%d\n",
+		st.LastSeq, st.LastTS, measuredFloat(stall, stallOK, "%.0f"), st.LossWindowMS)
 	fmt.Printf("day:    %s gen=%d part=%d file=%s bytes=%d records=%d\n", st.Day, st.Gen, st.Part, st.File, st.Bytes, st.Records)
+	calls, callsOK := st.FsyncCount()
+	rate, rateOK := st.FsyncRate()
+	fmt.Printf("fsync:  calls=%s per_record=%s (writer-seat counters; unmeasured on the read-only path)\n",
+		measuredInt(calls, callsOK), measuredFloat(rate, rateOK, "%.6f"))
 	// SPEC-01 §3.5b: refusals and the records that account for them sit on ONE
 	// line, so an operator can compare refused with recorded at a glance and
-	// see immediately when data was lost without a record.
-	fmt.Printf("queue:  depth=%d cap=%d backpressure_total=%d gap_records=%d est_lost_total=%d\n",
-		st.QueueDepth, st.QueueCap, st.BackpressureTotal, st.GapRecords, st.EstLostTotal)
+	// see immediately when data was lost without a record. backpressure_total is
+	// a writer-seat measurement, so it reads "unmeasured" on this path while
+	// gap_records/est_lost_total — the ledger's own record of the same loss —
+	// stay exact.
+	depth, depthOK := st.QueueLen()
+	refusals, refusalsOK := st.Refusals()
+	fmt.Printf("queue:  depth=%s cap=%d backpressure_total=%s gap_records=%d est_lost_total=%d\n",
+		measuredInt(int64(depth), depthOK), st.QueueCap, measuredUint(refusals, refusalsOK), st.GapRecords, st.EstLostTotal)
 	fmt.Printf("writer: pid=%d lock_held=%t version=%s\n", st.WriterPID, st.WriterLockHeld, st.WriterVersion)
 	fmt.Printf("disk:   bytes=%d budget=%d (%.1f%%)\n", st.DiskBytes, st.DiskBudgetBytes,
 		100*float64(st.DiskBytes)/float64(max64(st.DiskBudgetBytes, 1)))
@@ -209,6 +227,30 @@ func printLedgerStatus(st types.LedgerStatus) {
 	// SPEC-01 §3.10a: the ladder's ledger-derived rung counters, so an operator
 	// can tell remediation from detection without opening the ledger.
 	fmt.Printf("runs:   play_runs=%d agent_runs=%d (rung entries in the day's records)\n", st.PlayRuns, st.AgentRuns)
+}
+
+// The three helpers below render a measurement the status path took, or
+// "unmeasured" when it is absent — the text form of the §3.10b rule that a
+// missing measurement is never printed as a zero (TRBL-130).
+func measuredInt(v int64, ok bool) string {
+	if !ok {
+		return "unmeasured"
+	}
+	return strconv.FormatInt(v, 10)
+}
+
+func measuredUint(v uint64, ok bool) string {
+	if !ok {
+		return "unmeasured"
+	}
+	return strconv.FormatUint(v, 10)
+}
+
+func measuredFloat(v float64, ok bool, layout string) string {
+	if !ok {
+		return "unmeasured"
+	}
+	return fmt.Sprintf(layout, v)
 }
 
 func max64(a, b int64) int64 {

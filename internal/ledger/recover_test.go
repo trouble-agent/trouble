@@ -385,15 +385,19 @@ func TestSeqRecoveryFromHeadHint(t *testing.T) {
 			clk := newFakeClock(day)
 			l := testLedgerAt(t, root, clk)
 			st := l.Status()
-			if st.LastSeqPending < c.wantMin {
-				t.Errorf("LastSeqPending = %d, want >= %d (max(HEAD, file) rule)", st.LastSeqPending, c.wantMin)
+			pending, ok := st.PendingSeq()
+			if !ok {
+				t.Fatalf("live status did not measure last_seq_pending (unmeasured=%v)", st.Unmeasured)
+			}
+			if pending < c.wantMin {
+				t.Errorf("LastSeqPending = %d, want >= %d (max(HEAD, file) rule)", pending, c.wantMin)
 			}
 			rec := mustAppend(t, l, eventDraft("psi", "psi:sha256v1:after", "cc", 0))
 			if rec.Seq <= c.wantMin {
 				t.Errorf("next seq = %d, want > %d: the allocator never goes backwards", rec.Seq, c.wantMin)
 			}
-			if rec.Seq != st.LastSeqPending+1 {
-				t.Errorf("next seq = %d, want LastSeqPending+1 = %d", rec.Seq, st.LastSeqPending+1)
+			if rec.Seq != pending+1 {
+				t.Errorf("next seq = %d, want LastSeqPending+1 = %d", rec.Seq, pending+1)
 			}
 		})
 	}

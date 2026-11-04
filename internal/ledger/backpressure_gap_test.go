@@ -221,7 +221,7 @@ func TestBackpressureRefusalsAreRecordedAsGap(t *testing.T) {
 	refused1, drain1 := burstRefusals(t, l, perBurst, 3, "b1")
 	unwedge()
 	drain1()
-	if got, want := l.Status().BackpressureTotal, uint64(refused1); got != want {
+	if got, want := refusalCount(t, l.Status()), uint64(refused1); got != want {
 		t.Fatalf("backpressure_total = %d, want %d (one per refused call)", got, want)
 	}
 	totalRefused += refused1
@@ -266,8 +266,8 @@ func TestBackpressureRefusalsAreRecordedAsGap(t *testing.T) {
 	// (The recorded-surface fields of status are pinned separately, in
 	// backpressure_status_test.go.)
 	st := l.Status()
-	if want := uint64(totalRefused); st.BackpressureTotal != want {
-		t.Errorf("backpressure_total = %d, want %d", st.BackpressureTotal, want)
+	if want := uint64(totalRefused); refusalCount(t, st) != want {
+		t.Errorf("backpressure_total = %d, want %d", refusalCount(t, st), want)
 	}
 	// The fold carries the diagnostic an operator needs: the queue cap and the
 	// wait that expired, in the record itself.

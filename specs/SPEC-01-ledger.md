@@ -5,7 +5,7 @@ Area prefix: TROUBLE-LEDGER
 Package: `internal/ledger`
 Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
 Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
-ACs: AC-6, AC-22, AC-24, AC-26, AC-30, AC-35
+ACs: AC-6, AC-22, AC-24, AC-26, AC-30, AC-35, AC-36
 PRD: §03, §04a, §06b, §11
 
 ## 1. Purpose
@@ -89,16 +89,17 @@ func (l *Ledger) Verify(ctx context.Context, day string) (VerifyReport, error) /
 `Append` fills `Seq`, `RecID`, `TS` and `SchemaVersion`; a draft that supplies any of them is refused
 (TROUBLE-LEDGER-001, `payload.reason=validation`). The ledger is the only seq allocator (§3.5).
 
-`VerifyReport` is package-local (returned by the CLI verb, never an HTTP body):
+`VerifyReport` is package-local (returned by the CLI verb, never an HTTP body). Its three collection members
+are always arrays on the wire — empty when the walk found nothing, never `null` (§3.10b):
 
 ```go
 type VerifyReport struct {
     Day string `json:"day"`; Files []string `json:"files"`; Lines int64 `json:"lines"`
-    SeqHoles []struct{ From, To uint64 } `json:"seq_holes"`
+    SeqHoles []struct{ From, To uint64 } `json:"seq_holes"`   // §3.10b: [] when clean, never null
     TornLines, CorruptLines, NewerSchema int `json:"torn_lines,corrupt_lines,newer_schema"`
     PayloadHashMismatches int `json:"payload_hash_mismatches"`
     TombstoneMismatches int `json:"tombstone_mismatches"`; Counts GroupCounters `json:"counts"`
-    OK bool `json:"ok"`; Errors []string `json:"errors"`
+    OK bool `json:"ok"`; Errors []string `json:"errors"`      // §3.10b: [] when clean, never null
 }
 ```
 
@@ -584,9 +585,11 @@ EstLostTotal int64 `json:"est_lost_total"` // §3.5b: sum of their est_lost
 credited on durable writes) and `ReadStatus()` (the read-only CLI path: derived from the day's partitions
 exactly as §3.10a derives the rung counters) publish them, and the two paths must report the same numbers
 for the same ledger — a fold only the live writer can see would be a fact about a process, not about the
-ledger. `trouble ledger status` prints both on the queue line beside `backpressure_total`, so
-`est_lost_total` short of `backpressure_total` reads as loss the ledger cannot account for — visible,
-instead of invisible.
+ledger. The refused side is the opposite case: `backpressure_total` counts refusals inside the writing
+process, so the read-only path does not report it at all (§3.10b) rather than report a 0 that would read as
+"no refusals happened". `trouble ledger status` prints both ledger-side numbers on the queue line, so
+`est_lost_total` short of the refusals the writer counted reads as loss the ledger cannot account for —
+visible, instead of invisible.
 
 ### 3.6 The in-memory index: structures, budget, degradation (mandate e)
 
@@ -836,24 +839,25 @@ type IndexStats struct {
 }
 
 type LedgerStatus struct {
-    LastSeq           uint64    `json:"last_seq"`           // durable watermark (fsynced)
-    LastSeqPending    uint64    `json:"last_seq_pending"`   // allocated, not yet fsynced
+    LastSeq           uint64    `json:"last_seq"`                     // durable watermark (fsynced)
+    LastSeqPending    *uint64   `json:"last_seq_pending,omitempty"`   // §3.10b: writer seat only
     LastTS            string    `json:"last_ts"`
-    StallS            float64   `json:"stall_s"`
-    LossWindowMS      int       `json:"loss_window_ms"`     // §2.1, = fsync_window_ms
+    StallS            *float64  `json:"stall_s,omitempty"`            // §3.10b: both paths; absent when there is no watermark
+    LossWindowMS      int       `json:"loss_window_ms"`               // §2.1, = fsync_window_ms
     Day               string    `json:"day"`
     Gen               int       `json:"gen"`
     Part              int       `json:"part"`
     File              string    `json:"file"`
     Bytes             int64     `json:"bytes"`
     Records           int64     `json:"records"`
-    FsyncCalls        int64     `json:"fsync_calls"`
-    FsyncPerRecord    float64   `json:"fsync_per_record"`
-    QueueDepth        int       `json:"queue_depth"`
-    QueueCap          int       `json:"queue_cap"`
-    BackpressureTotal uint64    `json:"backpressure_total"`
-    GapRecords        int64     `json:"gap_records"`     // §3.5b: backpressure gap records the ledger carries
-    EstLostTotal      int64     `json:"est_lost_total"`  // §3.5b: sum of their est_lost
+    FsyncCalls        *int64    `json:"fsync_calls,omitempty"`        // §3.10b: writer seat only
+    FsyncPerRecord    *float64  `json:"fsync_per_record,omitempty"`   // §3.10b: writer seat only, and no_records
+    QueueDepth        *int      `json:"queue_depth,omitempty"`        // §3.10b: writer seat only
+    QueueCap          int       `json:"queue_cap"`                    // policy default, not a measurement
+    BackpressureTotal *uint64   `json:"backpressure_total,omitempty"` // §3.10b: writer seat only
+    GapRecords        int64     `json:"gap_records"`                  // §3.5b: backpressure gap records the ledger carries
+    EstLostTotal      int64     `json:"est_lost_total"`               // §3.5b: sum of their est_lost
+    Unmeasured        map[string]string `json:"unmeasured,omitempty"` // §3.10b: absent member -> reason
     WriterPID         int       `json:"writer_pid"`
     WriterVersion     string    `json:"writer_version"`
     DiskBytes         int64     `json:"disk_bytes"`
@@ -962,6 +966,12 @@ type CompactionResult struct {
 }
 ```
 
+The two documents below are the WRITER-SEAT shape (the daemon's `Status()` and the index's stats), where
+every counter is measured: no member is listed in `unmeasured` and none is absent. `trouble ledger status
+--json` — the read-only walk (§2.4) — omits the five members marked §3.10b (`last_seq_pending`,
+`fsync_calls`, `fsync_per_record`, `queue_depth`, `backpressure_total`) and names each in `unmeasured`
+with `in_process_counter`; everything else is identical.
+
 ```json
 {"last_seq":41207,"last_seq_pending":41209,"last_ts":"2026-09-16T09:14:03.221Z","stall_s":1.2,"loss_window_ms":200,"day":"2026-09-16","gen":0,"part":1,"file":"2026-09-16.jsonl","bytes":30408704,"records":41207,"fsync_calls":11,"fsync_per_record":0.000267,"queue_depth":0,"queue_cap":65536,"backpressure_total":0,"gap_records":0,"est_lost_total":0,"writer_pid":2028599,"writer_version":"0.1.0","disk_bytes":30408704,"disk_budget_bytes":2147483648,"index":{"entries":41207,"groups":7,"groups_cold":0,"incidents":2,"sources":3,"days":1,"files_scanned":1,"bytes_scanned":30408704,"lines_scanned":41207,"torn_lines":1,"corrupt_lines":0,"skipped_newer_schema":0,"build_ms":412,"budget_ms":9000,"budget_bytes":536870912,"index_bytes":4194304,"scan_rate_mibs":148.2,"degraded":false,"degraded_reason":"","truncated_before_ts":"","cold_evictions_per_min":0}}
 {"host_id":"7f3a91c2d4e5b607","source":"sentinel:payment-worker","zone":"loopback","last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"last_seq":41207,"events_total":6401,"events_24h":6401,"gaps_24h":0,"dropped_24h":0,"redactions_24h":3,"canary_seen":true,"canary_last_ts":"2026-09-16T09:13:00.000Z"}
@@ -996,6 +1006,43 @@ derivation has three properties a live gauge cannot claim:
 The absent case is zero, and it is meaningful: `play_runs: 0` on a ledger with incidents is the
 signature of detection without remediation. `--json` stays additive: every pre-existing field keeps
 its name and meaning, and both counters are appended beside `disk_budget_bytes`.
+
+### 3.10b Measured, or absent with a reason — never a zero (amendment TRBL-130)
+
+`trouble ledger status` takes the read-only walk (§2.4). Some members of `LedgerStatus` are a property of
+the ledger's files and some are a property of the PROCESS holding the writer seat. The second kind cannot be
+measured by the first path, and such a member is then ABSENT — not 0:
+
+| Member | Measured by | Absent from | Reason |
+|---|---|---|---|
+| `last_seq_pending` | the writer seat | the read-only walk | `in_process_counter` |
+| `fsync_calls`, `fsync_per_record` | the writer seat | the read-only walk | `in_process_counter`; the rate is also `no_records` when the ledger has no records |
+| `queue_depth` | the writer seat | the read-only walk | `in_process_counter` |
+| `backpressure_total` | the writer seat | the read-only walk | `in_process_counter` |
+| `stall_s` | BOTH paths (the walk computes `last_ts` against the clock) | either path, on a ledger with no record | `no_records` |
+
+An absent member is omitted from `--json` (a pointer with `omitempty`) and named in `unmeasured`, a
+`field → reason` map whose values are `in_process_counter` and `no_records`. The map is what makes the
+omission readable rather than merely quiet: a script learns that the path could not look, instead of having
+to infer it from a missing key. 0 is reserved for a measurement that happened — the writer seat's own
+`Status()` document carries all five counters and names nothing as unmeasured, because it measured them. The
+text stanza prints `unmeasured` where a counter is absent, so a human never reads a zero for a number the
+command did not take.
+
+This is §3.10a's absent case seen from the other side. `play_runs: 0` is a FACT about the ledger — detection
+without remediation — and stays a zero; `fsync_calls` is a fact about a process and disappears when that
+process is not the one answering. The same rule bounds what the read-only path may claim: the members it
+CAN derive (`records`, `stall_s`, `gap_records`, `est_lost_total`, `play_runs`, `agent_runs`, the disk
+numbers) are reported with real values on both paths and must agree for the same ledger.
+
+The verify report (§2.2) carries the same rule for collections: `seq_holes`, `files` and `errors` are ALWAYS
+arrays, empty when the walk found nothing. A nil slice marshals to `null`, and `null` reads exactly like "not
+computed", so a clean ledger and an unwalked ledger produced the same document; `[]` says "this walk found
+no holes" and cannot be mistaken for silence.
+
+`--json` stays additive apart from those five members, which go from a value to an omission. A consumer that
+read `status.fsync_calls` must now branch on presence (`unmeasured` is what to branch on); a consumer that
+silently read the old absence as 0 was reading a number the command never measured.
 
 ## 4. Wiring
 
@@ -1193,7 +1240,8 @@ Test files under `internal/ledger/`, all with the measured numbers as regression
 | `ac_test.go` | **AC-6**: 1 M synthetic appends → seq has no holes, every line parses, every record has non-empty `origin.host_id`/`origin.source` and a `rec_id`, and no byte of a written file changes; **AC-22**: three records (journald, sentinel, collector) sharing one `merge_key` and three different sigs → `IncidentBySig`/merge-key index resolve to one incident and one group, while two distinct merge keys stay two; **AC-26**: a 20-step scripted ladder fixture (SPEC-05's harness) + a kill-switch flip inside it → `Evidence(inc)` returns ≥ 1 record per ladder state in seq order with no gap between the incident's first and last seq, and the kill-switch checkpoint is present | AC-6: 0 holes, 0 header violations; AC-22: 1 group / 1 incident, 0 duplicates; AC-26: 20/20 steps present, 0 missing seq |
 | `internal/ledger/page_test.go` | **AC-30**: token grammar round-trip (opaque, stable within a generation); a multi-generation corpus walked at `page_size` 1, 3, 7 and 50: no record repeated, no record skipped, `next_page_token=""` exactly at the end; drop-oldest-generation mid-walk → `Reset=true` + newest-first restart with **0 HTTP 500s**; tokens that are dropped/foreign/unparsable → the matching `ResetReason` through `PageFromTokenString`; `page_size` clamp (0 → default, >max → max, per-ledger override honoured) and the negative-value 400; the `.idx` rebuild path (deleted, torn and `Bytes`/`Sha256`-mismatched sidecars all discard + rebuild field-for-field); a cold-read page stays `Partial=true` with real scanned counts and bounded by `page_size`; a page changes no index state | every record exactly once per walk; `ScannedLines ≤ offset_stride + page_size` per file per page (the probe is the one extra bounded read and is asserted times two); 0 unbounded scans |
 | `internal/ledger/sidecar_test.go` | `.idx` written at rotation and at compaction with exact count/offsets/seq range/min-max ts; rebuild with the `.idx` deleted; rebuild from a torn `.idx`; a sidecar whose `Bytes`/`Sha256` mismatch the file → discard + rebuild + `IndexStats` flag; a time window outside `[MinTS, MaxTS]` → 0 bytes read; a window inside it reads only the straddling pages | rebuilt sidecar equals the original field-for-field; 0 bytes read for an out-of-range window; a mismatched sidecar never answers a page |
-| `internal/ledger/backpressure_gap_test.go` | **AC-35** §3.5b: the queue is capped and `max_enqueue_wait` is expired against a real stalled flush goroutine, so producers are refused through the shipping path (`TestBackpressureRefusalsAreRecordedAsGap` — two saturated bursts produce two folded `gap{cause=backpressure}` records whose `est_lost` sum equals the refusals the producers saw, each naming the queue cap and wait in `cause_detail`); `TestBackpressureDropSurfaceAgreesAcrossStatusPaths` — `gap_records`/`est_lost_total` equal that refusal count on the live writer AND on the read-only status, and the read-only `backpressure_total` stays 0 because it is an in-process counter; `TestBackpressureFoldFlushedOnStop` — a tally with no batch boundary left is written by the close path | sum(est_lost) == refusals exactly; one record per drain window; a refusal leaves a record, never silence |
+| `internal/ledger/backpressure_gap_test.go` | **AC-35** §3.5b: the queue is capped and `max_enqueue_wait` is expired against a real stalled flush goroutine, so producers are refused through the shipping path (`TestBackpressureRefusalsAreRecordedAsGap` — two saturated bursts produce two folded `gap{cause=backpressure}` records whose `est_lost` sum equals the refusals the producers saw, each naming the queue cap and wait in `cause_detail`); `TestBackpressureDropSurfaceAgreesAcrossStatusPaths` — `gap_records`/`est_lost_total` equal that refusal count on the live writer AND on the read-only status, and the read-only `backpressure_total` is ABSENT with `in_process_counter` as its reason (§3.10b) because it is an in-process counter; `TestBackpressureFoldFlushedOnStop` — a tally with no batch boundary left is written by the close path | sum(est_lost) == refusals exactly; one record per drain window; a refusal leaves a record, never silence |
+| `internal/ledger/unmeasured_status_test.go` | **AC-36** §3.10b: `TestReadStatusOmitsWriterSeatCounters` — the read-only walk reports no value for `fsync_calls`/`fsync_per_record`/`queue_depth`/`last_seq_pending`/`backpressure_total`, names each in `unmeasured` with `in_process_counter`, keeps the members it CAN derive (`stall_s`, `records`, the refusal folds) real, and the writer seat's own document carries all five keys; `TestLiveStatusMarksRateAsNoRecords` — a ledger with no records has no denominator for the rate and no watermark to be stalled since, so both are absent with `no_records` on both paths; `TestVerifyReportCollectionsAreAlwaysArrays` — `seq_holes`/`files`/`errors` marshal as arrays on both verify paths, `[]` when clean and a populated array when a hole exists | no `"fsync_calls":0` from a path that did not measure it; no `"seq_holes": null`; a JSON key is present exactly when the path measured it |
 
 Every threshold above is also printed by `trouble ledger status --json` as a live value beside its limit, so
 a regression is visible in production and not only in CI.

@@ -53,7 +53,7 @@ func TestAppendBatchCostsOneGroupCommitWindow(t *testing.T) {
 	if len(recs) != k {
 		t.Fatalf("AppendBatch returned %d records, want %d", len(recs), k)
 	}
-	if got := after.FsyncCalls - before.FsyncCalls; got != 1 {
+	if got := fsyncCount(t, after) - fsyncCount(t, before); got != 1 {
 		t.Fatalf("one batch of %d records produced %d durable commits, want 1: the §3.5a batch is not one group commit", k, got)
 	}
 	if got := after.Records - before.Records; got != k {
@@ -79,7 +79,7 @@ func TestAppendBatchCostsOneGroupCommitWindow(t *testing.T) {
 			fmt.Sprintf("%064x", i), 0))
 	}
 	after = l.Status()
-	if got := after.FsyncCalls - before.FsyncCalls; got != k {
+	if got := fsyncCount(t, after) - fsyncCount(t, before); got != k {
 		t.Fatalf("the control arm produced %d commits for %d sequential appends, want %d: the §7 serial cost model changed", got, k, k)
 	}
 }
@@ -196,7 +196,7 @@ func TestAppendBatchClampedByMaxBatchRecords(t *testing.T) {
 		t.Fatalf("got %d records, want %d", len(recs), k)
 	}
 	wantCommits := (k + cap - 1) / cap // ceil(K/cap)
-	if got := after.FsyncCalls - before.FsyncCalls; got != int64(wantCommits) {
+	if got := fsyncCount(t, after) - fsyncCount(t, before); got != int64(wantCommits) {
 		t.Fatalf("%d records at cap %d produced %d commits, want %d (ceil)", k, cap, got, wantCommits)
 	}
 	// The split is invisible to the seq space: still contiguous and ordered.

@@ -734,9 +734,15 @@ func (w *writer) snapshot() types.LedgerStatus {
 	st := w.st
 	w.mu.Unlock()
 	lastSeq := w.lastSeq.Load()
+	pending := w.pendingSeq.Load()
+	// SPEC-01 §3.10b (TRBL-130): the counters below are measured HERE, in the
+	// process that owns the writer seat, so they are always present on a live
+	// snapshot — a measured 0 is reported as 0, and only an unmeasured value is
+	// absent.
+	calls := w.fsyncCalls.Load()
 	return types.LedgerStatus{
 		LastSeq:        lastSeq,
-		LastSeqPending: w.pendingSeq.Load(),
+		LastSeqPending: &pending,
 		LastTS:         st.lastTS,
 		Day:            st.day,
 		Gen:            st.gen,
@@ -744,7 +750,7 @@ func (w *writer) snapshot() types.LedgerStatus {
 		File:           partName(st.day, st.gen, st.part),
 		Bytes:          st.bytes,
 		Records:        st.records,
-		FsyncCalls:     w.fsyncCalls.Load(),
+		FsyncCalls:     &calls,
 		WriterPID:      os.Getpid(),
 		GapRecords:     int64(w.gapRecords.Load()),
 		EstLostTotal:   int64(w.estLost.Load()),

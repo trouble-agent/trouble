@@ -231,12 +231,12 @@ func TestOneIngestPostOneGroupCommitWindow(t *testing.T) {
 
 	// One settled warm-up write (a canary-less Start writes none; the boot
 	// lifecycle record landed at Open, before our counter read).
-	before := l.Status().FsyncCalls
+	before := fsyncCalls(t, l.Status())
 	start := time.Now()
 	if id := chain.postOneEvent(t, 1); id == "" {
 		t.Fatalf("ingest POST returned no event id")
 	}
-	after := l.Status().FsyncCalls
+	after := fsyncCalls(t, l.Status())
 	elapsed := time.Since(start)
 
 	if got := after - before; got != 1 {
@@ -250,12 +250,12 @@ func TestOneIngestPostOneGroupCommitWindow(t *testing.T) {
 	ctrl := newIngestChain(t, false)
 	lc := ctrl.l
 	ctrl.start(t)
-	before = lc.Status().FsyncCalls
+	before = fsyncCalls(t, lc.Status())
 	start = time.Now()
 	if id := ctrl.postOneEvent(t, 2); id == "" {
 		t.Fatalf("control POST returned no event id")
 	}
-	after = lc.Status().FsyncCalls
+	after = fsyncCalls(t, lc.Status())
 	elapsed = time.Since(start)
 	if got := after - before; got != 2 {
 		t.Fatalf("the pre-fix control produced %d windows for one POST, want 2 (event + group): the control arm no longer models the old posture", got)

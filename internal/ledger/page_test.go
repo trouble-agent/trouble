@@ -104,7 +104,7 @@ func multiGenerationLedger(t *testing.T, clk *fakeClock, days, perDay int, muts 
 				i%2,
 			))
 		}
-		fsBefore := l.Status().FsyncCalls
+		fsBefore := fsyncCount(t, l.Status())
 		recs, err := l.AppendBatch(context.Background(), drafts)
 		if err != nil {
 			t.Fatalf("AppendBatch(day %d, %d records): %v", d, perDay, err)
@@ -125,7 +125,7 @@ func multiGenerationLedger(t *testing.T, clk *fakeClock, days, perDay int, muts 
 			batch = 1
 		}
 		want := (perDay + batch - 1) / batch
-		if got := l.Status().FsyncCalls - fsBefore; got > int64(want)+1 {
+		if got := fsyncCount(t, l.Status()) - fsBefore; got > int64(want)+1 {
 			t.Fatalf("day %d of %d records took %d group-commit windows (want ≤%d at max_batch_records %d, +1 §2.1 catch-up); the fixture is back to per-record flushes (TRBL-098)", d, perDay, got, want, batch)
 		}
 		for _, rec := range recs {

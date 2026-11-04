@@ -1034,26 +1034,31 @@ type IndexStats struct {
 }
 
 type LedgerStatus struct {
-    LastSeq           uint64    `json:"last_seq"`           // durable watermark (fsynced)
-    LastSeqPending    uint64    `json:"last_seq_pending"`   // allocated, not yet fsynced
+    LastSeq           uint64    `json:"last_seq"`                     // durable watermark (fsynced)
+    LastSeqPending    *uint64   `json:"last_seq_pending,omitempty"`   // SPEC-01 §3.10b: writer seat only
     LastTS            string    `json:"last_ts"`
-    StallS            float64   `json:"stall_s"`
-    LossWindowMS      int       `json:"loss_window_ms"`     // §2.1, = fsync_window_ms
+    StallS            *float64  `json:"stall_s,omitempty"`            // SPEC-01 §3.10b: absent when there is no watermark
+    LossWindowMS      int       `json:"loss_window_ms"`               // SPEC-01 §2.1, = fsync_window_ms
     Day               string    `json:"day"`
     Gen               int       `json:"gen"`
     Part              int       `json:"part"`
     File              string    `json:"file"`
     Bytes             int64     `json:"bytes"`
     Records           int64     `json:"records"`
-    FsyncCalls        int64     `json:"fsync_calls"`
-    FsyncPerRecord    float64   `json:"fsync_per_record"`
-    QueueDepth        int       `json:"queue_depth"`
-    QueueCap          int       `json:"queue_cap"`
-    BackpressureTotal uint64    `json:"backpressure_total"`
+    FsyncCalls        *int64    `json:"fsync_calls,omitempty"`        // SPEC-01 §3.10b: writer seat only
+    FsyncPerRecord    *float64  `json:"fsync_per_record,omitempty"`   // SPEC-01 §3.10b: writer seat only, and no_records
+    QueueDepth        *int      `json:"queue_depth,omitempty"`        // SPEC-01 §3.10b: writer seat only
+    QueueCap          int       `json:"queue_cap"`                    // policy default, not a measurement
+    BackpressureTotal *uint64   `json:"backpressure_total,omitempty"` // SPEC-01 §3.10b: writer seat only
+    GapRecords        int64     `json:"gap_records"`                  // SPEC-01 §3.5b
+    EstLostTotal      int64     `json:"est_lost_total"`               // SPEC-01 §3.5b
+    Unmeasured        map[string]string `json:"unmeasured,omitempty"` // SPEC-01 §3.10b: absent member -> reason
     WriterPID         int       `json:"writer_pid"`
     WriterVersion     string    `json:"writer_version"`
     DiskBytes         int64     `json:"disk_bytes"`
     DiskBudgetBytes   int64     `json:"disk_budget_bytes"`
+    PlayRuns          int64     `json:"play_runs"`   // SPEC-01 §3.10a
+    AgentRuns         int64     `json:"agent_runs"`  // SPEC-01 §3.10a
     Index             IndexStats `json:"index"`
 }
 
@@ -1155,6 +1160,9 @@ type CompactionResult struct {
     ErrorCode           string   `json:"error_code"`
 }
 ```
+
+The first document below is the writer-seat `LedgerStatus` (every counter measured); the read-only
+`trouble ledger status --json` omits the five members marked SPEC-01 §3.10b and names them in `unmeasured`.
 
 ```json
 {"last_seq":41207,"last_seq_pending":41209,"last_ts":"2026-09-16T09:14:03.221Z","stall_s":1.2,"loss_window_ms":200,"day":"2026-09-16","gen":0,"part":1,"file":"2026-09-16.jsonl","bytes":30408704,"records":41207,"fsync_calls":11,"fsync_per_record":0.000267,"queue_depth":0,"queue_cap":65536,"backpressure_total":0,"writer_pid":2028599,"writer_version":"0.1.0","disk_bytes":30408704,"disk_budget_bytes":2147483648,"index":{"entries":41207,"groups":7,"groups_cold":0,"incidents":2,"sources":3,"days":1,"files_scanned":1,"bytes_scanned":30408704,"lines_scanned":41207,"torn_lines":1,"corrupt_lines":0,"skipped_newer_schema":0,"build_ms":412,"budget_ms":9000,"budget_bytes":536870912,"index_bytes":4194304,"scan_rate_mibs":148.2,"degraded":false,"degraded_reason":"","truncated_before_ts":"","cold_evictions_per_min":0}}

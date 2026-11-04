@@ -113,8 +113,12 @@ func TestBootPhaseTableAttributesTheReadyLatency(t *testing.T) {
 		}
 		t.Logf("    %-18s %10s", name, d.Round(time.Millisecond))
 	}
+	calls, rate := fsyncCalls(t, st), 0.0
+	if measured, ok := st.FsyncRate(); ok {
+		rate = measured
+	}
 	t.Logf("ledger: %d records on the READY path in %d durable commits (%.2f commits/record, loss window %dms)",
-		st.Records, st.FsyncCalls, st.FsyncPerRecord, st.LossWindowMS)
+		st.Records, calls, rate, st.LossWindowMS)
 
 	// (4) The measured cause: TRBL-044 (§3.3a batch reconcile + §3.5a batch
 	// append) collapsed the reconcile's N sequential durable commits into
@@ -133,10 +137,10 @@ func TestBootPhaseTableAttributesTheReadyLatency(t *testing.T) {
 			st.Records)
 		return
 	}
-	if st.FsyncCalls >= st.Records {
+	if calls >= st.Records {
 		t.Fatalf("%d records cost %d durable commits — the batch reconcile (§3.3a) is not engaged: "+
 			"a boot whose reconcile writes failed-unit records must batch them (TRBL-044), or it pays one "+
-			"group-commit window per record again", st.Records, st.FsyncCalls)
+			"group-commit window per record again", st.Records, calls)
 	}
 	ratio := 0.0
 	if second > 0 {
@@ -144,6 +148,6 @@ func TestBootPhaseTableAttributesTheReadyLatency(t *testing.T) {
 	}
 	t.Logf("batched: %d records in %d durable commits (%.2f commits/record) — the §3.3a batch reconcile "+
 		"collapsed the READY-path cost model; widest phase %s %s, %.1fx the next (%s %s)",
-		st.Records, st.FsyncCalls, st.FsyncPerRecord,
+		st.Records, calls, rate,
 		widestName, widest.Round(time.Millisecond), ratio, secondName, second.Round(time.Millisecond))
 }

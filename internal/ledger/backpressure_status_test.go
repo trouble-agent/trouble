@@ -40,7 +40,7 @@ func TestBackpressureDropSurfaceAgreesAcrossStatusPaths(t *testing.T) {
 	forceBoundary(t, l)
 
 	live := l.Status()
-	if got, want := live.BackpressureTotal, uint64(refused); got != want {
+	if got, want := refusalCount(t, live), uint64(refused); got != want {
 		t.Fatalf("live backpressure_total = %d, want %d", got, want)
 	}
 	if live.GapRecords != 1 {
@@ -58,8 +58,14 @@ func TestBackpressureDropSurfaceAgreesAcrossStatusPaths(t *testing.T) {
 		t.Fatalf("read-only status disagrees with the live writer: read-only gap_records=%d est_lost_total=%d, live gap_records=%d est_lost_total=%d",
 			ro.GapRecords, ro.EstLostTotal, live.GapRecords, live.EstLostTotal)
 	}
-	if ro.BackpressureTotal != 0 {
-		t.Errorf("read-only backpressure_total = %d, want 0: it is an in-process counter and a read-only status must not invent one", ro.BackpressureTotal)
+	// TRBL-130: the read-only path is not the writer and does not hold its
+	// refusal tally, so it must not invent one — the member is ABSENT and the
+	// reason is published, rather than a 0 that reads as "no refusals".
+	if got, ok := ro.Refusals(); ok {
+		t.Errorf("read-only backpressure_total = %d, want it absent: it is an in-process counter and a read-only status must not invent one", got)
+	}
+	if got, want := ro.Unmeasured["backpressure_total"], types.UnmeasuredInProcess; got != want {
+		t.Errorf("read-only unmeasured[backpressure_total] = %q, want %q", got, want)
 	}
 
 	// The records themselves must carry the same total the status reports, so

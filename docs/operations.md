@@ -23,7 +23,21 @@ configured value, and `docs_test.go` fails CI if this paragraph drifts from that
 | no holes or corruption | `trouble ledger verify` | non-zero exit; the report names the files |
 | disk inside budget | `trouble ledger status --json` | `disk_bytes` approaching `disk_budget_bytes` (default 2 GiB) |
 | index healthy | `trouble ledger status --json` | `index.degraded=true` with a reason, or cold evictions climbing |
-| refusals are accounted for | `trouble ledger status --json` (`backpressure_total`, `gap_records`, `est_lost_total`) | `est_lost_total` short of `backpressure_total` on a ledger whose writer is alive: refusals happened that no `gap` record can account for (SPEC-01 §3.5b). `backpressure_total` is an in-process counter, so it resets with the daemon while `gap_records`/`est_lost_total` are ledger facts |
+| refusals are accounted for | `trouble ledger status --json` (`gap_records`, `est_lost_total`; `backpressure_total` on the live writer only) | `est_lost_total` short of the refusals the writing process counted: refusals happened that no `gap` record can account for (SPEC-01 §3.5b). `backpressure_total` is an in-process counter, so the CLI's read-only path does not report it at all — the key is absent and `unmeasured.backpressure_total` reads `in_process_counter` (§3.10b) — while `gap_records`/`est_lost_total` are ledger facts both paths answer |
+
+`trouble ledger status` never reports a zero for a number it did not take. Both verbs are read-only
+(§2 above), so they cannot see the writer process's counters: `fsync_calls`, `fsync_per_record`,
+`queue_depth`, `last_seq_pending` and `backpressure_total` are omitted from `--json` and listed in an
+`unmeasured` map (`{"fsync_calls": "in_process_counter", …}`), and the text form prints `unmeasured` in
+their place. The numbers a file walk can derive — `records`, `stall_s`, `gap_records`, `est_lost_total`,
+`play_runs`, `agent_runs`, the disk figures — are present with real values on both paths and agree for the
+same ledger. A `0` therefore always means a measurement that happened. To read the writer-seat counters
+live, ask the process that holds the writer seat — they exist only in its memory and no file records them,
+so neither `ledger status` nor a file walk can ever report a number that would survive the daemon.
+
+`trouble ledger verify --json` always returns `seq_holes`, `files` and `errors` as arrays: `[]` means the
+walk found nothing, and a clean ledger can never be confused with one whose holes were not computed
+(SPEC-01 §3.10b).
 
 `trouble ledger verify` opens **no** lock: it is always safe to run against a live ledger. It reads
 the same files the writer is appending to, excludes a torn final line, and reports rather than

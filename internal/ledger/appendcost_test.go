@@ -53,7 +53,7 @@ func TestSequentialAppendsCostOneGroupCommitWindowEach(t *testing.T) {
 	// producer immediately (or lets Appends share a window), this count drops —
 	// that is a real improvement, but it invalidates the budget arithmetic in
 	// SPEC-12 §7b, so re-derive the READY budget in the same change.
-	if got := after.FsyncCalls - before.FsyncCalls; got != appends {
+	if got := fsyncCount(t, after) - fsyncCount(t, before); got != appends {
 		t.Fatalf("%d sequential appends produced %d durable commits, want %d: the boot's cost model "+
 			"(SPEC-12 §7b) assumes one group-commit window per record on the READY path; if this changed "+
 			"deliberately, re-derive the READY budget with it", appends, got, appends)

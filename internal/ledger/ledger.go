@@ -88,10 +88,15 @@ func HelpLedgerSection() string {
 // (SPEC-01 §4.4: `/health.json` shows the gap).
 func (l *Ledger) HealthLedgerFields() map[string]any {
 	st := l.Status()
+	// This is the writer-seat path, so the stall is measured; the accessor keeps
+	// the shape honest if a future path leaves it absent (/health.json's
+	// ledger_stall_s is a required float, so 0 is its "no measurement" value and
+	// only reachable on an empty ledger).
+	stall, _ := st.StallSeconds()
 	return map[string]any{
 		"ledger_last_seq":       st.LastSeq,
 		"ledger_last_ts":        st.LastTS,
-		"ledger_stall_s":        st.StallS,
+		"ledger_stall_s":        stall,
 		"ledger_bytes":          st.Bytes,
 		"ledger_loss_window_ms": st.LossWindowMS,
 		"ledger_degraded":       st.Index.Degraded,
@@ -678,12 +683,19 @@ func (l *Ledger) Close(ctx context.Context) error {
 }
 
 // Status is O(1): no I/O, no lock (SPEC-01 §2.3).
+//
+// This is the writer-seat path, so every in-process counter is measured and
+// present; only a quantity this ledger cannot define (a rate with no records, a
+// stall with no watermark) is left absent and named in Unmeasured
+// (SPEC-01 §3.10b, TRBL-130).
 func (l *Ledger) Status() types.LedgerStatus {
 	st := l.w.snapshot()
 	st.LossWindowMS = l.opts.Rotation.FsyncWindowMS
 	st.QueueCap = l.opts.Rotation.QueueCapRecords
-	st.QueueDepth = l.w.queueDepth()
-	st.BackpressureTotal = l.w.backpressure.Load()
+	depth := l.w.queueDepth()
+	st.QueueDepth = &depth
+	refusals := l.w.backpressure.Load()
+	st.BackpressureTotal = &refusals
 	// §3.5b: GapRecords / EstLostTotal arrive with the writer snapshot, credited
 	// only when a fold's bytes are durable. The read-only path derives the same
 	// numbers from the day files, so both status paths answer alike.
@@ -692,15 +704,26 @@ func (l *Ledger) Status() types.LedgerStatus {
 	st.DiskBytes = l.diskBytes()
 	st.Index = l.idx.stats()
 	if st.Records > 0 {
-		st.FsyncPerRecord = float64(st.FsyncCalls) / float64(st.Records)
+		if calls, ok := st.FsyncCount(); ok {
+			rate := float64(calls) / float64(st.Records)
+			st.FsyncPerRecord = &rate
+		}
+	} else {
+		// No records: the per-record rate has no denominator. 0 would read as
+		// "no fsyncs", which is a different (and false) statement.
+		st.MarkUnmeasured("fsync_per_record", types.UnmeasuredNoRecords)
 	}
 	if st.LastTS != "" {
 		if t, err := types.ParseUTC(st.LastTS); err == nil {
-			st.StallS = l.now().Sub(t).Seconds()
-			if st.StallS < 0 {
-				st.StallS = 0
+			stall := l.now().Sub(t).Seconds()
+			if stall < 0 {
+				stall = 0
 			}
+			st.StallS = &stall
 		}
+	}
+	if st.StallS == nil {
+		st.MarkUnmeasured("stall_s", types.UnmeasuredNoRecords)
 	}
 	return st
 }

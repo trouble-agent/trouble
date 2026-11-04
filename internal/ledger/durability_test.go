@@ -122,7 +122,7 @@ func TestFsyncCountIsStructural(t *testing.T) {
 	el := runAppends(t, l, int(n), batch)
 	after := l.Status()
 
-	deltaF := after.FsyncCalls - before.FsyncCalls
+	deltaF := fsyncCount(t, after) - fsyncCount(t, before)
 	deltaR := after.Records - before.Records
 	want := (deltaR + int64(batch) - 1) / int64(batch)
 	load := loadAvg1()

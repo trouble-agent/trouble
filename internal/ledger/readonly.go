@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
@@ -153,6 +154,13 @@ func diskBytes(root string) int64 {
 // LOCK file (open, no flock) for the writer PID, and walks day files for record
 // counts and last-sequence. This is the read-only path that SPEC-01 §2.4
 // requires for `ledger status` — the CLI verb must never touch the writer seat.
+//
+// Because it is not the writer, the writer-seat counters are NOT measurable
+// here: fsync_calls, fsync_per_record, queue_depth, last_seq_pending and
+// backpressure_total are left absent and named in Unmeasured with
+// "in_process_counter" (SPEC-01 §3.10b, TRBL-130). stall_s, the refusal folds
+// and every other member are derived from the files, so this path reports them
+// exactly as the writer seat does.
 func ReadStatus(root string) (types.LedgerStatus, error) {
 	st := types.LedgerStatus{
 		WriterPID:       -1, // signals "not read via writer"
@@ -261,13 +269,44 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 
 	st.DiskBytes = diskBytes(root)
 
+	// SPEC-01 §3.10b (TRBL-130): the writer-seat counters — the fdatasync
+	// counter and its rate, the enqueue queue, the allocated-not-yet-durable
+	// watermark, this process's refusal tally — belong to a process this walk is
+	// not. They are left ABSENT and the reason is published, so no reader sees a
+	// 0 that means "this path could not look"; the ledger-side answers
+	// (gap_records / est_lost_total) are derived below like any other fold.
+	for _, f := range []string{
+		"fsync_calls", "fsync_per_record", "queue_depth", "last_seq_pending", "backpressure_total",
+	} {
+		st.MarkUnmeasured(f, types.UnmeasuredInProcess)
+	}
+
 	if seqHoles > 0 {
 		st.Index.Degraded = true
 		st.Index.DegradedReason = "seq_gaps_detected"
 	}
 
-	// Fill in defaults that the daemon would set on open (SPEC-01 §2.5).
+	// The stall IS measurable here — it is last_ts against the current clock, the
+	// same arithmetic the writer seat does — so it is measured rather than
+	// dropped, and absent only when the ledger holds no record at all.
+	if lastTS != "" {
+		if t, terr := types.ParseUTC(lastTS); terr == nil {
+			stall := time.Since(t).Seconds()
+			if stall < 0 {
+				stall = 0
+			}
+			st.StallS = &stall
+		}
+	}
+	if st.StallS == nil {
+		st.MarkUnmeasured("stall_s", types.UnmeasuredNoRecords)
+	}
+
+	// Fill in defaults that the daemon would set on open (SPEC-01 §2.5). These
+	// are policy values, not measurements: they are the same numbers the daemon
+	// runs with, which is why both status paths can report them.
 	st.LossWindowMS = DefaultFsyncWindowMS
+	st.QueueCap = DefaultQueueCapRecords
 	st.DiskBudgetBytes = DefaultDiskBudgetBytes
 
 	return st, nil
@@ -479,5 +518,6 @@ func ReadVerify(root string, day string) (VerifyReport, error) {
 		len(rep.SeqHoles) == 0 && rep.PayloadHashMismatches == 0 &&
 		rep.TombstoneMismatches == 0 && len(rep.Errors) == 0
 
+	rep.normalize()
 	return rep, nil
 }

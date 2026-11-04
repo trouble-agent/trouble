@@ -194,3 +194,67 @@ func TestProductionDriverAdvancesASentinelIncidentToThePlayRung(t *testing.T) {
 			string(types.StPlayDrafted), string(types.RungPlay))
 	}
 }
+
+// TestTheCadenceLoopAdvancesWithoutAnExplicitDrive is the AC's wiring gate: it
+// proves the COMPOSITION ROOT drives the ladder, not that the driver works when
+// something calls it. No Drive call is made anywhere in this test — the incident
+// is injected the way a sensor or the sentinel injects one, and the only thing
+// that may move it is the cadence goroutine started in the background_loops
+// phase (SPEC-05 §4.4a).
+//
+// It is deliberately falsifiable: disable that goroutine and this test hangs out
+// its deadline and fails, while the driver-level tests still pass — which is
+// exactly why the row needed both.
+func TestTheCadenceLoopAdvancesWithoutAnExplicitDrive(t *testing.T) {
+	// The cadence is a resolved key, so the test passes it the way an operator
+	// would (flag > env > file > default). The default 30s would make this test
+	// a 30-second sleep; 50ms makes it a wiring assertion.
+	bootExtraArgs = []string{"--ladder-drive_interval", "50ms"}
+	h := bootDaemon(t)
+	if got := h.d.Cfg.Ladder.DriveInterval; string(got) != "50ms" {
+		t.Fatalf("resolved ladder.drive_interval = %q, want 50ms (the argv seam must reach the resolved config)", string(got))
+	}
+	if h.d.Ladder == nil || h.d.Store == nil {
+		t.Fatal("the boot built no ladder/store")
+	}
+	installPlay(t, h.d.Cfg.Registry.PlaysDir, "default@1.toml")
+
+	ctx := context.Background()
+	sig := types.NewSig(types.SigSource("sentinel"), "sha256", 1, []byte("trbl-123-cadence-digest-0001"))
+	rec, err := h.d.Store.Append(ctx, types.KGroup, sig.String(), "", map[string]any{
+		"op": "create", "digest": sig.DigestHex(),
+		"group_id": "grp_trbl123_cadence", "title": "trbl-123 cadence class",
+		"count": 1, "aggregate": true, "source": "collector",
+		"first_seen_ts": types.FormatUTC(time.Now()), "last_seen_ts": types.FormatUTC(time.Now()),
+		"events_upper_seq": 1, "norm_version": types.NormVersionV1,
+	})
+	if err != nil {
+		t.Fatalf("group record: %v", err)
+	}
+	sentinelToLadder(h.d, rec)
+
+	var incID string
+	for _, o := range h.d.Ledger.DashReader().OpenIncidents(100) {
+		if o.Sig == sig.String() {
+			incID = o.ID
+		}
+	}
+	if incID == "" {
+		t.Fatal("the sentinel group's incident did not open")
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		got, ierr := h.d.Ladder.Incident(ctx, incID)
+		if ierr != nil {
+			t.Fatalf("Incident: %v", ierr)
+		}
+		if got.State == types.StPlayDrafted && got.Rung == types.RungPlay {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("state/rung = %q/%q after 20s with NO Drive call: the cadence loop never ran (SPEC-05 §4.4a)", string(got.State), string(got.Rung))
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}

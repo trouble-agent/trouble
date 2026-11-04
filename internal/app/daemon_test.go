@@ -103,6 +103,12 @@ func bootDaemon(t *testing.T) *harness {
 // hold the pair fixed across attempts. bootDaemonWith clears it on return.
 var bootPortPicker func(t *testing.T) (int, int)
 
+// bootExtraArgs is the argv seam: the harness writes a FIXED config body, so a
+// test that needs a non-default resolved key passes it the way an operator
+// would (flag > env > file > default, SPEC-12 §2.5) instead of editing the
+// template for every caller. Cleared by bootDaemonWithIntervals.
+var bootExtraArgs []string
+
 // bootOnce performs ONE boot attempt: fresh state root, fresh token mint,
 // fresh port pick, config + env write, RunDaemon to READY. A boot the bind
 // preflight refuses (TROUBLE-LIFECYCLE-003) closes its own ledger and is
@@ -191,7 +197,7 @@ token_file = %q
 	ready := make(chan struct{})
 	go func() {
 		_, err := RunDaemon(ctx, BootOptions{
-			Args: []string{"--config", cfgPath},
+			Args: append([]string{"--config", cfgPath}, bootExtraArgs...),
 			Env:  []string{},
 			Log:  nil,
 			OnReady: func(d *Daemon) {
@@ -309,6 +315,7 @@ func bootDaemonWithIntervals(t *testing.T, so SubsystemOptions, heartbeatInterva
 	defer func() {
 		bootPortPicker = nil
 		bootPhaseObserver = nil
+		bootExtraArgs = nil
 	}()
 	h, err := runBootAttemptsWithIntervals(t, so, t.Fatalf, heartbeatInterval, idleHeartbeatInterval, checkerInterval)
 	if err != nil {

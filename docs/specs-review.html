@@ -126,7 +126,7 @@ deferred table), <code>deferred</code> (specified at interface level only; see �
 <td>SPEC-01</td>
 <td>ledger: record schema, sig format, ids, durability</td>
 <td>§03, §04a, §06b, §11</td>
-<td>AC-6, AC-22, AC-24, AC-26, AC-30</td>
+<td>AC-6, AC-22, AC-24, AC-26, AC-30, AC-35</td>
 <td>frozen</td>
 </tr>
 <tr>
@@ -430,6 +430,12 @@ item ships — see §6.1) · <strong>D</strong> = deferred to v1.0 (AC text reta
 <td>AC-34</td>
 <td>AC-34 Health status impossibility (SPEC-12 §3.3a, pinned): <code>status="ok"</code> is IMPOSSIBLE while any <code>subsystems[]</code> row reports <code>built=false</code> — over all 32 built-combinations of the five rows (<code>sentinel</code>, <code>issues</code>, <code>research</code>, <code>flow</code>, <code>skills</code>), exactly one, the all-built set, may read <code>ok</code>, and every set carrying at least one <code>built=false</code> row reads <code>degraded</code> (whichever row it is, in either shape — a refusal carrying its <code>TROUBLE-*-NNN</code> code or an unbuilt row with no refusal recorded — with <code>detail.subsystem_refused</code> + <code>detail.subsystem</code> or <code>detail.subsystem_unbuilt</code> naming THAT row), and <code>stalled</code> keeps its §3.3 precedence over both; the reverse is NOT claimed — all five <code>built=true</code> rows do not by themselves force <code>ok</code> (a degraded sensor, an unstamped build or a degraded hub tier still degrades an all-built response). The rule holds at the composition root too: the block the health surface reads is the live subsystem set's own report, a partial set (one member of an otherwise-live set absent) degrades the composed response, the block is never omitted or shortened (an unassembled set reports five not-built rows, never fewer), and the rows stay in build order.</td>
 <td>SPEC-12 §3.3a</td>
+<td>B</td>
+</tr>
+<tr>
+<td>AC-35</td>
+<td>AC-35 Ledger refusal accounting (SPEC-01 §3.5b): a producer refused at the write boundary with TROUBLE-LEDGER-001 <code>reason=backpressure</code> leaves a durable record of the loss — the writer tallies refusals without re-entering the refusing queue, folds them into ONE <code>gap{cause="backpressure", scope="ledger:queue"}</code> record per drain window carrying <code>est_lost</code>, <code>from_ts</code>/<code>to_ts</code> and a <code>cause_detail</code> naming the queue cap and <code>max_enqueue_wait</code>, and flushes a fold still open when the ledger closes; the sum of <code>est_lost</code> over those records equals the number of refusals they account for, with a crash or a failed write inside a drain window as the only, stated loss edge; and <code>trouble ledger status</code> reports the recorded side beside the refused side (<code>gap_records</code>, <code>est_lost_total</code>) from BOTH the live writer and the read-only path, with the same numbers for the same ledger, so a refusal cannot be invisible to an operator reading the ledger.</td>
+<td>SPEC-01 §3.5b</td>
 <td>B</td>
 </tr>
 </tbody>
@@ -820,6 +826,11 @@ resolved config, the ledger writer and the spool, and nothing consumes it in rev
 <td>none — the per-subsystem health block and the status rule are shipped behaviour (<code>internal/lifecycle/health.go</code>, <code>internal/app/subsystems.go</code>, <code>internal/app/dashdeps.go</code>), all inside the §3.3 cut line, and no deferred item is a passing condition</td>
 <td>Status <code>B</code>: the §3.3a Status rule (no <code>ok</code> with a <code>built=false</code> row), the never-omitted block, the per-row detail keys and the build ordering are existing behaviour with named enforcing tests (SPEC-12 §7 rows <code>internal/lifecycle/health_test.go</code> + <code>internal/app/health_wiring_test.go</code>; <code>health_test.go</code> added the exhaustive 32-combination sweep and the all-five-names detail table that had no test — the spot tests held only sentinel/issues/skills).</td>
 </tr>
+<tr>
+<td>AC-35 (allocated for SPEC-01 §3.5b)</td>
+<td>none — the refusal fold, the shutdown flush and the recorded status surface are shipped behaviour inside the §3.3 cut line (<code>internal/ledger/writer.go</code>, <code>internal/ledger/readonly.go</code>, <code>cmd/trouble/ledger.go</code>), and no deferred item is a passing condition</td>
+<td>Status <code>B</code>: the fold publishes the SPEC-03 §3.9 gap shape into the existing gap index, so it adds no new consumer and no deferred artifact. Named enforcing tests are <code>internal/ledger/backpressure_gap_test.go</code> (two saturated bursts: <code>sum(est_lost)</code> == the refusals the producers saw; the record's <code>cause_detail</code> names the queue cap and <code>max_enqueue_wait</code>) and <code>internal/ledger/backpressure_status_test.go</code> (live and read-only status agree, and a tally with no boundary left is written by <code>Close</code>). The refusals are produced by the shipping <code>enqueue</code> path against a real capped queue, not by a stub.</td>
+</tr>
 </tbody>
 </table>
 <h3 id="62-ac-1ac-17-text-absence">6.2 AC-1..AC-17 text absence</h3>
@@ -890,7 +901,7 @@ git grep -nE 'TBD|Phase 2|TODO|consider' -- specs/   # step 6 (manual review of 
 <li>Every spec file is a new node under <code>~/trouble/specs/</code>; <code>specs/tools/selfcheck.py</code> is the
   only executable artifact in the suite (stdlib-only Python, no deps) and is the CI entry point for the
   consistency loop. Since v0.1.1 it also validates <code>SPEC-13</code> (file set 01..13) and the AC range —
-  <code>AC-1..AC-34</code> as of the AC-34 allocation for SPEC-12 §3.3a, derived from §3.2 rather than
+  <code>AC-1..AC-35</code> as of the AC-35 allocation for SPEC-01 §3.5b, derived from §3.2 rather than
   hardcoded — plus the matrix→metadata declaration check of §7 step 2b, which is the mechanical half of
   keeping this index honest.</li>
 <li>No fleet repository is modified: trouble is greenfield at <code>~/trouble</code>.</li>
@@ -902,7 +913,7 @@ Area prefix: TROUBLE-LEDGER
 Package: <code>internal/ledger</code>
 Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
 Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
-ACs: AC-6, AC-22, AC-24, AC-26, AC-30
+ACs: AC-6, AC-22, AC-24, AC-26, AC-30, AC-35
 PRD: §03, §04a, §06b, §11</p>
 <h2 id="1-purpose">1. Purpose</h2>
 <p><code>internal/ledger</code> is the single durable store of trouble: one append-only JSONL ledger per host, written by
@@ -1638,6 +1649,65 @@ accounting treats the re-observation as a count, not a duplicate incident. What 
 is therefore only time-to-detection (≤ one reconcile interval) plus the count inflation of one re-emit —
 and, on the boot path, the §7b finding that the batch is what made READY affordable is a property worth
 that bounded tail.</p>
+<h4 id="35b-refusals-are-recorded-the-backpressure-gap-fold-trbl-125">3.5b Refusals are recorded: the backpressure gap fold (TRBL-125)</h4>
+<p>§5 code 001 with <code>reason=backpressure</code> is the one outcome in this spec where the ledger refuses <em>data</em>
+rather than <em>malformed input</em>. Until this section, a refusal incremented the in-process
+<code>BackpressureTotal</code> and returned: the producer learned it had lost an append while the ledger itself
+carried no evidence of the loss, so an operator reading the ledger could not tell that anything had been
+dropped. §3.5b makes a refusal an auditable event with three rules and one invariant.</p>
+<p><strong>Rule 1 — the refusing caller writes nothing.</strong> It cannot: the record it would write needs the queue
+that just refused it, so a self-write either blocks (the same <code>max_enqueue_wait</code> again, now inside the
+refusal path, which is a deadlock under load) or re-refuses and loses the record anyway. A refusal
+therefore only tallies: one unit per refused call — the unit <code>backpressure_total</code> counts, and one call is
+one unit even for <code>AppendBatch</code>, which §3.5a already defines as one group — plus the first and last
+refusal instants. The tally takes no allocation, no I/O and no syscall beyond a short lock, so a
+saturated queue cannot be made slower by the code that reports it.</p>
+<p><strong>Rule 2 — the writer folds the tally at a batch boundary.</strong> On the writer goroutine, which owns the file
+and is the only goroutine allowed to append, the between-batch boundary work drains the tally and puts
+ONE <code>gap</code> record at the head of the next batch — and only when at least one refusal happened since the
+previous fold, so a quiet ledger pays nothing at all. The record carries the SPEC-03 §3.9 gap member set,
+which makes it a first-class gap: <code>index.applyGapLocked</code> derives a <code>GapRecord</code> from the payload, and
+<code>Query().Gaps</code> — and therefore ladder verification — consumes it exactly like a sensor dropout. Members:</p>
+<ul>
+<li><code>kind: "gap"</code>, <code>sensor: "ledger"</code>, <code>subsystem: "ledger:queue"</code>;</li>
+<li><code>scope: "ledger:queue"</code>, <code>cause: "backpressure"</code>;</li>
+<li><code>est_lost</code> = the number of refusals folded into this record;</li>
+<li><code>from_ts</code> / <code>to_ts</code> = the first and last refusal of the window;</li>
+<li><code>cause_detail</code> names the queue cap and the <code>max_enqueue_wait</code> that expired, plus the folded count.</li>
+</ul>
+<p>Folding, not one record per refusal, is the house rule for bounded volume (SPEC-03 §3.8a applies the same
+rule to sampled observations): N refusals inside one drain window cost one record, never N, so a
+saturated queue cannot amplify its own outage into a record storm that the same queue would then have to
+absorb.</p>
+<p><strong>Rule 3 — a shutdown flushes the open fold.</strong> <code>Close</code> closes the queue, drains the batch in flight and
+crosses one final batch boundary, so a tally with no boundary left is written rather than swallowed. The
+shutdown tail is its own batch: the writer flushes the partial batch on its own file first and only then
+runs the boundary work (rotation, hole records, the fold), because rotation is legal only between batches
+(§3.5 rule 4) and a batch never spans two files.</p>
+<p><strong>The invariant.</strong> The sum of <code>est_lost</code> over every <code>gap{cause="backpressure", scope="ledger:queue"}</code>
+record in the ledger equals the number of refusals those records account for, and no refusal is counted
+twice: the tally is drained by the fold, so a refusal arriving after the drain belongs to the next
+window's record. What bounds that claim is stated rather than assumed — <strong>the only loss edge is a crash
+(or a failed write) inside a drain window.</strong> A SIGKILL between a refusal and the fold that would record it
+loses that fold, and with the process gone the counter goes too, so there is nothing left to compare: this
+is §2.1's crash story applied to a counter instead of a record, bounded by one batch boundary
+(<code>fsync_window_ms</code>, default 200 ms). A write that fails pays the same price and is already reported
+through §5 code 001/<code>write</code>; the recorded counters are credited only after the fold's bytes are durable,
+so the status surface never claims a record the file does not carry.</p>
+<p><strong>The status surface.</strong> <code>LedgerStatus</code> gains two members beside <code>backpressure_total</code>, so an operator can
+compare refused with recorded at a glance:</p>
+<div class="codehilite"><pre><span></span><code><span class="nx">GapRecords</span><span class="w">   </span><span class="kt">int64</span><span class="w"> </span><span class="s">`json:"gap_records"`</span><span class="w">    </span><span class="c1">// §3.5b: backpressure gap records the ledger carries</span>
+<span class="nx">EstLostTotal</span><span class="w"> </span><span class="kt">int64</span><span class="w"> </span><span class="s">`json:"est_lost_total"`</span><span class="w"> </span><span class="c1">// §3.5b: sum of their est_lost</span>
+</code></pre></div>
+
+<p><code>backpressure_total</code> answers "how many producers did this process refuse?"; the two new members answer
+"how much of that loss does the ledger carry?". Both <code>Status()</code> (the writer seat: O(1) from counters
+credited on durable writes) and <code>ReadStatus()</code> (the read-only CLI path: derived from the day's partitions
+exactly as §3.10a derives the rung counters) publish them, and the two paths must report the same numbers
+for the same ledger — a fold only the live writer can see would be a fact about a process, not about the
+ledger. <code>trouble ledger status</code> prints both on the queue line beside <code>backpressure_total</code>, so
+<code>est_lost_total</code> short of <code>backpressure_total</code> reads as loss the ledger cannot account for — visible,
+instead of invisible.</p>
 <h3 id="36-the-in-memory-index-structures-budget-degradation-mandate-e">3.6 The in-memory index: structures, budget, degradation (mandate e)</h3>
 <p>Rebuilt at boot by one sequential pass over the authoritative file set in seq order. Every structure is
 bounded; there is no unbounded structure in the design.</p>
@@ -1977,6 +2047,8 @@ not a separate mount, so an unconfigured ledger there is a disk-fill waiting for
 <span class="w">    </span><span class="nx">QueueDepth</span><span class="w">        </span><span class="kt">int</span><span class="w">       </span><span class="s">`json:"queue_depth"`</span>
 <span class="w">    </span><span class="nx">QueueCap</span><span class="w">          </span><span class="kt">int</span><span class="w">       </span><span class="s">`json:"queue_cap"`</span>
 <span class="w">    </span><span class="nx">BackpressureTotal</span><span class="w"> </span><span class="kt">uint64</span><span class="w">    </span><span class="s">`json:"backpressure_total"`</span>
+<span class="w">    </span><span class="nx">GapRecords</span><span class="w">        </span><span class="kt">int64</span><span class="w">     </span><span class="s">`json:"gap_records"`</span><span class="w">     </span><span class="c1">// §3.5b: backpressure gap records the ledger carries</span>
+<span class="w">    </span><span class="nx">EstLostTotal</span><span class="w">      </span><span class="kt">int64</span><span class="w">     </span><span class="s">`json:"est_lost_total"`</span><span class="w">  </span><span class="c1">// §3.5b: sum of their est_lost</span>
 <span class="w">    </span><span class="nx">WriterPID</span><span class="w">         </span><span class="kt">int</span><span class="w">       </span><span class="s">`json:"writer_pid"`</span>
 <span class="w">    </span><span class="nx">WriterVersion</span><span class="w">     </span><span class="kt">string</span><span class="w">    </span><span class="s">`json:"writer_version"`</span>
 <span class="w">    </span><span class="nx">DiskBytes</span><span class="w">         </span><span class="kt">int64</span><span class="w">     </span><span class="s">`json:"disk_bytes"`</span>
@@ -2085,7 +2157,7 @@ not a separate mount, so an unconfigured ledger there is a disk-fill waiting for
 <span class="p">}</span>
 </code></pre></div>
 
-<div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="nt">"last_seq"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"last_seq_pending"</span><span class="p">:</span><span class="mi">41209</span><span class="p">,</span><span class="nt">"last_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T09:14:03.221Z"</span><span class="p">,</span><span class="nt">"stall_s"</span><span class="p">:</span><span class="mf">1.2</span><span class="p">,</span><span class="nt">"loss_window_ms"</span><span class="p">:</span><span class="mi">200</span><span class="p">,</span><span class="nt">"day"</span><span class="p">:</span><span class="s2">"2026-09-16"</span><span class="p">,</span><span class="nt">"gen"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"part"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"file"</span><span class="p">:</span><span class="s2">"2026-09-16.jsonl"</span><span class="p">,</span><span class="nt">"bytes"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"records"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"fsync_calls"</span><span class="p">:</span><span class="mi">11</span><span class="p">,</span><span class="nt">"fsync_per_record"</span><span class="p">:</span><span class="mf">0.000267</span><span class="p">,</span><span class="nt">"queue_depth"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"queue_cap"</span><span class="p">:</span><span class="mi">65536</span><span class="p">,</span><span class="nt">"backpressure_total"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"writer_pid"</span><span class="p">:</span><span class="mi">2028599</span><span class="p">,</span><span class="nt">"writer_version"</span><span class="p">:</span><span class="s2">"0.1.0"</span><span class="p">,</span><span class="nt">"disk_bytes"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"disk_budget_bytes"</span><span class="p">:</span><span class="mi">2147483648</span><span class="p">,</span><span class="nt">"index"</span><span class="p">:{</span><span class="nt">"entries"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"groups"</span><span class="p">:</span><span class="mi">7</span><span class="p">,</span><span class="nt">"groups_cold"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"incidents"</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">"sources"</span><span class="p">:</span><span class="mi">3</span><span class="p">,</span><span class="nt">"days"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"files_scanned"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"bytes_scanned"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"lines_scanned"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"torn_lines"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"corrupt_lines"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"skipped_newer_schema"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"build_ms"</span><span class="p">:</span><span class="mi">412</span><span class="p">,</span><span class="nt">"budget_ms"</span><span class="p">:</span><span class="mi">9000</span><span class="p">,</span><span class="nt">"budget_bytes"</span><span class="p">:</span><span class="mi">536870912</span><span class="p">,</span><span class="nt">"index_bytes"</span><span class="p">:</span><span class="mi">4194304</span><span class="p">,</span><span class="nt">"scan_rate_mibs"</span><span class="p">:</span><span class="mf">148.2</span><span class="p">,</span><span class="nt">"degraded"</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span><span class="nt">"degraded_reason"</span><span class="p">:</span><span class="s2">""</span><span class="p">,</span><span class="nt">"truncated_before_ts"</span><span class="p">:</span><span class="s2">""</span><span class="p">,</span><span class="nt">"cold_evictions_per_min"</span><span class="p">:</span><span class="mi">0</span><span class="p">}}</span>
+<div class="codehilite"><pre><span></span><code><span class="p">{</span><span class="nt">"last_seq"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"last_seq_pending"</span><span class="p">:</span><span class="mi">41209</span><span class="p">,</span><span class="nt">"last_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T09:14:03.221Z"</span><span class="p">,</span><span class="nt">"stall_s"</span><span class="p">:</span><span class="mf">1.2</span><span class="p">,</span><span class="nt">"loss_window_ms"</span><span class="p">:</span><span class="mi">200</span><span class="p">,</span><span class="nt">"day"</span><span class="p">:</span><span class="s2">"2026-09-16"</span><span class="p">,</span><span class="nt">"gen"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"part"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"file"</span><span class="p">:</span><span class="s2">"2026-09-16.jsonl"</span><span class="p">,</span><span class="nt">"bytes"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"records"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"fsync_calls"</span><span class="p">:</span><span class="mi">11</span><span class="p">,</span><span class="nt">"fsync_per_record"</span><span class="p">:</span><span class="mf">0.000267</span><span class="p">,</span><span class="nt">"queue_depth"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"queue_cap"</span><span class="p">:</span><span class="mi">65536</span><span class="p">,</span><span class="nt">"backpressure_total"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"gap_records"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"est_lost_total"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"writer_pid"</span><span class="p">:</span><span class="mi">2028599</span><span class="p">,</span><span class="nt">"writer_version"</span><span class="p">:</span><span class="s2">"0.1.0"</span><span class="p">,</span><span class="nt">"disk_bytes"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"disk_budget_bytes"</span><span class="p">:</span><span class="mi">2147483648</span><span class="p">,</span><span class="nt">"index"</span><span class="p">:{</span><span class="nt">"entries"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"groups"</span><span class="p">:</span><span class="mi">7</span><span class="p">,</span><span class="nt">"groups_cold"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"incidents"</span><span class="p">:</span><span class="mi">2</span><span class="p">,</span><span class="nt">"sources"</span><span class="p">:</span><span class="mi">3</span><span class="p">,</span><span class="nt">"days"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"files_scanned"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"bytes_scanned"</span><span class="p">:</span><span class="mi">30408704</span><span class="p">,</span><span class="nt">"lines_scanned"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"torn_lines"</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span><span class="nt">"corrupt_lines"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"skipped_newer_schema"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"build_ms"</span><span class="p">:</span><span class="mi">412</span><span class="p">,</span><span class="nt">"budget_ms"</span><span class="p">:</span><span class="mi">9000</span><span class="p">,</span><span class="nt">"budget_bytes"</span><span class="p">:</span><span class="mi">536870912</span><span class="p">,</span><span class="nt">"index_bytes"</span><span class="p">:</span><span class="mi">4194304</span><span class="p">,</span><span class="nt">"scan_rate_mibs"</span><span class="p">:</span><span class="mf">148.2</span><span class="p">,</span><span class="nt">"degraded"</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span><span class="nt">"degraded_reason"</span><span class="p">:</span><span class="s2">""</span><span class="p">,</span><span class="nt">"truncated_before_ts"</span><span class="p">:</span><span class="s2">""</span><span class="p">,</span><span class="nt">"cold_evictions_per_min"</span><span class="p">:</span><span class="mi">0</span><span class="p">}}</span>
 <span class="p">{</span><span class="nt">"host_id"</span><span class="p">:</span><span class="s2">"7f3a91c2d4e5b607"</span><span class="p">,</span><span class="nt">"source"</span><span class="p">:</span><span class="s2">"sentinel:payment-worker"</span><span class="p">,</span><span class="nt">"zone"</span><span class="p">:</span><span class="s2">"loopback"</span><span class="p">,</span><span class="nt">"last_event_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T09:14:03.221Z"</span><span class="p">,</span><span class="nt">"last_event_age_s"</span><span class="p">:</span><span class="mf">0.2</span><span class="p">,</span><span class="nt">"last_seq"</span><span class="p">:</span><span class="mi">41207</span><span class="p">,</span><span class="nt">"events_total"</span><span class="p">:</span><span class="mi">6401</span><span class="p">,</span><span class="nt">"events_24h"</span><span class="p">:</span><span class="mi">6401</span><span class="p">,</span><span class="nt">"gaps_24h"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"dropped_24h"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"redactions_24h"</span><span class="p">:</span><span class="mi">3</span><span class="p">,</span><span class="nt">"canary_seen"</span><span class="p">:</span><span class="kc">true</span><span class="p">,</span><span class="nt">"canary_last_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T09:13:00.000Z"</span><span class="p">}</span>
 <span class="p">{</span><span class="nt">"group_id"</span><span class="p">:</span><span class="s2">"grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH"</span><span class="p">,</span><span class="nt">"sig"</span><span class="p">:</span><span class="s2">"sentinel:sha256v1:9f2c1d3e4b5a6c7d"</span><span class="p">,</span><span class="nt">"digest"</span><span class="p">:</span><span class="s2">"9f2c1d3e4b5a6c7d0123456789abcdef0123456789abcdef0123456789abcdef"</span><span class="p">,</span><span class="nt">"merge_key"</span><span class="p">:</span><span class="s2">"bcc48494f2190f4f"</span><span class="p">,</span><span class="nt">"source"</span><span class="p">:</span><span class="s2">"sentinel"</span><span class="p">,</span><span class="nt">"title"</span><span class="p">:</span><span class="s2">"queue wedge: pool exhausted"</span><span class="p">,</span><span class="nt">"count"</span><span class="p">:</span><span class="mi">6401</span><span class="p">,</span><span class="nt">"rate_1m"</span><span class="p">:</span><span class="mf">18.4</span><span class="p">,</span><span class="nt">"rate_5m"</span><span class="p">:</span><span class="mf">12.1</span><span class="p">,</span><span class="nt">"rate_60m"</span><span class="p">:</span><span class="mf">6.7</span><span class="p">,</span><span class="nt">"trend"</span><span class="p">:</span><span class="mf">0.52</span><span class="p">,</span><span class="nt">"first_seen_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T06:00:00.000Z"</span><span class="p">,</span><span class="nt">"last_seen_ts"</span><span class="p">:</span><span class="s2">"2026-09-16T09:14:03.221Z"</span><span class="p">,</span><span class="nt">"incident_id"</span><span class="p">:</span><span class="s2">"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE"</span><span class="p">,</span><span class="nt">"counters"</span><span class="p">:{</span><span class="nt">"events"</span><span class="p">:</span><span class="mi">6401</span><span class="p">,</span><span class="nt">"suppressed"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"redacted_values"</span><span class="p">:</span><span class="mi">3</span><span class="p">,</span><span class="nt">"dropped_events"</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span><span class="nt">"sample_rate"</span><span class="p">:</span><span class="mi">1</span><span class="p">},</span><span class="nt">"cold"</span><span class="p">:</span><span class="kc">false</span><span class="p">}</span>
 </code></pre></div>
@@ -2266,7 +2338,7 @@ The ledger also propagates SPEC-02 codes unchanged (§4.2) and references SPEC-1
 <td>001</td>
 <td>permanent</td>
 <td>append refused (empty origin/actor/sig where required, unknown kind, seq/rec_id supplied by the caller, payload over <code>max_record_bytes</code> on a spine kind, <code>max_enqueue_wait</code> exceeded) or the write/fdatasync itself failed</td>
-<td><code>payload.reason</code> ∈ <code>validation\|backpressure\|write\|fsync\|head</code>; producers block up to <code>max_enqueue_wait</code> first; the ladder refuses new budgeted work on <code>backpressure</code></td>
+<td><code>payload.reason</code> ∈ <code>validation\|backpressure\|write\|fsync\|head</code>; producers block up to <code>max_enqueue_wait</code> first; the ladder refuses new budgeted work on <code>backpressure</code>; a <code>backpressure</code> refusal is never silent — it is folded into a <code>gap{cause=backpressure}</code> record by the writer (§3.5b)</td>
 </tr>
 <tr>
 <td>002</td>
@@ -2369,7 +2441,10 @@ cannot complete (an unreadable file) surfaces as 011 corruption, which is the ho
 <li><strong>Queue saturation.</strong> 65,536 queued records, producers block up to <code>max_enqueue_wait</code> (5 s), then get
    001/<code>backpressure</code>; <code>BackpressureTotal</code> increments and the ladder stops admitting budgeted work
    (SPEC-05 design constraint). Ledger records are never dropped to relieve pressure — that would put a hole
-   in the audit chain that AC-6 forbids.</li>
+   in the audit chain that AC-6 forbids. The <em>refusal itself</em> is recorded: the writer folds the window's
+   refusals into one <code>gap{cause=backpressure, scope=ledger:queue}</code> record (§3.5b), so <code>est_lost_total</code>
+   accounting for <code>backpressure_total</code> is the property an operator checks, and a refusal with no record is
+   the defect (AC-35).</li>
 <li><strong>A record with <code>sig=""</code>.</strong> Legal for non-sig-keyed kinds; it is indexed by seq/ts/kind/inc only and
    belongs to no group. A sig-required kind with an empty sig is refused (001/validation).</li>
 <li><strong>Two groups claim one merge key.</strong> Not a ledger error: the ledger stores both, indexes both and exposes
@@ -2486,6 +2561,11 @@ cannot complete (an unreadable file) surfaces as 011 corruption, which is the ho
 <td><code>.idx</code> written at rotation and at compaction with exact count/offsets/seq range/min-max ts; rebuild with the <code>.idx</code> deleted; rebuild from a torn <code>.idx</code>; a sidecar whose <code>Bytes</code>/<code>Sha256</code> mismatch the file → discard + rebuild + <code>IndexStats</code> flag; a time window outside <code>[MinTS, MaxTS]</code> → 0 bytes read; a window inside it reads only the straddling pages</td>
 <td>rebuilt sidecar equals the original field-for-field; 0 bytes read for an out-of-range window; a mismatched sidecar never answers a page</td>
 </tr>
+<tr>
+<td><code>internal/ledger/backpressure_gap_test.go</code></td>
+<td><strong>AC-35</strong> §3.5b: the queue is capped and <code>max_enqueue_wait</code> is expired against a real stalled flush goroutine, so producers are refused through the shipping path (<code>TestBackpressureRefusalsAreRecordedAsGap</code> — two saturated bursts produce two folded <code>gap{cause=backpressure}</code> records whose <code>est_lost</code> sum equals the refusals the producers saw, each naming the queue cap and wait in <code>cause_detail</code>); <code>TestBackpressureDropSurfaceAgreesAcrossStatusPaths</code> — <code>gap_records</code>/<code>est_lost_total</code> equal that refusal count on the live writer AND on the read-only status, and the read-only <code>backpressure_total</code> stays 0 because it is an in-process counter; <code>TestBackpressureFoldFlushedOnStop</code> — a tally with no batch boundary left is written by the close path</td>
+<td>sum(est_lost) == refusals exactly; one record per drain window; a refusal leaves a record, never silence</td>
+</tr>
 </tbody>
 </table>
 <p>Every threshold above is also printed by <code>trouble ledger status --json</code> as a live value beside its limit, so
@@ -2596,7 +2676,7 @@ still fails on a genuine multi-x regression regardless of which host it lands on
 <p><strong>Packages/files created by this spec</strong> (greenfield repository <code>~/trouble</code>; no fleet repository is
 touched — the only repository in scope is the new one):</p>
 <div class="codehilite"><pre><span></span><code>internal/ledger/ledger.go      Open/Close/Append/Status, Options, the writer goroutine
-internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD, the §3.5a batch group
+internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD, the §3.5a batch group, the §3.5b refusal fold
 internal/ledger/recover.go     LOCK, seq recovery, torn-line recovery, VerifyReport
 internal/ledger/index.go       the bounded index, boot rebuild, degradation ladder, cold read
 internal/ledger/query.go       the Query interface implementation, QueryInfo
@@ -24281,5 +24361,5 @@ rule that makes Redis a queue instead of a store; the drop-gate of §3.5 step 5 
 history from being deleted before it is archived; and the profile-invariance claim of §1.2, which is
 asserted by test and must never become an assumption.</p>
 </section>
-<div class="footer">generated from the spec suite in this repository · 935bc96 (working tree with local edits) · print-friendly: each section page-breaks</div>
+<div class="footer">generated from the spec suite in this repository · 2e6bf1a (working tree with local edits) · print-friendly: each section page-breaks</div>
 </div></body></html>

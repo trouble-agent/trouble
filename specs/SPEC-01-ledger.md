@@ -5,7 +5,7 @@ Area prefix: TROUBLE-LEDGER
 Package: `internal/ledger`
 Consumed types: Record, RecordDraft, Origin, Actor, Sig, SigSource, Prefix, RecordKind, Incident, Group, GroupCounters, GapRecord, Evidence, Duration, IndexStats, QueryInfo, LedgerStatus, GroupStat, SourceAge, EvidenceBundle, RotationPolicy, RetentionPolicy, CompactionResult, PageToken, GenerationIndex, LedgerArchiveMarker
 Local types: batch, part, dayEntry, seqOffset, groupRing, writerState, headFile, reader, ref, groupSort, pageWalk, sidecarRow
-ACs: AC-6, AC-22, AC-24, AC-26, AC-30
+ACs: AC-6, AC-22, AC-24, AC-26, AC-30, AC-35
 PRD: §03, §04a, §06b, §11
 
 ## 1. Purpose
@@ -520,6 +520,74 @@ is therefore only time-to-detection (≤ one reconcile interval) plus the count 
 and, on the boot path, the §7b finding that the batch is what made READY affordable is a property worth
 that bounded tail.
 
+#### 3.5b Refusals are recorded: the backpressure gap fold (TRBL-125)
+
+§5 code 001 with `reason=backpressure` is the one outcome in this spec where the ledger refuses *data*
+rather than *malformed input*. Until this section, a refusal incremented the in-process
+`BackpressureTotal` and returned: the producer learned it had lost an append while the ledger itself
+carried no evidence of the loss, so an operator reading the ledger could not tell that anything had been
+dropped. §3.5b makes a refusal an auditable event with three rules and one invariant.
+
+**Rule 1 — the refusing caller writes nothing.** It cannot: the record it would write needs the queue
+that just refused it, so a self-write either blocks (the same `max_enqueue_wait` again, now inside the
+refusal path, which is a deadlock under load) or re-refuses and loses the record anyway. A refusal
+therefore only tallies: one unit per refused call — the unit `backpressure_total` counts, and one call is
+one unit even for `AppendBatch`, which §3.5a already defines as one group — plus the first and last
+refusal instants. The tally takes no allocation, no I/O and no syscall beyond a short lock, so a
+saturated queue cannot be made slower by the code that reports it.
+
+**Rule 2 — the writer folds the tally at a batch boundary.** On the writer goroutine, which owns the file
+and is the only goroutine allowed to append, the between-batch boundary work drains the tally and puts
+ONE `gap` record at the head of the next batch — and only when at least one refusal happened since the
+previous fold, so a quiet ledger pays nothing at all. The record carries the SPEC-03 §3.9 gap member set,
+which makes it a first-class gap: `index.applyGapLocked` derives a `GapRecord` from the payload, and
+`Query().Gaps` — and therefore ladder verification — consumes it exactly like a sensor dropout. Members:
+
+- `kind: "gap"`, `sensor: "ledger"`, `subsystem: "ledger:queue"`;
+- `scope: "ledger:queue"`, `cause: "backpressure"`;
+- `est_lost` = the number of refusals folded into this record;
+- `from_ts` / `to_ts` = the first and last refusal of the window;
+- `cause_detail` names the queue cap and the `max_enqueue_wait` that expired, plus the folded count.
+
+Folding, not one record per refusal, is the house rule for bounded volume (SPEC-03 §3.8a applies the same
+rule to sampled observations): N refusals inside one drain window cost one record, never N, so a
+saturated queue cannot amplify its own outage into a record storm that the same queue would then have to
+absorb.
+
+**Rule 3 — a shutdown flushes the open fold.** `Close` closes the queue, drains the batch in flight and
+crosses one final batch boundary, so a tally with no boundary left is written rather than swallowed. The
+shutdown tail is its own batch: the writer flushes the partial batch on its own file first and only then
+runs the boundary work (rotation, hole records, the fold), because rotation is legal only between batches
+(§3.5 rule 4) and a batch never spans two files.
+
+**The invariant.** The sum of `est_lost` over every `gap{cause="backpressure", scope="ledger:queue"}`
+record in the ledger equals the number of refusals those records account for, and no refusal is counted
+twice: the tally is drained by the fold, so a refusal arriving after the drain belongs to the next
+window's record. What bounds that claim is stated rather than assumed — **the only loss edge is a crash
+(or a failed write) inside a drain window.** A SIGKILL between a refusal and the fold that would record it
+loses that fold, and with the process gone the counter goes too, so there is nothing left to compare: this
+is §2.1's crash story applied to a counter instead of a record, bounded by one batch boundary
+(`fsync_window_ms`, default 200 ms). A write that fails pays the same price and is already reported
+through §5 code 001/`write`; the recorded counters are credited only after the fold's bytes are durable,
+so the status surface never claims a record the file does not carry.
+
+**The status surface.** `LedgerStatus` gains two members beside `backpressure_total`, so an operator can
+compare refused with recorded at a glance:
+
+```go
+GapRecords   int64 `json:"gap_records"`    // §3.5b: backpressure gap records the ledger carries
+EstLostTotal int64 `json:"est_lost_total"` // §3.5b: sum of their est_lost
+```
+
+`backpressure_total` answers "how many producers did this process refuse?"; the two new members answer
+"how much of that loss does the ledger carry?". Both `Status()` (the writer seat: O(1) from counters
+credited on durable writes) and `ReadStatus()` (the read-only CLI path: derived from the day's partitions
+exactly as §3.10a derives the rung counters) publish them, and the two paths must report the same numbers
+for the same ledger — a fold only the live writer can see would be a fact about a process, not about the
+ledger. `trouble ledger status` prints both on the queue line beside `backpressure_total`, so
+`est_lost_total` short of `backpressure_total` reads as loss the ledger cannot account for — visible,
+instead of invisible.
+
 ### 3.6 The in-memory index: structures, budget, degradation (mandate e)
 
 Rebuilt at boot by one sequential pass over the authoritative file set in seq order. Every structure is
@@ -784,6 +852,8 @@ type LedgerStatus struct {
     QueueDepth        int       `json:"queue_depth"`
     QueueCap          int       `json:"queue_cap"`
     BackpressureTotal uint64    `json:"backpressure_total"`
+    GapRecords        int64     `json:"gap_records"`     // §3.5b: backpressure gap records the ledger carries
+    EstLostTotal      int64     `json:"est_lost_total"`  // §3.5b: sum of their est_lost
     WriterPID         int       `json:"writer_pid"`
     WriterVersion     string    `json:"writer_version"`
     DiskBytes         int64     `json:"disk_bytes"`
@@ -893,7 +963,7 @@ type CompactionResult struct {
 ```
 
 ```json
-{"last_seq":41207,"last_seq_pending":41209,"last_ts":"2026-09-16T09:14:03.221Z","stall_s":1.2,"loss_window_ms":200,"day":"2026-09-16","gen":0,"part":1,"file":"2026-09-16.jsonl","bytes":30408704,"records":41207,"fsync_calls":11,"fsync_per_record":0.000267,"queue_depth":0,"queue_cap":65536,"backpressure_total":0,"writer_pid":2028599,"writer_version":"0.1.0","disk_bytes":30408704,"disk_budget_bytes":2147483648,"index":{"entries":41207,"groups":7,"groups_cold":0,"incidents":2,"sources":3,"days":1,"files_scanned":1,"bytes_scanned":30408704,"lines_scanned":41207,"torn_lines":1,"corrupt_lines":0,"skipped_newer_schema":0,"build_ms":412,"budget_ms":9000,"budget_bytes":536870912,"index_bytes":4194304,"scan_rate_mibs":148.2,"degraded":false,"degraded_reason":"","truncated_before_ts":"","cold_evictions_per_min":0}}
+{"last_seq":41207,"last_seq_pending":41209,"last_ts":"2026-09-16T09:14:03.221Z","stall_s":1.2,"loss_window_ms":200,"day":"2026-09-16","gen":0,"part":1,"file":"2026-09-16.jsonl","bytes":30408704,"records":41207,"fsync_calls":11,"fsync_per_record":0.000267,"queue_depth":0,"queue_cap":65536,"backpressure_total":0,"gap_records":0,"est_lost_total":0,"writer_pid":2028599,"writer_version":"0.1.0","disk_bytes":30408704,"disk_budget_bytes":2147483648,"index":{"entries":41207,"groups":7,"groups_cold":0,"incidents":2,"sources":3,"days":1,"files_scanned":1,"bytes_scanned":30408704,"lines_scanned":41207,"torn_lines":1,"corrupt_lines":0,"skipped_newer_schema":0,"build_ms":412,"budget_ms":9000,"budget_bytes":536870912,"index_bytes":4194304,"scan_rate_mibs":148.2,"degraded":false,"degraded_reason":"","truncated_before_ts":"","cold_evictions_per_min":0}}
 {"host_id":"7f3a91c2d4e5b607","source":"sentinel:payment-worker","zone":"loopback","last_event_ts":"2026-09-16T09:14:03.221Z","last_event_age_s":0.2,"last_seq":41207,"events_total":6401,"events_24h":6401,"gaps_24h":0,"dropped_24h":0,"redactions_24h":3,"canary_seen":true,"canary_last_ts":"2026-09-16T09:13:00.000Z"}
 {"group_id":"grp_01J9Z6Q0M2X4T8V1K7B3N5R8WH","sig":"sentinel:sha256v1:9f2c1d3e4b5a6c7d","digest":"9f2c1d3e4b5a6c7d0123456789abcdef0123456789abcdef0123456789abcdef","merge_key":"bcc48494f2190f4f","source":"sentinel","title":"queue wedge: pool exhausted","count":6401,"rate_1m":18.4,"rate_5m":12.1,"rate_60m":6.7,"trend":0.52,"first_seen_ts":"2026-09-16T06:00:00.000Z","last_seen_ts":"2026-09-16T09:14:03.221Z","incident_id":"inc_01J9Z6Q0M2X4T8V1K7B3N5R8WE","counters":{"events":6401,"suppressed":0,"redacted_values":3,"dropped_events":0,"sample_rate":1},"cold":false}
 ```
@@ -1012,7 +1082,7 @@ The ledger also propagates SPEC-02 codes unchanged (§4.2) and references SPEC-1
 
 | Code | Class | Trigger (exact) | Behaviour |
 |---|---|---|---|
-| 001 | permanent | append refused (empty origin/actor/sig where required, unknown kind, seq/rec_id supplied by the caller, payload over `max_record_bytes` on a spine kind, `max_enqueue_wait` exceeded) or the write/fdatasync itself failed | `payload.reason` ∈ `validation\|backpressure\|write\|fsync\|head`; producers block up to `max_enqueue_wait` first; the ladder refuses new budgeted work on `backpressure` |
+| 001 | permanent | append refused (empty origin/actor/sig where required, unknown kind, seq/rec_id supplied by the caller, payload over `max_record_bytes` on a spine kind, `max_enqueue_wait` exceeded) or the write/fdatasync itself failed | `payload.reason` ∈ `validation\|backpressure\|write\|fsync\|head`; producers block up to `max_enqueue_wait` first; the ladder refuses new budgeted work on `backpressure`; a `backpressure` refusal is never silent — it is folded into a `gap{cause=backpressure}` record by the writer (§3.5b) |
 | 002 | permanent | seq hole, duplicate seq or non-monotonic seq seen on read | hole recorded and returned in `VerifyReport.SeqHoles`; the daemon keeps serving; the hole is written to the trail by the next batch as `lifecycle{op:"hole"}` |
 | 003 | transient | torn last line (no terminating `\n`, or an unparsable tail) | the torn fragment is excluded from the index, counted (`IndexStats.TornLines`), the file gets a `\n` before the next record so exactly one line is dropped, and `lifecycle{op:"recover_torn"}` is written |
 | 004 | permanent | a record's `schema_version` > `Options.MaxSchema` | forward-compat: the line is skipped, counted (`SkippedNewerSchema`), the file is flagged `version_gate`; the daemon stays up and `/health.json` shows the gap |
@@ -1060,7 +1130,10 @@ cannot complete (an unreadable file) surfaces as 011 corruption, which is the ho
 7. **Queue saturation.** 65,536 queued records, producers block up to `max_enqueue_wait` (5 s), then get
    001/`backpressure`; `BackpressureTotal` increments and the ladder stops admitting budgeted work
    (SPEC-05 design constraint). Ledger records are never dropped to relieve pressure — that would put a hole
-   in the audit chain that AC-6 forbids.
+   in the audit chain that AC-6 forbids. The *refusal itself* is recorded: the writer folds the window's
+   refusals into one `gap{cause=backpressure, scope=ledger:queue}` record (§3.5b), so `est_lost_total`
+   accounting for `backpressure_total` is the property an operator checks, and a refusal with no record is
+   the defect (AC-35).
 8. **A record with `sig=""`.** Legal for non-sig-keyed kinds; it is indexed by seq/ts/kind/inc only and
    belongs to no group. A sig-required kind with an empty sig is refused (001/validation).
 9. **Two groups claim one merge key.** Not a ledger error: the ledger stores both, indexes both and exposes
@@ -1120,6 +1193,7 @@ Test files under `internal/ledger/`, all with the measured numbers as regression
 | `ac_test.go` | **AC-6**: 1 M synthetic appends → seq has no holes, every line parses, every record has non-empty `origin.host_id`/`origin.source` and a `rec_id`, and no byte of a written file changes; **AC-22**: three records (journald, sentinel, collector) sharing one `merge_key` and three different sigs → `IncidentBySig`/merge-key index resolve to one incident and one group, while two distinct merge keys stay two; **AC-26**: a 20-step scripted ladder fixture (SPEC-05's harness) + a kill-switch flip inside it → `Evidence(inc)` returns ≥ 1 record per ladder state in seq order with no gap between the incident's first and last seq, and the kill-switch checkpoint is present | AC-6: 0 holes, 0 header violations; AC-22: 1 group / 1 incident, 0 duplicates; AC-26: 20/20 steps present, 0 missing seq |
 | `internal/ledger/page_test.go` | **AC-30**: token grammar round-trip (opaque, stable within a generation); a multi-generation corpus walked at `page_size` 1, 3, 7 and 50: no record repeated, no record skipped, `next_page_token=""` exactly at the end; drop-oldest-generation mid-walk → `Reset=true` + newest-first restart with **0 HTTP 500s**; tokens that are dropped/foreign/unparsable → the matching `ResetReason` through `PageFromTokenString`; `page_size` clamp (0 → default, >max → max, per-ledger override honoured) and the negative-value 400; the `.idx` rebuild path (deleted, torn and `Bytes`/`Sha256`-mismatched sidecars all discard + rebuild field-for-field); a cold-read page stays `Partial=true` with real scanned counts and bounded by `page_size`; a page changes no index state | every record exactly once per walk; `ScannedLines ≤ offset_stride + page_size` per file per page (the probe is the one extra bounded read and is asserted times two); 0 unbounded scans |
 | `internal/ledger/sidecar_test.go` | `.idx` written at rotation and at compaction with exact count/offsets/seq range/min-max ts; rebuild with the `.idx` deleted; rebuild from a torn `.idx`; a sidecar whose `Bytes`/`Sha256` mismatch the file → discard + rebuild + `IndexStats` flag; a time window outside `[MinTS, MaxTS]` → 0 bytes read; a window inside it reads only the straddling pages | rebuilt sidecar equals the original field-for-field; 0 bytes read for an out-of-range window; a mismatched sidecar never answers a page |
+| `internal/ledger/backpressure_gap_test.go` | **AC-35** §3.5b: the queue is capped and `max_enqueue_wait` is expired against a real stalled flush goroutine, so producers are refused through the shipping path (`TestBackpressureRefusalsAreRecordedAsGap` — two saturated bursts produce two folded `gap{cause=backpressure}` records whose `est_lost` sum equals the refusals the producers saw, each naming the queue cap and wait in `cause_detail`); `TestBackpressureDropSurfaceAgreesAcrossStatusPaths` — `gap_records`/`est_lost_total` equal that refusal count on the live writer AND on the read-only status, and the read-only `backpressure_total` stays 0 because it is an in-process counter; `TestBackpressureFoldFlushedOnStop` — a tally with no batch boundary left is written by the close path | sum(est_lost) == refusals exactly; one record per drain window; a refusal leaves a record, never silence |
 
 Every threshold above is also printed by `trouble ledger status --json` as a live value beside its limit, so
 a regression is visible in production and not only in CI.
@@ -1235,7 +1309,7 @@ touched — the only repository in scope is the new one):
 
 ```
 internal/ledger/ledger.go      Open/Close/Append/Status, Options, the writer goroutine
-internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD, the §3.5a batch group
+internal/ledger/writer.go      batch/part/dayEntry/writerState, group commit, fdatasync, HEAD, the §3.5a batch group, the §3.5b refusal fold
 internal/ledger/recover.go     LOCK, seq recovery, torn-line recovery, VerifyReport
 internal/ledger/index.go       the bounded index, boot rebuild, degradation ladder, cold read
 internal/ledger/query.go       the Query interface implementation, QueryInfo

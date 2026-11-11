@@ -125,3 +125,41 @@ paths = [
 ]
 regexTarget = "line"
 regexes = ['''fedcba9876543210fedcba9876543210''']
+
+# TRBL-131 — WHY THIS ENTRY IS A ONE-FILE PATH EXEMPTION AND NOT A LINE-SCOPED
+# (RE)THE ONE BELOW IT. Everything here was measured against gitleaks v8.30.1,
+# the binary the Tier 1 `secrets` step runs, on a full-fidelity checkout of this
+# repo (worktree at HEAD, planted-credential fixtures, both arms):
+#
+#   a) A global `[[allowlists]]` entry that carries `paths` is applied as a
+#      SOURCE FILTER. The file is skipped before any rule runs, so adding
+#      `regexes` / `regexTarget` / `condition = "AND"` to that same entry does
+#      NOT narrow it — planted credential on a board line, 0 findings.
+#   b) A `paths`-less entry is ignored entirely: `regexes` alone, `stopwords`
+#      alone, and `regexTarget = "line"` / `"match"` alone each leave every
+#      finding in place.
+#   c) `.gitleaksignore` cannot carry the fix either: with `--no-git` the
+#      fingerprint is `<file>:<rule>:***` (the secret component is masked), so
+#      one entry suppresses the whole file and per-line precision is lost.
+#   d) Attaching a rule-level allowlist to the built-in `generic-api-key` rule
+#      requires copying that rule — plus its ~1,400-line stopword table — into
+#      this file, which would drift from upstream on the next gitleaks bump.
+#
+# So the exemption is file-scoped, and the COMPENSATING CONTROL is deliberate:
+# the path pattern below is a DOUBLE-quoted TOML string. The builtin
+# cross-check scanner (engine/guard_manager.py::_load_gitleaks_allowlist) only
+# compiles triple-quoted literal-string entries, so it does NOT pick this
+# pattern up and keeps
+# scanning the board file in full — the board is exempt from gitleaks and still
+# graded by the builtin scanner. Every other path stays gradeable by both: a
+# credential planted anywhere outside this one file is still caught by
+# gitleaks (demonstrated: `.coding-hermes/board/tasks.jsonl` exempt, planted
+# token under docs/ still reported).
+#
+# If a future gitleaks supports per-line global allowlists, replace this with
+# that mechanism and delete this note.
+[[allowlists]]
+description = "the tracked work board (.coding-hermes/board/tasks.jsonl) quotes the redaction placeholder as EVIDENCE: three of its rows record a security finding whose text is 'token-hash assertion, REDACTED' / 'Secret=REDACTED' / 'token store, REDACTED', and gitleaks' generic-api-key rule reads that prose as a key assignment — three findings, zero credentials, measured 2026-11-04. The exemption is the single path below, not a directory or a regex, and it is the only file in this repo where the redaction word is written on purpose; the builtin cross-check still scans this file because the pattern is not a triple-quoted literal (see the note above)."
+paths = [
+  "(^|/)\\.coding-hermes/board/tasks\\.jsonl$",
+]

@@ -1,0 +1,1000 @@
+tasks:
+- id: TRBL-001
+  title: 'SPEC expansion wave v0.1.1 residual: AC-31 codeplane bundle specified on
+    SPEC-04/07/09, metadata+index AC range amended to AC-1..AC-31, selfcheck derives
+    AC range and enforces matrix->metadata drift, QA battery added'
+  criteria:
+  - 1) SPEC-04/05/07/09 metadata ACs lines include AC-31 and the SPEC-INDEX AC-31
+    matrix row names the sections that actually specify it. 2) SPEC-07 research request
+    and SPEC-09 issue body carry the codeplane bundle verbatim per AC-31. 3) SPEC-INDEX/SPEC-TYPES
+    AC range reads AC-1..AC-31; the section 6.1 cut-line row covers AC-31. 4) specs/tools/selfcheck.py
+    derives the AC universe from the matrix and FAILS when a matrix-named spec does
+    not declare the AC in its metadata line; falsification proof captured. 5) tests/e2e/spec_suite_battery.sh
+    runs green. 6) selfcheck PASS, go build/vet clean, go test ./... -count=1 -short
+    green, one commit on main.
+  status: complete
+  created_at: '2026-09-17T05:11:01.396444+00:00'
+  completed_at: '2026-09-17T05:36:35.129945+00:00'
+- id: TRBL-005
+  title: "Shipped example config cannot boot: examples/config.toml uses a TOML inline\
+    \ table for verify.zone_windows where SPEC-12 \xA7167 pins the string form, so\
+    \ a fresh operator's documented copy-edit path dies with TROUBLE-LIFECYCLE-001\
+    \ (exit 13, no listener) - fix the example to the documented form and add a boot\
+    \ test against the shipped file"
+  criteria:
+  - 1) examples/config.toml uses the SPEC-12 167 string form for verify.zone_windows
+    and a copy of it boots on the documented path with no TROUBLE-LIFECYCLE-001 (listener/serve
+    stage reached).
+  - 2) A Go test loads the SHIPPED examples/config.toml verbatim (no testdata copy,
+    no hand-written fixture) and asserts config load + boot reaches serve; it FAILS
+    (not skips) when the example is absent.
+  - 3) The documented accepted form and the shipped form agree with SPEC-12:167; specs
+    untouched or, if touched, specs/tools/selfcheck.py PASS with letter-suffix-only
+    edits.
+  - 4) go build ./... and go vet ./... clean; test run shows RED before the example
+    fix and GREEN after (both captured in the report).
+  - 5) One commit on main addressing TRBL-005, explicit paths only, no push (repo
+    has no remote by design).
+  status: complete
+  created_at: '2026-09-18T03:29:55.611985+00:00'
+  completed_at: '2026-09-18T03:40:07.620101+00:00'
+- id: TRBL-006
+  title: Expand dashboard token_file home path
+  criteria:
+  - Default and configured dashboard.token_file paths beginning with ~/ resolve to
+    the current user's home directory before token loading; add regression coverage;
+    preserve absolute paths and spec behavior.
+  status: complete
+  created_at: '2026-09-18T15:03:59.555972+00:00'
+  completed_at: '2026-09-18T16:14:09.927745+00:00'
+- id: TRBL-007
+  title: '[P0] Three of five subsystems silently not built on a stock config - health
+    surface reports ok while ingest plane/issues desk/skill loop are absent'
+  criteria:
+  - AC1 stock boot cannot report status=ok while any subsystem was refused (regression
+    test); AC2 documented config surface declares projects (id + DSN public key) and
+    the ingest listener actually binds; AC3 POST /api/{id}/event/ with the documented
+    auth form lands one event + one group record end-to-end; AC4 /health.json carries
+    a per-subsystem built/refused block and the dashboard shows refused subsystems;
+    AC5 the shipped example config yields a boot where sentinel is built (or the refusal
+    is impossible to miss)
+  status: complete
+  created_at: '2026-09-18T16:45:18.652489+00:00'
+  completed_at: '2026-09-18T17:46:07.963157+00:00'
+- id: TRBL-016
+  title: Shipped subsystem defaults must satisfy their own validators (issues desk
+    + skill loop)
+  criteria:
+  - "AC1: a stock boot builds issues and skills \u2014 the shipped compiled defaults\
+    \ validate on their own, or declare a working local driver/source, or are OFF\
+    \ by default as an explicit, documented, named opt-out rather than an accident"
+  - 'AC2: a repo test over the SHIPPED examples/config.toml asserts both subsystems
+    are built, or that the opt-out is deliberate and named in the file operators copy'
+  - 'AC3: /health.json on a boot of the shipped example reads status ok with every
+    subsystem built, or exactly the deliberate opt-outs named'
+  status: complete
+  created_at: '2026-09-18T18:26:57.353574+00:00'
+  completed_at: '2026-09-18T19:21:43.920236+00:00'
+- id: TRBL-020
+  title: Wire issues and skills config
+  criteria:
+  - '[AC1] Register [issues]/[skills] config and wire buildSubsystems so valid file
+    opt-ins build; [AC2] shipped example opt-in boots health ok; [AC3] invalid declarations
+    refuse with named key'
+  status: complete
+  created_at: '2026-09-18T21:16:14.735195+00:00'
+  completed_at: '2026-09-18T22:36:27.166566+00:00'
+- id: TRBL-024
+  title: 'Load-fragile app boot deadlines: fixed 30s READY deadline vs a 22-25s boot'
+  criteria:
+  - internal/app boots use a load-aware readiness budget derived from /proc/loadavg
+    instead of a bare 30s constant; a boot that cannot reach READY reports observed
+    load_avg + elapsed and records an explicit SKIP verdict under extreme load instead
+    of a false red; unit test proves the derivation scales; specs amended letter-suffix
+    style with selfcheck PASS; go build/vet clean and go test ./internal/app/... EXIT=0
+    on the changed tree
+  status: complete
+  created_at: '2026-09-18T22:49:54.581589+00:00'
+  completed_at: '2026-09-18T23:23:42.453389+00:00'
+- id: TRBL-018
+  title: 'cmd/troubled per-key flag surface: the documented flag > env > file > default
+    chain must be reachable from the shipped daemon binary'
+  criteria:
+  - AC1 cmd/troubled accepts every registered per-key flag in its SPEC-12 2.5 documented
+    spelling (dotted key to dashed flag) and a flag value beats a config-file value,
+    proven by a test; an unknown flag is still refused by name (TROUBLE-LIFECYCLE-001)
+    and the argv secret scan is unchanged. AC2 a scratch or second instance boots
+    from flags alone with no edited config file and answers /health.json. AC3 SPEC-12
+    2.5 plus docs/cmd.md state the daemon's real surface and specs/tools/selfcheck.py
+    PASS in the same commit.
+  status: complete
+  created_at: '2026-09-18T23:43:35.832428+00:00'
+  completed_at: '2026-09-19T00:11:25.742290+00:00'
+- id: TRBL-002
+  title: Cross-platform release engineering
+  criteria:
+  - make release builds four stamped targets; Dockerfile and compose satisfy ports/health/profile
+    criteria; operations docs deployment section; tests and spec constraints verified
+  status: complete
+  created_at: '2026-09-19T00:35:59.316657+00:00'
+  completed_at: '2026-09-19T00:59:21.146626+00:00'
+- id: TRBL-027
+  title: Wire light-hub server profile configuration
+  criteria:
+  - Register server.profile, server.redis, and server.duckbrain in lifecycle resolution
+    with tests; preserve standalone defaults and spec contracts
+  status: complete
+  created_at: '2026-09-19T02:02:15.721326+00:00'
+  completed_at: '2026-09-19T02:24:06.600262+00:00'
+- id: TRBL-029
+  title: Implement light-hub runtime
+  criteria:
+  - Implement SPEC-13 light-hub Redis queue, ack-after-fsync, dedup, degradation,
+    archival seams, and tests; preserve standalone behavior
+  status: complete
+  created_at: '2026-09-19T02:53:50.925924+00:00'
+  completed_at: '2026-09-19T03:55:24.420027+00:00'
+- id: TRBL-031
+  title: 'Light-hub recovery: rewire the consumer when Redis returns'
+  criteria:
+  - 'After a runtime Redis loss the enabled light-hub runtime supervises itself and
+    rewires: EnsureGroup re-runs so a cold/empty Redis gets the stream+group back
+    via MKSTREAM, the stale consumer is stopped and a fresh one drains, exactly one
+    lifecycle redis_restored record is written, /health.json returns degraded=false
+    with no degraded reason, and an ingest POST answers 200 with the ledger Append
+    preceding the XACK. Proven by a new unit test in internal/hub/runtime_test.go
+    that is RED before the change and GREEN after, plus a live Redis stop/empty-restart
+    run. Standalone profile behaviour is unchanged.'
+  status: complete
+  created_at: '2026-09-19T04:14:08.641493+00:00'
+  completed_at: '2026-09-19T04:48:21.071410+00:00'
+- id: QA-TROUBLE-1
+  title: '[P1] Environment-fragile RSS perf assertion: TestRSSContributionIsBounded
+    fails 3/4 environments (17.8MB vs 12.6MB budget)'
+  criteria:
+  - 'The sensors RSS-contribution gate is deterministic across environments (5 consecutive
+    -count=5 reps green on the control host AND under a fresh-environment stress)
+    while still failing a real retention/leak regression (documented falsification:
+    a mutilated pipeline that retains per-event state makes the gate FAIL); SPEC-03
+    section 7''s 12MB steady-contribution budget is preserved and go test ./internal/sensors/
+    is green'
+  status: complete
+  created_at: '2026-09-19T06:40:47.643496+00:00'
+  completed_at: '2026-09-19T06:52:24.690802+00:00'
+- id: QA-TROUBLE-4
+  title: internal/sensors TestResolveManagers must be uid-independent (fixture hardcodes
+    user:1000 so it is a deterministic false red on any host whose uid != 1000)
+  criteria:
+  - TestResolveManagers passes when the test binary runs as a non-1000 uid (setpriv
+    --reuid=1018) AND still asserts the same-uid dedup collapse (system + one deduped
+    uid) plus a distinct-second-uid case (3 managers); gofmt/vet clean; go test ./internal/sensors/
+    -count=1 passes; specs selfcheck PASS; only internal/sensors/dbus_test.go modified
+  status: complete
+  created_at: '2026-09-19T07:31:08.045281+00:00'
+  completed_at: '2026-09-19T07:35:49.864721+00:00'
+- id: TRBL-013
+  title: 'Rules reload backstop fingerprint must be granularity-independent: rulesMTimes
+    hashes size+mtime only, so a content change with an identical size inside one
+    filesystem timestamp tick is invisible (clean-machine TestRuleDirMTimesDetectsChange
+    red)'
+  criteria:
+  - 'AC1: rulesMTimes (internal/sensors/rules.go) detects a rule-file CONTENT change
+    even when size and mtime are byte-identical (content-derived fingerprint). AC2:
+    TestRuleDirMTimesDetectsChange is deterministic on any filesystem granularity
+    - it proves detection with mtimes pinned equal via os.Chtimes before/after the
+    edit, and it FAILS on the pre-fix code. AC3: the fingerprint stays STABLE for
+    an unchanged dir (no reload storm) and still reacts to file add/remove. AC4: SPEC-03
+    3.7 letter-suffix note documents the content-derived backstop + python3 specs/tools/selfcheck.py
+    PASS. AC5: go build ./... + go vet ./internal/sensors/ + gofmt clean + package
+    tests green on this host.'
+  status: complete
+  created_at: '2026-09-19T08:04:21.059431+00:00'
+  completed_at: '2026-09-19T08:11:24.193703+00:00'
+- id: TRBL-009
+  title: 'Idle-host amplification: repeated detections must not create one incident/event
+    record per sensor cycle'
+  criteria:
+  - AC1 a repeated detection with identical sig+inKey inside the dedup window yields
+    ONE incident (test over the real ingest/sensor path); AC2 a repeating rule does
+    not persist one event record per cycle (fold or counter, with the disposition
+    visible); AC3 measure and record records/day + ledger bytes/day on an idle host
+    with an explicit budget; AC4 no regression in storm-breaker behaviour
+  status: complete
+  created_at: '2026-09-19T08:26:10.837315+00:00'
+  completed_at: '2026-09-19T09:33:05.127615+00:00'
+- id: TRBL-023
+  title: 'The flow''s durable dispatch queue is the issue desk''s spool: with the
+    desk off a spawn dispatch is refused rather than durably queued'
+  criteria:
+  - A dispatch that cannot be delivered while the desk is off is either durably queued
+    in a place that is actually replayed, or refused with a code and a ledger record
+    naming the coupling (never a silent drop); a test drives a spawn with the desk
+    off and asserts exactly one of those outcomes; the chosen coupling is written
+    where SPEC-08 3.6/3.9 and SPEC-09 3.6/3.7 meet and specs/tools/selfcheck.py PASSES.
+  status: complete
+  created_at: '2026-09-19T09:52:17.534429+00:00'
+  completed_at: '2026-09-19T10:16:00.926254+00:00'
+- id: TRBL-039
+  title: Flow dispatch-queue bounds as SPEC-12 registry keys
+  criteria:
+  - The flow spool bounds (max_entries/ttl/max_attempts/replay cadence/replay batch)
+    are registered leaf-by-leaf in the SPEC-12 config registry with defaults 256/72h/5/5s/100,
+    resolvable and visible via trouble config explain; the composition root wires
+    the resolved values into both flow.Spool and Flow (no constants-only path); an
+    operator override measurably changes spool behavior in a test; SPEC-12 is amended
+    under the letter-suffix rule with SPEC-08 3.9a cross-referenced and specs/tools/selfcheck.py
+    PASSES
+  status: complete
+  created_at: '2026-09-19T11:45:01.459189+00:00'
+  completed_at: '2026-09-19T12:17:46.986862+00:00'
+- id: TRBL-036
+  title: Register the SPEC-03 section 4 sensors key surface leaf-by-leaf in the lifecycle
+    registry
+  criteria:
+  - Every scalar sensors.* key of the internal/sensors config switch is a registered
+    lifecycle key, a source-derived coverage test enforces it, flag/env/file/default
+    precedence plus explain provenance are exercised for the sensors keys, and a stock
+    boot shows no key refusal
+  status: complete
+  created_at: '2026-09-19T12:42:40.641443+00:00'
+  completed_at: '2026-09-19T13:19:59.827625+00:00'
+- id: TRBL-059
+  title: 'AC-31 cross-plane context: CodeplaneContext bundle'
+  criteria:
+  - CodeplaneContext exists in internal/types; a sentinel Admit populates Observation.Codeplane;
+    the bundle lands on the incident record; the release-mismatch case writes the
+    codeplane_release_mismatch gap; a test names AC-31
+  status: in_progress
+  created_at: '2026-09-20T22:02:41.164275+00:00'
+- id: TRBL-060
+  title: 'AC-30 ledger pagination: PageToken + Page()'
+  criteria:
+  - PageToken per SPEC-01 2.3a grammar; Query gains Page(); a walk repeats nothing
+    and skips nothing; dropped-generation returns the reset hint; .idx rebuild path
+    exercised; a test names AC-30
+  status: complete
+  created_at: '2026-09-20T22:02:41.582443+00:00'
+  completed_at: '2026-09-21T00:10:10.203626+00:00'
+- id: TRBL-061
+  title: AC-28 routes.per_class override resolution
+  criteria:
+  - per_class resolves from config longest-prefix-wins; the override routes A while
+    the default routes B; an invalid key is refused with the SPEC-12 3.1d code naming
+    the key; Origin.Route is stamped with the carrying route; a test names AC-28
+  status: in_progress
+  created_at: '2026-09-20T22:02:42.207269+00:00'
+- id: TRBL-062
+  title: Container quickstart first event cannot authenticate
+  criteria:
+  - a fresh docker compose up -d of the SHIPPED compose file + container config, with
+    only the documented placeholder edits, returns 200 for the documented first-event
+    curl, and the ledger gains one event + its group record
+  status: complete
+  created_at: '2026-09-20T22:02:42.807168+00:00'
+  completed_at: '2026-10-08T00:07:33.800128+00:00'
+- id: TRBL-063
+  title: dashboard token create silent store divergence
+  criteria:
+  - dashboard token create output names the store path; a mint whose store differs
+    from the resolved dashboard.token_file warns naming both paths; a test pins CLI
+    path == daemon resolved dashboard.token_file for a config declaring /data/state/dashboard.token
+    and for no config
+  status: complete
+  created_at: '2026-09-20T22:02:43.338865+00:00'
+  completed_at: '2026-10-08T00:09:17.457824+00:00'
+- id: QA-TROUBLE-9
+  title: 'Full native suite red again at HEAD: loadfence TestSuiteContentionLooserOnlyAndCapped
+    deterministic invariant break + perf-floor family (research TestDeriveNeverBlocks,
+    scrub TestScrubBudget+TestIngestHarnessThroughput, sentinel TestLoadIngestThroughput,
+    dashboard TestBudgetDashboardRSS)'
+  criteria:
+  - go test ./internal/loadfence/... -count=1 green, all five named tests green individually
+    and in full suite, go build+vet clean, SPEC-01 s7/s7a consistency kept with selfcheck.py
+    PASS if specs touched, no tautology-weakened assertions
+  status: complete
+  created_at: '2026-09-22T19:35:42.264580+00:00'
+  completed_at: '2026-09-22T20:58:47.248385+00:00'
+- id: TRBL-065
+  title: 'Mount SPEC-13 section 2.2 operator verbs: trouble hub status|archive|dedup|drain
+    on cmd/trouble against existing seams (Runtime.Status, PlanArchive/Archiver.Archive,
+    Consumer.Drain)'
+  criteria:
+  - trouble hub status|archive|dedup|drain all resolve on a live instance; status
+    prints HubStatus fields SPEC-13 2.2 names and exits 1 on degraded; drain empties
+    a populated stream, exits 1 with pending on timeout, is the only mutating verb;
+    archive exits 0 ok/1 failed/2 refused, dedup 0 present/1 absent/2 unreachable,
+    --json on status+dedup; a test names SPEC-13 2.2 per verb; TRBL-029 boundary list
+    annotated to point at this row
+  status: complete
+  created_at: '2026-09-22T19:35:53.118948+00:00'
+  completed_at: '2026-09-22T21:54:26.676040+00:00'
+- id: TRBL-066
+  title: Fresh no-.git source transfer builds an UNSTAMPED pair (0.0.0-dev unknown)
+    and deploy/README.md never says so; container path documents GIT_SHA remedy, host
+    path documents none
+  criteria:
+  - deploy/README.md first-run section tells a no-.git reader how to get a stamped
+    pair (make bin GIT_SHA=<sha>) or explicitly declares the UNSTAMPED banner + trouble
+    install --force as expected and why it is safe; no documented fresh-machine path
+    produces an unstamped pair silently; one-line Makefile help if needed
+  status: complete
+  created_at: '2026-09-22T19:35:53.322620+00:00'
+  completed_at: '2026-09-22T21:31:36.768937+00:00'
+- id: TRBL-072
+  title: CI workflow for the public repo
+  criteria:
+  - 'A .github/workflows/ci.yml exists and passes locally: yaml-valid, gofmt clean,
+    CGO_ENABLED=0 build clean, vet clean, go test -short green, selfcheck PASS; triggers
+    on push+PR to main; no other files touched'
+  status: complete
+  created_at: '2026-09-24T15:48:35.968409+00:00'
+  completed_at: '2026-09-24T16:05:08.864582+00:00'
+- id: TRBL-068
+  title: Type the Python tool surface
+  criteria:
+  - All 5 Python files typed; 12 mypy errors in selfcheck.py fixed with clean-failure
+    semantics; mypy+ruff enforced via battery or selfcheck wiring with falsification
+    proof; selfcheck PASS on untouched specs
+  status: complete
+  created_at: '2026-09-24T15:48:36.070536+00:00'
+  completed_at: '2026-09-24T16:28:00.495677+00:00'
+- id: TRBL-067
+  title: Routine dep bumps
+  criteria:
+  - go.mod/go.sum carry cpuid/v2 2.4.0, testify 1.12.1, atomic 1.12.0; go build/vet
+    clean; go test -short green; no API breaks
+  status: complete
+  created_at: '2026-09-24T15:48:36.183976+00:00'
+  completed_at: '2026-09-24T16:10:00.237127+00:00'
+- id: TRBL-071
+  title: Unique operations.md section numbering
+  criteria:
+  - All H2 sections numbered uniquely and sequentially; in-file and repo cross-references
+    re-pointed and title-verified; selfcheck PASS; README hits reported not edited
+  status: complete
+  created_at: '2026-09-24T15:48:36.302414+00:00'
+  completed_at: '2026-09-24T16:28:44.321546+00:00'
+- id: TRBL-070
+  title: 'README freshness: SPEC-13 + internal/hub'
+  criteria:
+  - README authority line cites SPEC-01..13; package tour includes internal/hub; SPEC-13
+    spec listed in Read-the-specs; selfcheck still PASS
+  status: complete
+  created_at: '2026-09-24T15:50:59.355180+00:00'
+  completed_at: '2026-09-24T15:51:07.222670+00:00'
+- id: TRBL-074
+  title: Sentinel standalone on-ramp event-level dedup (fold retries)
+  criteria:
+  - 'Standalone generic-JSON ingest folds identical-sig retries inside a bounded dedup
+    window: N byte-identical POSTs yield one ledger event record per distinct event
+    id and one group record ending op=update with suppressed=N-1; different sigs never
+    fold; window expiry creates a fresh pair; SPEC-04 carries a letter-suffix section
+    documenting key/window/semantics; specs/tools/selfcheck.py PASS; internal/sentinel
+    tests green.'
+  status: complete
+  created_at: '2026-09-25T12:13:56.037811+00:00'
+  completed_at: '2026-09-25T13:51:21.128870+00:00'
+- id: INT-CI-001
+  title: Skip load-calibrated perf gates under CI with recorded references
+  criteria:
+  - The seven load-calibrated perf tests (TestAmortizedThroughput, TestFsyncWindowBound,
+    TestPerLineRegression, TestScanBudget, TestScrubBudget, TestIngestHarnessThroughput,
+    TestDeriveNeverBlocks) skip under CI (env gate) each with its quiet-host reference
+    figure recorded in the skip message, run unchanged when CI is unset; docs/operations.md
+    notes the gate; build and vet green.
+  status: complete
+  created_at: '2026-09-25T12:13:56.281079+00:00'
+  completed_at: '2026-09-25T12:34:39.014299+00:00'
+- id: README-1
+  title: Fix smoke-e2e token hash assertion and README count
+  criteria:
+  - make smoke-e2e passes; token store hash assertion parses the actual JSON shape;
+    README documents the measured assertion count; add regression coverage if appropriate
+  status: complete
+  created_at: '2026-09-27T16:36:34.139505+00:00'
+  completed_at: '2026-09-27T16:49:02.393317+00:00'
+- id: QA-TROUBLE-11
+  title: llm fallback chain must attempt request 1 on an expired caller deadline
+  criteria:
+  - 'internal/llm: an expired caller deadline produces exactly one attempted HTTP
+    request then ClassTimeout/ReasonDeadline; the attempt loop never skips attempt
+    1'
+  status: complete
+  created_at: '2026-09-27T23:22:31.909987+00:00'
+  completed_at: '2026-09-28T00:42:59.090208+00:00'
+- id: TRBL-083
+  title: 'e2e smoke port pair: bind both ports up front'
+  criteria:
+  - 'make smoke-e2e boots with a verified-free port pair: the script reserves BOTH
+    ports before deriving the config, and a regression arm proves a occupied port+1
+    is re-allocated rather than fatal'
+  status: complete
+  created_at: '2026-09-29T23:31:07.551580+00:00'
+  completed_at: '2026-09-29T23:54:52.443812+00:00'
+- id: INT-CI-002
+  title: research poll timeout gap determinism
+  criteria:
+  - go test ./internal/research/ -run TestPollBudgetEndsTheLoop -count=30 green; the
+    gap record no longer depends on wall-clock reordering between budget expiry and
+    the loop's poll boundary
+  status: complete
+  created_at: '2026-09-29T23:31:07.883850+00:00'
+  completed_at: '2026-09-29T23:46:36.814826+00:00'
+- id: DOC-1
+  title: Document hub CLI verbs
+  criteria:
+  - docs/cmd.md lists all 4 trouble hub verbs with flags matching binary --help output
+  status: complete
+  created_at: '2026-09-29T03:08:15.300330+00:00'
+  completed_at: '2026-09-29T03:35:55.288438+00:00'
+- id: DOC-2
+  title: Document dashboard token --output-env flag
+  criteria:
+  - docs/cmd.md shows --output-env for dashboard token create/rotate and --health-url/--state-root
+    for check-stall
+  status: complete
+  created_at: '2026-09-29T03:08:15.745334+00:00'
+  completed_at: '2026-09-29T03:48:02.013445+00:00'
+- id: DOC-3
+  title: Fix trouble upgrade flag documentation
+  criteria:
+  - docs/cmd.md shows only flags the binary actually accepts for trouble upgrade
+  status: complete
+  created_at: '2026-09-29T03:08:16.306392+00:00'
+  completed_at: '2026-09-29T03:49:03.464047+00:00'
+- id: DOC-4
+  title: Document dashboard HTTP routes
+  criteria:
+  - docs/ has a dedicated reference for the 20 dashboard HTTP routes outside SPEC-10
+  status: complete
+  created_at: '2026-09-29T03:08:16.854179+00:00'
+  completed_at: '2026-09-29T03:50:02.872613+00:00'
+- id: TRBL-076
+  title: Install docs state Go prerequisite
+  criteria:
+  - Quickstart docs explicitly state Go 1.26+ is required before make bin, with install
+    URL
+  status: complete
+  created_at: '2026-09-29T03:08:17.260233+00:00'
+  completed_at: '2026-09-29T03:51:04.870683+00:00'
+- id: TRBL-077
+  title: Document container degraded health
+  criteria:
+  - deploy/README.md container section states expected status=degraded for distroless
+    image
+  status: complete
+  created_at: '2026-09-29T03:08:17.639526+00:00'
+  completed_at: '2026-09-29T03:52:11.490915+00:00'
+- id: TRBL-081
+  title: Token CLI addresses non-default store
+  criteria:
+  - trouble dashboard token create accepts --token-file flag or reads daemon's resolved
+    store
+  status: complete
+  created_at: '2026-09-29T03:08:17.919424+00:00'
+  completed_at: '2026-09-29T03:54:19.010892+00:00'
+- id: TRBL-086
+  title: Config expands tilde in strings
+  criteria:
+  - Config parser expands ~ to HOME in string values like state_root
+  status: complete
+  created_at: '2026-09-29T03:08:18.157826+00:00'
+  completed_at: '2026-09-29T03:58:08.808910+00:00'
+- id: TRBL-087
+  title: state_root error names mode requirement
+  criteria:
+  - state_root mode enforcement error message tells user the required mode (0700)
+  status: complete
+  created_at: '2026-09-29T03:08:18.453826+00:00'
+  completed_at: '2026-09-29T04:02:13.043782+00:00'
+- id: TRBL-073
+  title: ''
+  criteria:
+  - implement and verify per board row TRBL-073
+  status: pending
+  created_at: '2026-09-29T10:30:24.639349+00:00'
+- id: TRBL-075
+  title: Fold identical D-Bus/reconcile observations through the sample fold to kill
+    the residual 10MB/day idle amplification
+  criteria:
+  - 'On an idle host, a dbus sensor signature that repeats within its window no longer
+    writes one ledger record per arrival: observations carrying an unchanged signature
+    are folded count-preservingly (one record per window with count/first_ts/last_ts
+    and fold:true), tests cover the foldability decision, and go vet + package tests
+    pass'
+  status: complete
+  created_at: '2026-10-02T19:25:38.708219+00:00'
+  completed_at: '2026-10-02T20:05:38.641306+00:00'
+- id: TRBL-082
+  title: Document a make-less build path
+  criteria:
+  - deploy/README.md and README.md document building without make (go build ./cmd/...
+    equivalent) for toolchain-less hosts; no claim that make is required goes unqualified
+  status: in_progress
+  created_at: '2026-10-01T23:35:27.678908+00:00'
+- id: TRBL-085
+  title: dashboard.token_file default anchored to state_root not HOME
+  criteria:
+  - A scratch config with state_root/config_path set but dashboard.token_file unset
+    resolves BOTH 'trouble dashboard token create' and the daemon to a path anchored
+    at state_root (or config_path), never the operator's real ~/.config/trouble/dashboard-tokens.json;
+    tests pin the anchoring; go build + focused tests pass
+  status: complete
+  created_at: '2026-10-02T07:50:09.887339+00:00'
+  completed_at: '2026-10-02T08:54:44.783223+00:00'
+- id: TRBL-091
+  title: Wire the trouble sensors probe CLI verb per SPEC-03
+  criteria:
+  - cmd/trouble accepts 'sensors probe', calls Sensors.Probe without booting sensors,
+    prints the capability_probe record, usage lists it, tests pass, go build+vet clean
+  status: complete
+  created_at: '2026-09-30T10:36:20.598006+00:00'
+  completed_at: '2026-09-30T10:57:16.515098+00:00'
+- id: TRBL-092
+  title: Soak RSS growth investigation
+  criteria:
+  - RSS growth over 3-day soak is investigated; leak source identified or growth explained;
+    fix committed or evidence-backed no-fix verdict recorded
+  status: complete
+  created_at: '2026-09-30T17:32:32.340290+00:00'
+  completed_at: '2026-09-30T20:12:51.543698+00:00'
+- id: QA-TROUBLE-12
+  title: Fix TROUBLE-SCRUB-008-before-LIFECYCLE-004 pre-boot ordering
+  criteria:
+  - TestSecretShapedFlagValueStillRefusedOnArgv green; scrub-008 still reachable with
+    valid state root; go build ./... clean
+  status: complete
+  created_at: '2026-10-01T12:11:00.423639+00:00'
+  completed_at: '2026-10-01T12:30:36.149592+00:00'
+- id: TRBL-084
+  title: 'Single-event ingest: route event+group through one AppendBatch window in
+    production'
+  criteria:
+  - 'At HEAD: sentinelSink and hubSink implement AppendBatch; TestProductionSinksCarryAppendBatch,
+    TestOneIngestPostOneGroupCommitWindow and TestSingleEventIngestLatencyBeforeAfter
+    pass on the merged tree; sentinel+ledger packages green'
+  status: complete
+  created_at: '2026-10-02T03:11:36.224345+00:00'
+  completed_at: '2026-10-02T03:24:18.159304+00:00'
+- id: TRBL-078
+  title: "substrate self-detection silences container noise (SPEC-03 \xA73.2a)"
+  criteria:
+  - "1) SPEC-03 \xA73.2a pins the container-substrate rule (marker evidence only,\
+    \ facility probed individually, ONE gap record, gated sensors Enabled:false with\
+    \ TROUBLE-SENSORS-026 naming the facility). 2) SPEC-TYPES adds CodeSensors026.\
+    \ 3) substrate_test.go covers the marker/evidence/absent contract and the one-record\
+    \ shape. 4) selfcheck PASS, go build/vet clean, gofmt clean, sensors suite green,\
+    \ app subsystems tests green, merged-tree gates on main."
+  status: complete
+  created_at: '2026-10-02T01:48:56.684968+00:00'
+  completed_at: '2026-10-02T02:04:04.160041+00:00'
+- id: TRBL-095
+  title: gofmt red on main
+  criteria:
+  - gofmt -l clean at HEAD; go test ./internal/app passes
+  status: complete
+  created_at: '2026-10-01T20:17:29.751300+00:00'
+  completed_at: '2026-10-01T20:17:36.786194+00:00'
+- id: RELEASE-002
+  title: Standalone sentinel on-ramp lacks event dedup
+  criteria:
+  - Same event POSTed N times to the standalone on-ramp produces 1 event record, not
+    N (retrying reporters no longer duplicate evidence); behavior covered by a test
+    in the touched package
+  status: complete
+  created_at: '2026-10-01T23:35:27.316159+00:00'
+  completed_at: '2026-10-01T23:55:15.971843+00:00'
+- id: RELEASE-003
+  title: selfcheck.py verifies spec-cited implementation files exist
+  criteria:
+  - specs/tools/selfcheck.py checks that implementation files cited by SPEC-INDEX
+    (e.g. internal/flow/spool.go) exist and the check fails closed when a cited file
+    is missing; selfcheck passes on the current tree
+  status: complete
+  created_at: '2026-10-01T23:35:27.431519+00:00'
+  completed_at: '2026-10-02T00:34:54.900551+00:00'
+- id: README-3
+  title: README headline rate lacks load-shape caveat
+  criteria:
+  - README.md no longer presents 1.94us/515k as unqualified; the fsync-window load-shape
+    consequence (single-event ~650ms) is stated near the headline and near the fsync-window
+    section
+  status: complete
+  created_at: '2026-10-01T23:35:27.557242+00:00'
+  completed_at: '2026-10-01T23:51:40.613642+00:00'
+- id: TRBL-093
+  title: Fix dashboard token minted while daemon down rejected forever
+  criteria:
+  - A dashboard token minted via CLI while the daemon is offline is rejected with
+    401 TROUBLE-DASHBOARD-002 after the daemon boots, even though the token file is
+    well-formed 0600. The daemon must reload the token store on boot (or the CLI must
+    signal the daemon) so tokens minted offline are accepted once the daemon comes
+    up.
+  status: complete
+  created_at: '2026-10-02T02:22:14.469729+00:00'
+  completed_at: '2026-10-02T02:33:13.457953+00:00'
+- id: QA-TROUBLE-13
+  title: sentinel TestCollectorLongLineIsTruncated fails only on clean JIT bunker
+  criteria:
+  - 'The 131079-byte-line test passes on a clean machine: the sensor event survives
+    scrub intake and the truncation assertion runs (no scrub_refused gap), both on
+    the dev box and the JIT bunker, with the root cause documented in the test or
+    code'
+  status: complete
+  created_at: '2026-10-02T07:50:03.307715+00:00'
+  completed_at: '2026-10-02T09:09:48.681278+00:00'
+- id: QA-TROUBLE-10
+  title: 'Lifecycle cross-version upgrade: backup binary exec bits + rollback copy+verify'
+  criteria:
+  - 'internal/lifecycle passes on a fresh box: no permission-denied on the backup
+    binary fork/exec, backup write path sets 0755 explicitly, rollback restores by
+    copy+verify (bytes equal AND binaryVersion matches) before reporting restored'
+  status: complete
+  created_at: '2026-10-02T10:51:59.181148+00:00'
+  completed_at: '2026-10-02T12:07:26.277463+00:00'
+- id: QA-TROUBLE-14
+  title: App first-run boot tests environment-deterministic on clean boxes
+  criteria:
+  - 'TestMissingRulesDirBootsToHealthOK, TestShippedExampleConfigBootsToServe, TestShippedExampleConfiguredValidlyBootsOk
+    pass on a clean JIT bunker and under load: absent-rules boot health expectation
+    matches shipped behaviour deterministically (no rss/dbus environment dependence),
+    assertion not weakened'
+  status: complete
+  created_at: '2026-10-02T10:51:59.302057+00:00'
+  completed_at: '2026-10-02T13:07:33.497915+00:00'
+- id: QA-TROUBLE-16
+  title: Dashboard AC19 strip-poller test deterministic under suite load
+  criteria:
+  - 'TestAC19LiveIncidentWithinBudget passes -count=3 under concurrent package load:
+    strip poller seq production no longer races a wall-clock window; assertion strength
+    preserved'
+  status: complete
+  created_at: '2026-10-02T10:51:59.423045+00:00'
+  completed_at: '2026-10-02T14:07:37.073539+00:00'
+- id: QA-TROUBLE-15
+  title: 'perf-budget suite family: load-scaled budgets for the fixed-wall-clock perf
+    tests'
+  criteria:
+  - 'All perf-budget tests in the QA-TROUBLE-15 family (TestRuleEvaluationBudget256Rules,
+    TestLoadIngestThroughput, TestBudgetDashboardRSS, TestDeriveNeverBlocks, TestScrubBudget,
+    TestIngestHarnessThroughput, TestFsyncCountIsStructural/TestAmortizedThroughput/TestFsyncWindowBound/TestPerLineRegression)
+    pass on a loaded dev box (load_avg_1m >= 20) without weakened assertions: budgets
+    scale with measured load or use min-of-N sampling; fixed wall-clock bounds replaced
+    by load-aware bounds'
+  status: complete
+  created_at: '2026-10-02T15:46:11.711554+00:00'
+  completed_at: '2026-10-02T17:38:45.165183+00:00'
+- id: TRBL-080
+  title: Document rootless-docker compose install gaps from 09-25 dogfood
+  criteria:
+  - 'docs/operations.md compose section documents: (1) DOCKER_HOST override for rootless/managed-docker
+    hosts (default /var/run/docker.sock fails permission-denied; working socket may
+    be /run/bunker/<agent>/docker.sock or /run/user/<uid>/docker.sock); (2) note that
+    some managed daemons (bunkerd-style) are out-of-band so a user-level docker.service
+    unit cannot be loaded; (3) guidance that compose/container docs writing temp files
+    should use $HOME not shared /tmp; all three traced to the 09-25 las-bunker-03
+    dogfood evidence'
+  status: complete
+  created_at: '2026-10-03T12:59:48.602822+00:00'
+  completed_at: '2026-10-03T13:07:48.184298+00:00'
+- id: RELEASE-SMOKE-001
+  title: cli_smoke.sh default-store assertions predate TRBL-085 state-root anchoring
+  criteria:
+  - make smoke-e2e passes at HEAD with zero FAIL lines; the default-path assertions
+    expect the state-root-anchored store and a HOME store-absence guard exists
+  status: complete
+  created_at: '2026-10-03T19:49:27.790363+00:00'
+  completed_at: '2026-10-03T20:22:07.203289+00:00'
+- id: TRBL-096
+  title: cli_smoke default-path fixture conflicts with TRBL-085 anchoring
+  criteria:
+  - make smoke-e2e rc=0 with 0 FAIL at commit 4dcdb3d on origin/main; CI run green
+  status: complete
+  created_at: '2026-10-03T19:58:44.901076+00:00'
+  completed_at: '2026-10-03T19:58:51.037273+00:00'
+- id: QA-TROUBLE-17
+  title: 'Stop the load-scaled perf-budget recurrence: artifact budget ceiling exceeded
+    on busy bunker'
+  criteria:
+  - "The load-scaled perf-budget class (QA-TROUBLE-5/9/15/17) stops recurring: internal/skills\
+    \ TestArtifactParseBudget must not fail solely because host load exceeded its\
+    \ 1.2s clamp (observed 1.338s at load_avg 34.87), and internal/sentinel TestLoadIngestThroughput's\
+    \ RSS-growth bound must not fail solely from box load \u2014 following the TRBL-004\
+    \ precedent (load-aware floors or explicit skip verdict), the change must be committed\
+    \ on main with the repo's tests green at HEAD"
+  status: complete
+  created_at: '2026-10-04T05:05:16.144738+00:00'
+  completed_at: '2026-10-19T21:36:01.770746+00:00'
+- id: DOC-6
+  title: Document internal/llm package in docs
+  criteria:
+  - "docs (cmd.md or a new docs page) covers internal/llm \u2014 the LLM ladder client:\
+    \ client/config/compact/errors/fallback \u2014 with an example; selfcheck passes\
+    \ if specs touched; build+tests green"
+  status: complete
+  created_at: '2026-10-04T22:33:24.885990+00:00'
+  completed_at: '2026-10-04T22:50:17.379069+00:00'
+- id: QA-TROUBLE-21
+  title: internal/skills TestLibrary_* red on non-sticky temp roots
+  criteria:
+  - internal/skills package tests pass on hosts where temp root lacks sticky bit;
+    writableDirOnPath accepts 0700 scratch dirs
+  status: complete
+  created_at: '2026-10-06T10:16:20.005716+00:00'
+  completed_at: '2026-10-06T10:58:43.531604+00:00'
+- id: QA-TROUBLE-18
+  title: Repo-owned chaos-corruption probe
+  criteria:
+  - Repo has .qa/chaos-probes/corruption.sh that boots the real troubled binary with
+    a temp state_root, truncates heartbeat.json, restarts, and self-grades per the
+    harness contract (0=OK,1=FAIL,2=INFO) within the 120s probe budget; probe run
+    locally produces a graded outcome; board row QA-TROUBLE-18 closed with the run
+    as evidence
+  status: complete
+  created_at: '2026-10-06T11:27:30.134629+00:00'
+  completed_at: '2026-10-06T11:36:12.875889+00:00'
+- id: QA-TROUBLE-22
+  title: chaos-resource suite panic under 3G cap
+  criteria:
+  - 'under the QA harness 3G cap the ledger package either completes or reports explicit
+    SKIP verdicts for its memory/time-budgeted gates (loadfence-family), and the suite
+    never hits go test''s own 10m timeout panic; a fresh capped run shows no ''panic:
+    test timed out'' and the mechanism is documented'
+  status: complete
+  created_at: '2026-10-06T18:11:54.033544+00:00'
+  completed_at: '2026-10-19T21:34:05.475121+00:00'
+- id: QA-TROUBLE-19
+  title: 'errorpath: missing dashboard token store boots WARN-only'
+  criteria:
+  - a boot whose dashboard token store is missing either regenerates with a named
+    ledger notice or refuses the dashboard subsystem with a named error code (one
+    behavior chosen, documented in SPEC-12 letter-suffix amendment, selfcheck PASS);
+    the chaos-errorpath missing-config arm no longer serves an unauthenticated dashboard
+    with only a WARN
+  status: complete
+  created_at: '2026-10-06T18:11:54.299491+00:00'
+  completed_at: '2026-10-07T04:23:18.609461+00:00'
+- id: TRBL-099
+  title: 'govulncheck clean: bump toolchain to go1.26.9 (17 stdlib vulns incl GO-2026-5026)'
+  criteria:
+  - govulncheck ./... reports no vulnerabilities; go build && go vet ./... clean;
+    toolchain line in go.mod >= go1.26.9; commit pushed to origin/main
+  status: complete
+  created_at: '2026-10-10T10:22:57.190375+00:00'
+  completed_at: '2026-10-10T10:23:36.380755+00:00'
+- id: TRBL-100
+  title: ledger status/verify/compact CLI verbs wired over internal/ledger API
+  criteria:
+  - go build ./... && go vet ./... && go test ./cmd/... ./internal/ledger/... -count=1
+    pass on merged main; trouble ledger status|verify|compact no longer exit 2; exit
+    codes match SPEC-01 2.4
+  status: in_progress
+  created_at: '2026-10-15T14:53:22.179667+00:00'
+- id: TRBL-101
+  title: mid-file torn/corrupt ledger lines detected, healed, counted
+  criteria:
+  - go test ./internal/ledger/... -count=1 green including new mid-file torn test;
+    tail recovery unchanged
+  status: in_progress
+  created_at: '2026-10-15T14:53:22.325619+00:00'
+- id: TRBL-103
+  title: dashboard token store per-entry quarantine
+  criteria:
+  - single malformed entry skips with warning, valid tokens 200; whole-file corruption
+    still TROUBLE-DASHBOARD-013; internal/dashboard tests green
+  status: in_progress
+  created_at: '2026-10-15T14:53:22.508270+00:00'
+- id: TRBL-REVIEW-CLOSE-ERR
+  title: dashboard incident close surfaces named ladder refusal
+  criteria:
+  - close of non-closable incident returns named TROUBLE-LADDER-012 no_close_edge
+    in body with proper status, not generic 500; internal/dashboard tests green
+  status: in_progress
+  created_at: '2026-10-15T14:53:22.686352+00:00'
+- id: TRBL-110
+  title: Ledger boot-time hint-seeded seq gap never reaches the audit trail
+  criteria:
+  - 'SPEC-01 3.4 rule 7 allocation is max(HEAD.last_seq, file_max)+1 and stays pinned
+    by TestSeqRecoveryFromHeadHint; the defect is that a stale-high HEAD seeds a real
+    seq hole with NO lifecycle{op:hole} record in the trail (SPEC-01 3.5: every hole
+    appears in the audit trail). Fix materializes the recovery gap as an auditable
+    hole record; go build ./... && go vet ./... && focused internal/ledger tests pass'
+  status: complete
+  created_at: '2026-10-16T13:08:05.839271+00:00'
+  completed_at: '2026-10-16T13:40:03.774027+00:00'
+- id: TRBL-107
+  title: 'Ledger hole trail: lifecycle{op:"hole",from,to} records never written to
+    audit trail; recover_torn payload lacks from-seq; glued-fragment swallowed'
+  criteria:
+  - "SPEC-01 \xA73.5: every hole appears in audit trail as lifecycle{op:\"hole\"};\
+    \ recover_torn payload must carry from/to seq; glued fragments must be recovered,\
+    \ not swallowed"
+  status: complete
+  created_at: '2026-10-17T16:40:30.790032+00:00'
+  completed_at: '2026-10-17T17:06:35.419243+00:00'
+- id: INT-CI-4
+  title: fix INT-CI-4 test regressions from TRBL-107
+  criteria:
+  - TestInteriorCorruption and TestLedgerVerifyExitCodesSpec01Section24 pass; CI green
+  status: complete
+  created_at: '2026-10-18T04:18:23.554386+00:00'
+  completed_at: '2026-10-18T04:49:24.454283+00:00'
+- id: TRBL-111
+  title: ledger verbs silently fall back to default state root on config failure
+  criteria:
+  - resolveLedgerContext exits 13 on missing/unreadable config instead of falling
+    back to default root; boot-note append is opt-in for read verbs; tests cover both
+    paths
+  status: complete
+  created_at: '2026-10-18T06:50:24.389478+00:00'
+  completed_at: '2026-10-18T07:03:54.922929+00:00'
+- id: TRBL-108
+  title: '[P2] ledger .idx sidecar metadata is internally inconsistent (records/first_seq/last_seq
+    contradict the file) and has no documented consumer - silent-misgrading risk'
+  criteria:
+  - the .idx sidecar must either (a) validate its metadata against the actual file
+    contents on load and discard+rebuild on mismatch, or (b) be documented as advisory-only
+    with an explicit rebuild rule; any consumer must not trust stale metadata; tests
+    prove the chosen contract
+  status: complete
+  created_at: '2026-10-18T09:28:04.171746+00:00'
+  completed_at: '2026-10-18T09:41:30.183749+00:00'
+- id: INT-CI-5
+  title: Fix tracked Go file formatting
+  criteria:
+  - gofmt -l reports no tracked Go files; internal/ledger/sidecar_contract_test.go
+    is gofmt-clean
+  status: complete
+  created_at: '2026-10-18T20:48:15.973832+00:00'
+  completed_at: '2026-10-18T21:01:37.199100+00:00'
+- id: DOC-11
+  title: Refresh changelog for landed user-visible changes
+  criteria:
+  - CHANGELOG.md Unreleased documents the verified user-visible changes since the
+    last changelog commit; worker trace links row, doc, evidence, and commit.
+  status: complete
+  created_at: '2026-10-19T21:54:59.609375+00:00'
+  completed_at: '2026-10-19T22:16:18.656003+00:00'
+- id: DOC-12
+  title: Link operator and LLM docs from the README path
+  criteria:
+  - README-reachable documentation links include docs/cmd.md and docs/llm.md and the
+    link census is verified.
+  status: complete
+  created_at: '2026-10-19T21:55:00.039978+00:00'
+  completed_at: '2026-10-19T22:22:46.039171+00:00'
+- id: DOC-13
+  title: Remove stale resolved-gap claims from shipped skills
+  criteria:
+  - Shipped skills cross-check board statuses and no longer state complete rows as
+    live gaps; probes remain accurate.
+  status: complete
+  created_at: '2026-10-19T21:55:00.555815+00:00'
+  completed_at: '2026-10-19T22:23:56.400040+00:00'
+- id: DOC-16
+  title: Repair stale spec citation ownership
+  criteria:
+  - SPEC citation exemptions are either corrected or owned by an open row, and specs/tools/selfcheck.py
+    passes with traceable evidence.
+  status: complete
+  created_at: '2026-10-19T21:55:01.054909+00:00'
+  completed_at: '2026-10-19T22:24:58.767538+00:00'
+- id: TRBL-106-R2
+  title: verify payload_hash false-positives on struct-ordered payloads
+  criteria:
+  - 98ba880 merged to main; go test ./internal/ledger/... -run TestVerifyPayloadHash
+    passes; selfcheck PASS
+  status: complete
+  created_at: '2026-10-20T00:43:32.118312+00:00'
+  completed_at: '2026-10-20T00:43:56.823085Z'
+- id: TRBL-112
+  title: 'Fix stale LOCK: dry-run compact must not take writer seat; ledger status
+    must liveness-check pid'
+  criteria:
+  - 'AC1: go test ./internal/ledger -count=1 exits 0 with no stale LOCK on refused
+    compact; AC2: ledger status --json on stale LOCK reports writer_pid=-1 (not dead
+    pid); AC3: dry-run compact on non-active day works normally'
+  status: complete
+  created_at: '2026-10-23T16:45:49.589875+00:00'
+  completed_at: '2026-10-23T17:55:39.238829+00:00'
+- id: TRBL-115
+  title: decompressed-cap boundary unreachable via generic-JSON
+  criteria:
+  - doc boundary must be reproducible or explicitly scoped
+  status: in_progress
+  created_at: '2026-10-20T01:13:34.366271+00:00'
+- id: TRBL-116
+  title: TRBL-116 verify counts only real compaction aggregates as declared events
+  criteria:
+  - go test ./internal/ledger -count=1 exits 0 at the merged commit; a new test drives
+    Ledger.Verify and ReadVerify over a group carrying aggregate=true with counters.events=1
+    and no compaction in that generation and asserts OK=true / TombstoneMismatches=0;
+    a real compaction aggregate (op=compaction_aggregate declaring 8 folded events
+    against 1 event record) still reports a tombstone mismatch; go test ./internal/ledger
+    -count=1 -run Compaction exits 0 (compaction-side predicate unchanged)
+  status: in_progress
+  created_at: '2026-10-22T18:56:12.315956+00:00'
+- id: TRBL-117
+  title: TRBL-117 compact-then-verify consumes agg_seqs
+  criteria:
+  - The committed change must satisfy the board acceptance criteria and include a
+    committed ch:trace marker resolving row, spec, test, evidence, witness, verdict,
+    and commit.
+  status: complete
+  created_at: '2026-10-22T19:16:55.880417+00:00'
+  completed_at: '2026-10-22T20:18:16.315634+00:00'
+- id: TRBL-119
+  title: Token minted while the dashboard booted refused must clear the refusal without
+    a restart
+  criteria:
+  - 'Commit 0307f23 makes refusedOnlyServer re-check the token store per request (refusalCleared
+    -> the SPEC-10 3.2 refresh the auth chain runs) and delegate to the ordinary route
+    table once the store loads, keeping a still-missing store at 503 TROUBLE-DASHBOARD-013
+    before credential evaluation. Acceptance: (1) new test TestRefusedWrapperServesAfterCliMintWithoutRestart
+    drives a live HTTP server: refused boot -> 503+013, a SECOND TokenStore object
+    (the CLI process) writes the credential file, and the SAME server answers that
+    token 200 with no restart; (2) an unknown token then returns 401 not 503, proving
+    the request reached the auth chain; (3) the two wrapper tests pin the refused-boot
+    premise with a temporary missing store instead of the host-dependent DefaultConfig
+    TokenFile; (4) go build ./... , go vet ./internal/dashboard , go test ./internal/dashboard/...
+    -short (ok 64.669s) all green.'
+  status: complete
+  created_at: '2026-10-23T14:43:02.574152+00:00'
+  completed_at: '2026-10-23T14:43:03.051145+00:00'
+- id: QA-TROUBLE-17-R2
+  title: Host-measured budget gates skip above one declared ceiling instead of failing
+    on an unattainable floor
+  criteria:
+  - 'Commit e05397a adds loadfence.HostGateLoadCeiling=16.0 with AboveHostGate/HostGateSkipText
+    (one threshold shared by both host-measured gates) and routes TestLoadIngestThroughput
+    (internal/sentinel) and TestArtifactParseBudget (internal/skills) through it:
+    above the ceiling each SKIPs naming the measurement, the load and the constant;
+    below it the floor/budget still asserts. loadAvg1 and loadAvgSkills delegate to
+    loadfence.LoadAvg1 so TROUBLE_HOST_LOAD_OVERRIDE falsifies both gates. Acceptance:
+    (1) TROUBLE_HOST_LOAD_OVERRIDE=21 makes both tests SKIP with the measurement named;
+    (2) TROUBLE_HOST_LOAD_OVERRIDE=8 runs the sentinel test to PASS (22.00s) and =0
+    runs the parse budget to PASS at 68ms vs the 500ms quiet-host budget; (3) internal/loadfence/host_gate_test.go
+    pins the predicate, the boundary, the ordering against FenceLoadAvg and the skip
+    text; (4) go test ./internal/sentinel/... ./internal/skills/... ./internal/loadfence/...
+    -short -count=1 is green (67.112s/11.665s/0.965s).'
+  status: complete
+  created_at: '2026-10-23T14:51:17.191109+00:00'
+  completed_at: '2026-10-23T14:51:17.698896+00:00'
+- id: TRBL-120
+  title: Refused dry-run compact no longer leaves its own LOCK; status never reports
+    a dead PID as writer
+  criteria:
+  - 'Commit 092ee37: cmd/trouble cleans the LOCK after a TROUBLE-LEDGER-007 dry-run
+    refusal but only when the LOCK payload names this process (RemoveLockIfOwned),
+    deliberately never touching a live daemon''s writer seat; internal/ledger.ReadStatus
+    reports a writer only when CheckWriterHeld confirms a live PID, so a stale LOCK
+    renders writer_pid=-1 instead of a dead pid. Acceptance: (1) TestLedgerStatusDoesNotReportDeadLockPID
+    pins stale-pid 999999 -> writer_pid=-1 on both JSON and text status; (2) the CLI
+    regression probes pin active-day refusal removes its own LOCK, writer-held refusal
+    retains the live holder''s LOCK, stale pid renders -1; (3) go build ./... , go
+    vet ./... , go test ./cmd/trouble/... -short (11.277s) and ./internal/ledger/
+    -short (242.438s worker run, focused rerun 2.055s) green.'
+  status: complete
+  created_at: '2026-10-23T14:56:35.182390+00:00'
+  completed_at: '2026-10-23T14:56:35.715190+00:00'
+- id: TRBL-118
+  title: 'Fix ack->close ladder transition: Actions.Ack must map to a ladder state
+    change, not just a ledger record'
+  criteria:
+  - 'AC1: internal/app/dashbridge.go Actions.Ack writes both the ladder state transition
+    AND the ledger audit record, so the index next-derive lands the incident in acknowledged
+    (not detected); AC2: dashboard close from detected->resolved edge now succeeds
+    (200, not 400/409); AC3: a regression test drives the full ack+close path end-to-end
+    on a scratch daemon'
+  status: in_progress
+  created_at: '2026-10-23T15:33:03.579226+00:00'
+- id: INT-LEDGER-1
+  title: 'Fix stale LOCK pid: live writer payload must name the holding process'
+  criteria:
+  - 'AC1: after daemon takes seat, LOCK payload pid == /proc self pid; AC2: stale-but-locked
+    state distinct from no-writer; AC3: dashboard status never reports dead pid while
+    flock held'
+  status: complete
+  created_at: '2026-10-23T15:41:51.993767+00:00'
+
+  completed_at: 2026-10-23T21:27:30Z

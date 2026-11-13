@@ -1,0 +1,49 @@
+{
+  "tick_id": "trouble-foreman-2026-11-04-15-49-36",
+  "status": "dispatching",
+  "started_at": "2026-11-04T15:59:47Z",
+  "base_sha": "7026eb416428c2aef4447105ef2398d5c8432565",
+  "wave_budget": 5,
+  "wave_size": 3,
+  "model": "glm-5.3-flash",
+  "provider": "xkiro",
+  "mode": "wave",
+  "host_load_1m_at_dispatch": 27.87,
+  "tasks": [
+    {
+      "id": "TRBL-126",
+      "title": "[P2] Incident rows carry no subject: dbus_unit_failed does not name the unit",
+      "branch": "wt/TRBL-126",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-126",
+      "brief": "/home/kara/.hermes/cache/scratch/trouble-tick/brief-TRBL-126.md",
+      "status": "dispatched"
+    },
+    {
+      "id": "TRBL-128",
+      "title": "[P2] Documented verbs that do not exist: runbook tells operators to run `trouble research`",
+      "branch": "wt/TRBL-128",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-128",
+      "brief": "/home/kara/.hermes/cache/scratch/trouble-tick/brief-TRBL-128.md",
+      "status": "dispatched"
+    },
+    {
+      "id": "TRBL-130",
+      "title": "[P3] Metric honesty: ledger status reports fsync_calls 0 on a live fsyncing ledger",
+      "branch": "wt/TRBL-130",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-130",
+      "brief": "/home/kara/.hermes/cache/scratch/trouble-tick/brief-TRBL-130.md",
+      "status": "dispatched"
+    }
+  ],
+  "not_picked": {
+    "TRBL-124": "status=review; fix 5ddbc0a already landed on main (ancestor of HEAD) - reconciliation row, deferred to a later tick",
+    "TRBL-127": "dashboard state-mapping row overlaps TRBL-126 dashboard rendering surface - deferred to avoid merge collision",
+    "TRBL-129": "cmd/trouble flag row overlaps TRBL-130 ledger status surface - deferred to avoid merge collision",
+    "TRBL-122": "fleet-class bunker-qa.sh row, file lives outside this repo (~/.hermes/scripts)",
+    "TRBL-049": "blocked, fleet-class AGENTS.md discovery issue",
+    "RELEASE-012": "owner-gated release authorization",
+    "QA-TROUBLE-DOCS-1/2": "bunker host disk blockers (99% / 98%)",
+    "QA-TROUBLE-REVIEW-1/2": "bunker battery launch blockers (subdir-of-parent-repo, host disk)",
+    "QA-TROUBLE-README-10": "QA collect-deadline residue, P3"
+  }
+}

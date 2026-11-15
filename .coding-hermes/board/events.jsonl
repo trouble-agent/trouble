@@ -561,3 +561,4 @@
 {"id":556,"timestamp":"2026-11-15T19:35:51Z","event_type":"task_created","task_id":"TRBL-135","actor":"foreman","detail":"{\"id\":\"TRBL-135\",\"status\":\"pending\"}","marker":null}
 {"id":557,"timestamp":"2026-11-15T19:38:00Z","event_type":"task_completed","task_id":"RELEASE-014","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":558,"timestamp":"2026-11-15T19:39:35Z","event_type":"task_created","task_id":"TRBL-136","actor":"foreman","detail":"{\"id\":\"TRBL-136\",\"status\":\"pending\"}","marker":null}
+{"id":559,"timestamp":"2026-11-15T19:43:59Z","event_type":"task_completed","task_id":"INT-CI-8","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

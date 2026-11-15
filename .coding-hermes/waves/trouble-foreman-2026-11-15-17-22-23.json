@@ -1,0 +1,17 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-11-15-17-22-23",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "7907e11636f3eea604b9dae4395c4b867d9e81db",
+  "wave_budget": 12,
+  "workers": [
+    {"task_id":"TRBL-127","worktree":"/home/kara/worktrees/trouble-TRBL-127","branch":"wt/TRBL-127","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"},
+    {"task_id":"TRBL-134-R2","worktree":"/home/kara/worktrees/trouble-TRBL-134-R2","branch":"wt/TRBL-134-R2","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"},
+    {"task_id":"RELEASE-014","worktree":"/home/kara/worktrees/trouble-RELEASE-014","branch":"wt/RELEASE-014","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"},
+    {"task_id":"RELEASE-015","worktree":"/home/kara/worktrees/trouble-RELEASE-015","branch":"wt/RELEASE-015","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"},
+    {"task_id":"TRBL-129","worktree":"/home/kara/worktrees/trouble-TRBL-129","branch":"wt/TRBL-129","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"},
+    {"task_id":"TRBL-130-R2","worktree":"/home/kara/worktrees/trouble-TRBL-130-R2","branch":"wt/TRBL-130-R2","base_sha":"7907e11636f3eea604b9dae4395c4b867d9e81db"}
+  ],
+  "merge_order": ["TRBL-127","TRBL-134-R2","RELEASE-014","RELEASE-015","TRBL-129","TRBL-130-R2"],
+  "status": "dispatching"
+}

@@ -13,6 +13,8 @@ Note on versions: no release tag is cut yet. A build from this tree is
 
 ### Added
 
+- **Release preparation tooling**: `scripts/release.sh --dry-run --version vX.Y.Z` checks the clean-tree, tag, exact-SHA CI, and changelog gates without changing the checkout; the non-dry-run path prepares locally named archives and `checksums.txt` but never tags or publishes.
+
 - **The spec set is the contract**: `SPECS-BRIEF.md`,
   `SPECS-BRIEF-v0.1.1.md`, `specs/SPEC-01..13`, `SPEC-TYPES`, `SPEC-INDEX`
   (AC matrix) plus `specs/tools/selfcheck.py`, which fails when the matrix and

@@ -1285,15 +1285,28 @@ func (ix *index) applyIncidentLocked(rec *types.Record, ts time.Time) {
 	if v, ok := rec.Payload["state"].(string); ok && v != "" {
 		inc.State = types.LadderState(v)
 	}
-	// TRBL-118: a dashboard ack is a state-bearing write. The bridge stamps the
-	// resulting state explicitly (the branch above), and a ledger written before
-	// that stamp carries only `transition:"acknowledged"` — fold it to
-	// `acknowledged` here rather than leaving the incident at the `detected`
-	// default. Without this a boot rebuild and the live append disagree, and the
-	// next observation re-derives a state the ladder has already left.
+	// TRBL-127: an incident record without a `state` key still names the state
+	// the machine reached in `to` — the T01 admission record is the common one
+	// (`from:detected to:recorded`), and it is exactly the edge SPEC-05 §3.2a
+	// lists as the entry into `recorded`. Folding the destination makes the
+	// dashboard projection and `trouble ledger status` report what the ladder
+	// says instead of the `detected` default, for ledgers already written as
+	// well as new ones.
 	if _, stamped := rec.Payload["state"]; !stamped {
+		refused, _ := rec.Payload["refused"].(bool)
+		// SPEC-05 §3.3: a refusal records the ATTEMPTED target in `to` and
+		// leaves the machine byte-identical, so its `to` is not a state the
+		// incident reached.
+		if !refused {
+			if v, ok := rec.Payload["to"].(string); ok && v != "" {
+				inc.State = types.LadderState(v)
+			}
+		}
+		// TRBL-118: a pre-amendment ack record carried neither `state` nor `to`.
 		if v, ok := rec.Payload["transition"].(string); ok && v == "acknowledged" {
-			inc.State = types.StAcknowledged
+			if _, hasTo := rec.Payload["to"]; !hasTo {
+				inc.State = types.StAcknowledged
+			}
 		}
 	}
 	if inc.State == "" {

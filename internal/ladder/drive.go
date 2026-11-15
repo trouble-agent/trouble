@@ -110,7 +110,7 @@ func (l *Ladder) Drive(ctx context.Context) (DriveReport, error) {
 	l.mu.Lock()
 	ids := make([]string, 0, len(l.incs))
 	for id, st := range l.incs {
-		if st.Inc.State == types.StRecorded {
+		if st.Inc.State == types.StRecorded || st.Inc.State == types.StPlayDrafted {
 			ids = append(ids, id)
 		}
 	}
@@ -157,12 +157,37 @@ func (l *Ladder) DriveOne(ctx context.Context, incID string) (bool, error) {
 	state := st.Inc.State
 	ceiling := st.Ceiling
 	killSwitch := l.gate.KillSwitch
+	hasRunnablePlay := st.Play != nil && l.deps.Registry != nil
 	// The transition sequence is the ledger's own watermark, raised above the
 	// incident's last accepted seq so a stale reader can never make the next
 	// Advance look like a replay (INV-5 dedups a real repeat, not a new drive).
 	seq := st.LastSeq + 1
 	l.mu.Unlock()
-	if killSwitch || state != types.StRecorded {
+	if killSwitch {
+		return false, nil
+	}
+	if state == types.StPlayDrafted {
+		// T08 is the existing checkpoint for a drafted play. A missing play or
+		// runner has no runnable task, so use T09 rather than claiming that a
+		// run started. Both edges are table-owned; the driver only selects the
+		// applicable row and lets Advance enforce its guards.
+		trigger := "run_started_check"
+		to := types.StPlayCheck
+		if !hasRunnablePlay {
+			trigger = "no_runnable_task"
+			to = types.StPlayFailed
+		}
+		row, ok := edgeByTrigger(trigger)
+		if !ok || row.To != to {
+			return false, nil
+		}
+		next, err := l.Advance(ctx, incID, Transition{Seq: seq, From: state, To: to, Trigger: row.ID})
+		if err != nil {
+			return false, nil
+		}
+		return next.State != state, nil
+	}
+	if state != types.StRecorded {
 		return false, nil
 	}
 	if l.deps.Index != nil {

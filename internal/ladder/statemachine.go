@@ -172,7 +172,7 @@ var legal = []edge{
 		Emitted: []string{"transition", "reason", "module"},
 		Code:    types.CodeLadder011,
 		Guard: func(l *Ladder, st *incState, tr Transition) *Error {
-			if st.NoRunnable {
+			if st.NoRunnable || st.Play == nil || l.deps.Registry == nil {
 				return nil
 			}
 			return newErr(types.CodeLadder011, reasonNoCheckMode, "no runnable task under the current gate")
@@ -1033,9 +1033,20 @@ func (l *Ladder) Advance(ctx context.Context, incID string, tr Transition) (type
 	}
 
 	// The stage effect runs before the state is persisted, but the record is
-	// appended BEFORE the in-memory index is updated (INV-2).
+	// appended BEFORE the in-memory index is updated (INV-2). T08 invokes the
+	// production registry, whose authorization callback reads ladder gates; do
+	// not hold the ladder mutex across that external call or the callback
+	// deadlocks. The incident remains in its drafted state until this checkpoint
+	// reacquires the lock and persists the transition.
 	if e.Apply != nil {
-		if aerr := e.Apply(l, st, tr); aerr != nil {
+		if e.ID == "T08" {
+			l.mu.Unlock()
+			aerr := e.Apply(l, st, tr)
+			l.mu.Lock()
+			if aerr != nil {
+				return l.refuseLocked(ctx, st, tr, aerr)
+			}
+		} else if aerr := e.Apply(l, st, tr); aerr != nil {
 			return l.refuseLocked(ctx, st, tr, aerr)
 		}
 	}

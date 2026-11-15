@@ -76,18 +76,17 @@ func TestDriveAdvancesRecordedIncidentToThePlayRung(t *testing.T) {
 		t.Errorf("T03 payload.rung = %q, want %q", gotRung, string(types.RungPlay))
 	}
 
-	// A second pass is a no-op: the incident left `recorded`, so nothing is
-	// driven twice and no refusal is fabricated.
-	before := len(h.ledger.byKind(types.KIncident))
+	// The second pass collects the drafted incident and enters the existing
+	// run_started_check checkpoint; a third pass has no drafted incident left.
 	rep2, err := h.l.Drive(context.Background())
 	if err != nil {
 		t.Fatalf("second Drive: %v", err)
 	}
-	if len(rep2.Advanced) != 0 {
-		t.Errorf("the second pass advanced %v, want none", rep2.Advanced)
+	if len(rep2.Advanced) != 1 || rep2.Advanced[0] != res.Inc {
+		t.Errorf("the second pass advanced %v, want [%s]", rep2.Advanced, res.Inc)
 	}
-	if after := len(h.ledger.byKind(types.KIncident)); after != before {
-		t.Errorf("the second pass appended %d incident record(s), want 0", after-before)
+	if rep3, err := h.l.Drive(context.Background()); err != nil || len(rep3.Advanced) != 0 {
+		t.Errorf("third Drive = %v, %v; want no advance", rep3.Advanced, err)
 	}
 }
 
@@ -143,8 +142,15 @@ func TestDriveWithNoPlayAndNoPortsDegradesInsteadOfPanicking(t *testing.T) {
 	if got.State != types.StPlayDrafted {
 		t.Fatalf("state = %q, want %q", string(got.State), string(types.StPlayDrafted))
 	}
-	if rep2, err2 := h.l.Drive(context.Background()); err2 != nil || len(rep2.Advanced) != 0 {
-		t.Fatalf("second Drive = %v, %v; want no advance and no error", rep2.Advanced, err2)
+	if rep2, err2 := h.l.Drive(context.Background()); err2 != nil || len(rep2.Advanced) != 1 {
+		t.Fatalf("second Drive = %v, %v; want the drafted incident to fail closed", rep2.Advanced, err2)
+	}
+	got, err = h.l.Incident(context.Background(), res.Inc)
+	if err != nil {
+		t.Fatalf("Incident after no-runnable pass: %v", err)
+	}
+	if got.State != types.StPlayFailed {
+		t.Fatalf("state after no-runnable pass = %q, want %q", string(got.State), string(types.StPlayFailed))
 	}
 }
 

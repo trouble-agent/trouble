@@ -119,6 +119,11 @@ becomes a dash and an underscore is kept: `state_root` is `--state_root`, `secre
 is flag-addressable in that form except the six §2.5a names — five of them are declarations rather than
 scalars, and one cannot cross a command line at all. A flag source beats env, file and default (§3.1).
 
+`--state_root` is the canonical spelling on every config-resolving verb. The historical external
+`check-stall --state-root` spelling remains a compatibility alias, and is accepted everywhere the
+canonical spelling is accepted; help output names both forms. The alias resolves to the same
+`state_root` key and has the same precedence and provenance as `--state_root`.
+
 The shipped unit's `ExecStart` renders exactly one argument pair, `--config <path>`; `RenderUnits` scans every
 argument it renders with the SPEC-02 mandatory rule set and refuses an `ExecStart` that carries secret-shaped
 material (TROUBLE-LIFECYCLE-006). That scan is the install-time half of the argv-secret control (§3.2); §2.5a

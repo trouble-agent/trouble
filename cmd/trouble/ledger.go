@@ -154,6 +154,7 @@ func openLedger(lc ledgerContext) (led *ledger.Ledger, writerHeld bool, err erro
 func cmdLedgerStatus(args []string) int {
 	fs := flag.NewFlagSet("ledger status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	asJSON := fs.Bool("json", false, "machine-readable LedgerStatus")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -267,6 +268,7 @@ func max64(a, b int64) int64 {
 func cmdLedgerVerify(args []string) int {
 	fs := flag.NewFlagSet("ledger verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	day := fs.String("day", "", "verify this day only (default: every authoritative file)")
 	asJSON := fs.Bool("json", false, "machine-readable VerifyReport")
 	if err := fs.Parse(args); err != nil {
@@ -333,6 +335,7 @@ func printVerifyReport(rep ledger.VerifyReport) {
 func cmdLedgerCompact(args []string) int {
 	fs := flag.NewFlagSet("ledger compact", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	day := fs.String("day", "", "the day to compact, YYYY-MM-DD (required)")
 	dryRun := fs.Bool("dry-run", false, "print the CompactionResult and write nothing")
 	asJSON := fs.Bool("json", false, "machine-readable CompactionResult")

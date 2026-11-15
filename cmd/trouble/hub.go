@@ -107,6 +107,7 @@ func resolveHubContext(args []string) (hubContext, int) {
 func cmdHubStatus(args []string) int {
 	fs := flag.NewFlagSet("hub status", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	asJSON := fs.Bool("json", false, "machine-readable HubStatus")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -243,6 +244,7 @@ func hubOffsets(ctx context.Context, client *hub.Client, cfg hub.RedisConfig) ty
 func cmdHubArchive(args []string) int {
 	fs := flag.NewFlagSet("hub archive", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	dryRun := fs.Bool("dry-run", false, "print the ArchivePlan and write nothing")
 	one := fs.String("file", "", "archive this generation only (default: every closed generation without an exported marker)")
 	force := fs.Bool("force", false, "export even when the archival target is not configured for verification")
@@ -336,6 +338,7 @@ func cmdHubArchive(args []string) int {
 func cmdHubDedup(args []string) int {
 	fs := flag.NewFlagSet("hub dedup", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	key := fs.String("key", "", "the idempotency key to probe (required)")
 	asJSON := fs.Bool("json", false, "machine-readable {key, state, ttl_seconds}")
 	if err := fs.Parse(args); err != nil {
@@ -396,6 +399,7 @@ func cmdHubDedup(args []string) int {
 func cmdHubDrain(args []string) int {
 	fs := flag.NewFlagSet("hub drain", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	timeout := fs.Duration("timeout", 30*time.Second, "give up after this long with entries still pending")
 	if err := fs.Parse(args); err != nil {
 		return 2

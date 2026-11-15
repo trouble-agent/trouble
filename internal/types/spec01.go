@@ -57,6 +57,10 @@ type IndexStats struct {
 	DegradedReason      string  `json:"degraded_reason"`
 	TruncatedBeforeTS   string  `json:"truncated_before_ts"`
 	ColdEvictionsPerMin float64 `json:"cold_evictions_per_min"`
+	// Measured distinguishes a built index from a status path that only walked
+	// ledger records. An unbuilt index must not read as an empty one.
+	Measured         bool   `json:"measured"`
+	UnmeasuredReason string `json:"unmeasured_reason,omitempty"`
 }
 
 // LedgerStatus is printed by `trouble ledger status --json` (SPEC-01 §3.10).

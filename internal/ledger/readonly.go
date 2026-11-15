@@ -165,6 +165,10 @@ func ReadStatus(root string) (types.LedgerStatus, error) {
 	st := types.LedgerStatus{
 		WriterPID:       -1, // signals "not read via writer"
 		DiskBudgetBytes: DefaultRetentionPolicy().DiskBudgetBytes,
+		Index: types.IndexStats{
+			Measured:         false,
+			UnmeasuredReason: "read_only_path_did_not_build_index",
+		},
 	}
 
 	// Read HEAD for writer metadata and day info.

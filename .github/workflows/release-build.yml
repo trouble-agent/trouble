@@ -1,0 +1,79 @@
+name: release-build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-only:
+    name: release gates and build-only artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # The repository's go.mod owns both the go and toolchain directives. Keep
+      # setup-go on that file so this workflow cannot silently select a newer
+      # release toolchain than the source tree declares.
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check gofmt
+        run: test -z "$(gofmt -l .)"
+
+      - name: Build (CGO disabled)
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test (short mode)
+        run: go test -short ./... -count=1
+
+      - name: Spec selfcheck
+        run: python3 specs/tools/selfcheck.py
+
+      # RELEASE-013 is not landed on this base: go.mod still selects Go
+      # 1.26.9, so this intentionally remains a fail-closed gate until that
+      # row lands. Do not turn this into continue-on-error.
+      - name: Vulnerability scan (RELEASE-013 gate)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          govulncheck ./...
+
+      # Run the repository-owned artifact builder even when an earlier gate is
+      # red, so a failed security gate cannot hide whether the build-only path
+      # itself works. A red earlier step still makes this job fail.
+      - name: Build release matrix (build only)
+        if: always()
+        run: make release
+
+      - name: Upload build-only artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trouble-release-build-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            dist/linux-amd64/troubled
+            dist/linux-amd64/trouble
+            dist/linux-arm64/troubled
+            dist/linux-arm64/trouble
+            dist/darwin-arm64/troubled
+            dist/darwin-arm64/trouble
+            dist/windows-amd64/troubled.exe
+            dist/windows-amd64/trouble.exe
+            dist/manifest.json
+
+      # ch:trace row=RELEASE-014 spec=specs/SPEC-INDEX.md#3.3 wave=none:serial test=none:workflow-yaml-and-local-gates doc=.github/workflows/release-build.yml evidence=.github/workflows/release-build.yml witness=none:workflow-dispatch-not-authorized-in-worker verdict=none:foreman-judge commit=none:foreman-integration memory=none:foreman-write
+      # STATUS: complete
+      # TIER: T1
+      # EVIDENCE: .github/workflows/release-build.yml

@@ -563,3 +563,4 @@
 {"id":558,"timestamp":"2026-11-15T19:39:35Z","event_type":"task_created","task_id":"TRBL-136","actor":"foreman","detail":"{\"id\":\"TRBL-136\",\"status\":\"pending\"}","marker":null}
 {"id":559,"timestamp":"2026-11-15T19:43:59Z","event_type":"task_completed","task_id":"INT-CI-8","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":560,"timestamp":"2026-11-15T19:44:56Z","event_type":"task_completed","task_id":"TRBL-134","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":561,"timestamp":"2026-11-15T19:45:46Z","event_type":"task_updated","task_id":"TRBL-135","actor":"foreman","detail":"{\"title\":\"[P2] GitReins tier-2 grades the wrong artifact and has no ceiling: it judges an empty combined diff on merge commits and can hang forever without writing a verdict (extends TRBL-131/TRBL-132)\"}","marker":null}

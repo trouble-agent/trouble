@@ -49,10 +49,14 @@ the daemon's own flags:
 
 config keys (flag > env > file > default, SPEC-12 §3.1):
   every key the resolver registers is also a flag: a.b_c -> --a-b_c, with the
-  value in the next argument or after '='. A flag beats the environment, the file
-  and the default. An unknown key is refused by name (TROUBLE-LIFECYCLE-001) and
+  value in the next argument or after '='. A flag beats the environment, the
+  file and the default. An unknown key is refused by name (TROUBLE-LIFECYCLE-001) and
   the daemon exits 13. A single-dash token that is not -v or -h is refused for the
   same reason: the per-key surface is spelled with two dashes.
+
+  state_root uses the canonical --state_root spelling. The documented
+  --state-root spelling is retained as a compatibility alias, and both forms
+  are accepted on every config-resolving surface.
 
   'trouble config explain [--json]' lists every key and the source that won. Six
   keys cannot ride argv: projects, issues, skills and llm are tables (a flag value

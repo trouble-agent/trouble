@@ -55,6 +55,10 @@ usage:
   trouble board integrity
   trouble --version
 
+State-root spelling: --state_root is the canonical config-key form. The
+documented --state-root spelling is retained as a compatibility alias, and both
+forms are accepted by every verb that resolves configuration.
+
 --token-file PATH (alias --dashboard-token_file PATH) is how the dashboard token
 verbs address a store other than the resolved dashboard.token_file: pass the
 daemon's own --dashboard-token_file value and the mint lands in the file that
@@ -69,8 +73,17 @@ func main() { os.Exit(run(os.Args[1:])) }
 
 // cfgPathOverride carries the --config value captured before dispatch.
 var cfgPathOverride string
+var stateRootOverride string
+
+const stateRootHelp = "state root override; use --state_root (canonical) or --state-root (compatibility alias)"
+
+func registerStateRootFlags(fs *flag.FlagSet) {
+	fs.StringVar(&stateRootOverride, "state_root", "", stateRootHelp)
+	fs.StringVar(&stateRootOverride, "state-root", "", "alias of --state_root (documented compatibility spelling)")
+}
 
 func run(args []string) int {
+	defer func() { stateRootOverride = "" }()
 	// --config is a GLOBAL flag: it is consumed here, before a verb's own flag
 	// set parses, because the verb's flags are parsed first and an unknown flag
 	// there is a usage error (the path is an input to resolution, not a key).
@@ -443,7 +456,12 @@ func resolvedConfigPath() string {
 
 // resolve loads the resolved config for a verb. A config problem is exit 13.
 func resolve(args []string) (lifecycle.Resolved, int) {
-	res, err := lifecycle.Resolve(captureConfig(args), os.Environ(), resolvedConfigPath())
+	resolvedArgs := captureConfig(args)
+	if stateRootOverride != "" {
+		resolvedArgs = append(resolvedArgs, "--state_root", stateRootOverride)
+	}
+	stateRootOverride = ""
+	res, err := lifecycle.Resolve(resolvedArgs, os.Environ(), resolvedConfigPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		return lifecycle.Resolved{}, 13
@@ -458,6 +476,7 @@ func cmdConfig(args []string) int {
 	}
 	fs := flag.NewFlagSet("config explain", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	key := fs.String("key", "", "show these keys only (comma-separated)")
 	asJSON := fs.Bool("json", false, "machine-readable ConfigValue[]")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -504,6 +523,7 @@ func cmdConfig(args []string) int {
 func cmdTopology(args []string) int {
 	fs := flag.NewFlagSet("topology", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	asJSON := fs.Bool("json", false, "machine-readable TopologyDecision[]")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -574,7 +594,7 @@ func cmdCheckStall(args []string) int {
 	fs := flag.NewFlagSet("check-stall", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	healthURL := fs.String("health-url", "", "override the health URL (default: dashboard.bind + /health.json)")
-	stateRoot := fs.String("state-root", "", "override the state root")
+	registerStateRootFlags(fs)
 	asJSON := fs.Bool("json", false, "machine-readable verdict")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -584,9 +604,7 @@ func cmdCheckStall(args []string) int {
 		return code
 	}
 	cfg := res.Config
-	if *stateRoot != "" {
-		cfg.StateRoot = *stateRoot
-	}
+
 	if *healthURL != "" {
 		cfg.HealthURL = *healthURL
 	}
@@ -613,6 +631,7 @@ func cmdCheckStall(args []string) int {
 func cmdEscalate(args []string) int {
 	fs := flag.NewFlagSet("escalate", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	unit := fs.String("unit", "", "the failing unit name (systemd %i)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -636,6 +655,7 @@ func cmdEscalate(args []string) int {
 func cmdInstall(args []string) int {
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	scope := fs.String("scope", "", "user|system (default: from lifecycle.systemd_scope)")
 	root := fs.String("root", "", "write the units into this unit root instead of the real one (tests)")
 	checkOnly := fs.Bool("check", false, "verify the installation and the escalation wiring, write nothing")
@@ -671,6 +691,7 @@ func cmdInstall(args []string) int {
 func cmdUpgrade(args []string) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	to := fs.String("to", "", "new binary path")
 	rollback := fs.Bool("rollback", false, "restore backups/bin/<newest> and restart")
 	wait := fs.Duration("wait", 0, "READY deadline after the restart (default: lifecycle.upgrade_ready_timeout)")
@@ -701,6 +722,7 @@ func cmdDashboard(args []string) int {
 	verb, rest := args[1], args[2:]
 	fs := flag.NewFlagSet("dashboard token "+verb, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	label := fs.String("label", "", "token label (becomes Actor.ID on writes, e.g. dash-write@laptop)")
 	scopes := fs.String("scopes", "", "comma-separated: read,write,autonomy")
 	asJSON := fs.Bool("json", false, "machine-readable output (list only)")

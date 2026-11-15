@@ -2373,18 +2373,27 @@ func parseArgs(args []string, known map[string]keyMeta) (map[string]any, error) 
 		if !strings.HasPrefix(arg, "--") {
 			continue
 		}
-		key := strings.TrimPrefix(arg, "--")
-		key = strings.ReplaceAll(key, "-", ".")
+		raw := strings.TrimPrefix(arg, "--")
 		var val string
-		if strings.Contains(key, "=") {
-			parts := strings.SplitN(key, "=", 2)
-			key = parts[0]
+		if strings.Contains(raw, "=") {
+			parts := strings.SplitN(raw, "=", 2)
+			raw = parts[0]
 			val = parts[1]
 		} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
 			val = args[i+1]
 			i++
 		} else {
 			val = "true"
+		}
+		// SPEC-12 §2.5 makes --state_root the canonical mechanical spelling.
+		// check-stall shipped --state-root before the mechanical rule was pinned,
+		// so keep that documented external spelling as an alias everywhere rather
+		// than making the same config key depend on the verb that received it.
+		key := raw
+		if key != "state-root" {
+			key = strings.ReplaceAll(key, "-", ".")
+		} else {
+			key = "state_root"
 		}
 		if _, ok := known[key]; !ok {
 			return nil, fmt.Errorf("%w: unknown flag %q", types.CodeLifecycle001, arg)

@@ -23,11 +23,18 @@ func Explain(r Resolved, keys []string) ([]types.ConfigValue, error) {
 		want[k] = true
 	}
 	var out []types.ConfigValue
+	found := make(map[string]bool, len(keys))
 	for _, cv := range r.Values {
 		if len(want) > 0 && !want[cv.Key] {
 			continue
 		}
+		found[cv.Key] = true
 		out = append(out, cv)
+	}
+	for _, k := range keys {
+		if !found[k] {
+			return nil, fmt.Errorf("missing config key %q", k)
+		}
 	}
 	return out, nil
 }

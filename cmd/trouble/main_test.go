@@ -553,6 +553,64 @@ func TestTokenCreateDefaultIgnoresXDGConfigHome(t *testing.T) {
 
 // runCaptured runs the CLI with stdout and stderr captured, so a test can assert on
 // the plaintext a mint prints AND on the store notice printed beside it.
+// TestConfigExplainMissingKeyFailsThroughCLI proves the user-facing missing-key
+// contract and keeps the unknown-key control separate from lifecycle resolution.
+func TestConfigExplainMissingKeyFailsThroughCLI(t *testing.T) {
+	base := t.TempDir()
+	cfg := writeConfig(t, base, "")
+	t.Setenv("TROUBLE_CONFIG_PATH", cfg)
+	stdout, stderr, code := runCaptured(t, "config", "explain", "--key", "does.not.exist")
+	if code == 0 {
+		t.Fatalf("missing key exited 0; stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "missing config key") || !strings.Contains(stderr, "does.not.exist") {
+		t.Fatalf("missing-key error = %q, want a clear named error", stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("missing-key request emitted data on stdout: %q", stdout)
+	}
+}
+
+// TestConfigExplainUnknownFlagIsRejectedThroughCLI is the negative control for
+// an unsupported flag: flag parsing must fail before config explanation runs.
+func TestConfigExplainUnknownFlagIsRejectedThroughCLI(t *testing.T) {
+	base := t.TempDir()
+	cfg := writeConfig(t, base, "")
+	t.Setenv("TROUBLE_CONFIG_PATH", cfg)
+	stdout, stderr, code := runCaptured(t, "config", "explain", "--not-a-flag")
+	if code == 0 {
+		t.Fatalf("unsupported flag exited 0; stdout=%q stderr=%q", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "flag provided but not defined") || !strings.Contains(stderr, "not-a-flag") {
+		t.Fatalf("unsupported-flag error = %q, want flag package refusal", stderr)
+	}
+}
+
+// TestStateRootSpellingsResolveToTheSameKey exercises both the canonical
+// --state_root spelling and the documented --state-root compatibility alias.
+func TestStateRootSpellingsResolveToTheSameKey(t *testing.T) {
+	base := t.TempDir()
+	cfg := writeConfig(t, base, "")
+	root := filepath.Join(base, "state-root")
+	for _, spelling := range []string{"--state_root", "--state-root"} {
+		t.Run(spelling, func(t *testing.T) {
+			t.Setenv("TROUBLE_CONFIG_PATH", cfg)
+			stdout, stderr, code := runCaptured(t, "config", "explain", spelling, root, "--key", "state_root")
+			if code != 0 {
+				t.Fatalf("config explain %s exit=%d stderr=%q", spelling, code, stderr)
+			}
+			if !strings.Contains(stdout, root) || !strings.Contains(stdout, "state_root") {
+				t.Fatalf("config explain %s output=%q, want state_root=%s", spelling, stdout, root)
+			}
+		})
+	}
+}
+
+// ch:trace row=TRBL-129 spec=specs/SPEC-12-lifecycle.md#2.5 wave=none:serial test=cmd/trouble/main_test.go::TestConfigExplainMissingKeyFailsThroughCLI doc=specs/SPEC-12-lifecycle.md evidence=cmd/trouble/main_test.go witness=none:ephemeral-worker-verification verdict=none:foreman-judge commit=none:foreman-integration memory=none:foreman-write
+// STATUS: complete
+// TIER: T2
+// EVIDENCE: cmd/trouble/main_test.go
+
 func runCaptured(t *testing.T, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	// cfgPathOverride is process-global state written by captureConfig; a test

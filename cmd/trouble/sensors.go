@@ -92,6 +92,7 @@ const sensorsUsage = "usage: trouble sensors probe [--json] [--timeout DURATION]
 func cmdSensorsProbe(args []string) int {
 	fs := flag.NewFlagSet("sensors probe", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
+	registerStateRootFlags(fs)
 	asJSON := fs.Bool("json", false, "print the capability_probe record as one JSON line")
 	timeout := fs.Duration("timeout", probeTimeout, "probe deadline")
 	if err := fs.Parse(args); err != nil {

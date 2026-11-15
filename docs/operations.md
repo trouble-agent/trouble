@@ -1173,12 +1173,23 @@ the two stamped binaries to `bin/`; `make release` writes the same pair for each
 target below plus `manifest.json` (checksums), and exits non-zero unless every
 target built — a partial manifest reads like a release, so it is never written.
 
+`make release` is the low-level matrix builder. The release-candidate gate is
+`scripts/release.sh --dry-run --version vX.Y.Z`; it is read-only and prints the
+planned provenance and artifact steps. Without `--dry-run`, the script first
+requires a clean tree, absent local and remote version tag, a completed green CI
+run for the exact HEAD SHA, and `CHANGELOG.md`'s `[Unreleased]` section. It then
+builds from a clean detached clone of that SHA and writes four named archives
+(`trouble-vX.Y.Z-<target>.tar.gz`) and `dist/checksums.txt` beside the eight
+binaries and `manifest.json`. It never creates, moves, deletes, pushes, or
+publishes a tag or release; the owner must authorize those publication actions
+separately.
+
 | goos/goarch | `troubled` (daemon) | `trouble` (CLI) | archive |
 |---|---|---|---|
-| linux/amd64 | `dist/linux-amd64/troubled` | `dist/linux-amd64/trouble` | (placeholder — your packaging step) |
-| linux/arm64 | `dist/linux-arm64/troubled` | `dist/linux-arm64/trouble` | (placeholder) |
-| darwin/arm64 | `dist/darwin-arm64/troubled` | `dist/darwin-arm64/trouble` | (placeholder) |
-| windows/amd64 | `dist/windows-amd64/troubled.exe` | `dist/windows-amd64/trouble.exe` | (placeholder) |
+| linux/amd64 | `dist/linux-amd64/troubled` | `dist/linux-amd64/trouble` | `dist/trouble-vX.Y.Z-linux-amd64.tar.gz` |
+| linux/arm64 | `dist/linux-arm64/troubled` | `dist/linux-arm64/trouble` | `dist/trouble-vX.Y.Z-linux-arm64.tar.gz` |
+| darwin/arm64 | `dist/darwin-arm64/troubled` | `dist/darwin-arm64/trouble` | `dist/trouble-vX.Y.Z-darwin-arm64.tar.gz` |
+| windows/amd64 | `dist/windows-amd64/troubled.exe` | `dist/windows-amd64/trouble.exe` | `dist/trouble-vX.Y.Z-windows-amd64.tar.gz` |
 
 Every one is built `CGO_ENABLED=0` with `-trimpath` and `-ldflags "-s -w"` plus the
 three `lifecycle` stamps. A build that cannot determine a sha stamps the literal

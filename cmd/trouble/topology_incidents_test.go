@@ -85,6 +85,26 @@ func TestTopologyNamesTheFailingUnitOfAnOpenIncident(t *testing.T) {
 		t.Fatalf("the topology output does not name the unit and its message (%q): %s", subject, stdout)
 	}
 
+	// TRBL-127: the tail's state column is the state the ladder actually reached
+	// (T01 lands in `recorded`), not the projection's `detected` default. Pinned
+	// here because this is the real `trouble topology`/`ledger status` CLI path.
+	var tailLine string
+	for _, ln := range strings.Split(stdout, "\n") {
+		if strings.Contains(ln, subject) {
+			tailLine = ln
+			break
+		}
+	}
+	if tailLine == "" {
+		t.Fatalf("no incident tail line carries the subject %q: %s", subject, stdout)
+	}
+	if !strings.Contains(tailLine, " recorded") {
+		t.Fatalf("the incident tail does not report the ledger's recorded state: %q", tailLine)
+	}
+	if strings.Contains(tailLine, " detected") {
+		t.Fatalf("the incident tail reports the detected fallback instead of the ledger state: %q", tailLine)
+	}
+
 	// The machine contract is untouched: --json stays []TopologyDecision.
 	jsonOut, stderr, code := runCaptured(t, "topology", "--json", "--config", cfg)
 	if code != 0 {

@@ -1912,6 +1912,8 @@ func (ix *index) stats() types.IndexStats {
 	ix.mu.RLock()
 	defer ix.mu.RUnlock()
 	st := ix.buildStats
+	st.Measured = true
+	st.UnmeasuredReason = ""
 	st.Entries = int(ix.entries)
 	st.Groups = len(ix.groups) + len(ix.cold)
 	st.GroupsCold = len(ix.cold)

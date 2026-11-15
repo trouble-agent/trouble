@@ -218,9 +218,13 @@ func printLedgerStatus(st types.LedgerStatus) {
 	fmt.Printf("writer: pid=%d lock_held=%t version=%s\n", st.WriterPID, st.WriterLockHeld, st.WriterVersion)
 	fmt.Printf("disk:   bytes=%d budget=%d (%.1f%%)\n", st.DiskBytes, st.DiskBudgetBytes,
 		100*float64(st.DiskBytes)/float64(max64(st.DiskBudgetBytes, 1)))
-	fmt.Printf("index:  entries=%d groups=%d cold=%d torn=%d corrupt=%d degraded=%t\n",
-		st.Index.Entries, st.Index.Groups, st.Index.GroupsCold, st.Index.TornLines,
-		st.Index.CorruptLines, st.Index.Degraded)
+	if !st.Index.Measured {
+		fmt.Printf("index:  unmeasured reason=%s degraded=%t\n", st.Index.UnmeasuredReason, st.Index.Degraded)
+	} else {
+		fmt.Printf("index:  entries=%d groups=%d incidents=%d cold=%d torn=%d corrupt=%d measured=true degraded=%t\n",
+			st.Index.Entries, st.Index.Groups, st.Index.Incidents, st.Index.GroupsCold, st.Index.TornLines,
+			st.Index.CorruptLines, st.Index.Degraded)
+	}
 	if r := st.Index.DegradedReason; r != "" {
 		fmt.Printf("index degraded: %s\n", r)
 	}

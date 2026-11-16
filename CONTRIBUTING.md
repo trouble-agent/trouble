@@ -79,8 +79,15 @@ Use the issue templates. For anything that looks like a security problem, follow
 
 ## License of contributions
 
-By contributing you agree your contribution is licensed under the MIT License
-(see `LICENSE`), inbound = outbound.
+By contributing you agree your contribution is licensed under the GNU Affero
+General Public License v3.0 (see `LICENSE`), inbound = outbound.
+
+You further grant trouble-agent, as the project steward, an irrevocable,
+worldwide, royalty-free right to relicense your contribution — alone or as part
+of the project — under any license chosen by the steward, including more
+permissive licenses (Apache-2.0, MIT, BSD, GPL). This keeps the steward able to
+relax the license for future versions; the project is intentionally AGPL-3.0
+today for idea protection and may be relicensed later.
 
 ## Code of conduct
 

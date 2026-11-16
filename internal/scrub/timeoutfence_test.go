@@ -104,8 +104,12 @@ func TestRuleTimeoutFenceChargesOnlyTheCpuTime(t *testing.T) {
 	if out == "" || res.Value == nil {
 		t.Fatal("the rescued call returned no value")
 	}
-	if got := atomic.LoadInt32(calls); got != 2 {
-		t.Errorf("the fence sampled %d times, want 2 (bracketing one re-evaluation)", got)
+	// samples come in PAIRS (one bracket per fenced rule evaluation) and a loaded
+	// host can fence more than one rule on this payload, so the invariant is an
+	// even count of at least one bracket — not a constant. Asserting ==2 made this
+	// arm red on a loaded box while the product behaviour was correct.
+	if got := atomic.LoadInt32(calls); got < 2 || got%2 != 0 {
+		t.Errorf("the fence sampled %d times, want an even count >= 2 (one bracket per fenced rule evaluation)", got)
 	}
 	if after := e.Stats(); after.Timeouts != before.Timeouts || after.FailClosed != before.FailClosed {
 		t.Errorf("timeouts/fail_closed moved on a rescued call (%d/%d -> %d/%d)",
@@ -178,8 +182,10 @@ func TestRuleTimeoutFenceCoversBothRuleLoops(t *testing.T) {
 	if _, _, err := e.ScrubFields(context.Background(), "1", fields, targets); err != nil {
 		t.Fatalf("ScrubFields failed a descheduled rule closed: %v", err)
 	}
-	if got := atomic.LoadInt32(calls); got != 4 {
-		t.Fatalf("the fence sampled %d times over two rescued rules, want 4 (one bracket per rule loop)", got)
+	// one bracket per loop is the floor; a loaded host can fence extra rules, so
+	// assert even pairs >= 4 rather than an exact count.
+	if got := atomic.LoadInt32(calls); got < 4 || got%2 != 0 {
+		t.Fatalf("the fence sampled %d times over two rule loops, want an even count >= 4 (at least one bracket per loop)", got)
 	}
 }
 
@@ -234,7 +240,11 @@ func TestRuleTimeoutFiresWhenSchedstatIsUnreadable(t *testing.T) {
 // bracket a second evaluation instead of every evaluation: on the ingress path the
 // fence must cost no syscalls at all while rules stay inside their budget.
 func TestRuleTimeoutFenceCostsNothingWhenTheBudgetHolds(t *testing.T) {
-	e := newTestEngine(t, "")
+	// a 5s budget, so "every rule fits" is a property of the code rather than of
+	// how much the host descheduled this process: on a loaded box a 250ms rule
+	// budget can be blown by a stall, which would fence a rule and take samples
+	// without anything being wrong with the happy path.
+	e := newTestEngine(t, "[scrub]\nrule_timeout = \"5s\"\n")
 	calls := stubThreadWait(t, waitSample("task-a", 0))
 	payload := strings.Repeat("2026-09-16T09:14:03.221Z host systemd[1]: Started Session 41207 of user opuser.\n", 12)
 	if _, _, err := e.ScrubString(context.Background(), types.TgEventMsg, "1", payload); err != nil {

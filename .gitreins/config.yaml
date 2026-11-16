@@ -127,7 +127,12 @@ evaluator:
   # exceeded" on TRBL-072 (CI workflow) after a clean criterion; raised one rung per the
   # gitreins-tier2-time-cap-exceeded pre-solve answer (evaluator.max_time is the only max_time in
   # this config; no pipeline.stages[tier2] override exists, so this is the effective cap).
-  max_time: "45m"
+  # Time cap 45m->90m (tick trouble-foreman-2026-11-16-13-48-05): tier2 INCOMPLETE "Cap exceeded:
+  # Time cap (45m) exceeded (45m18s)" on RELEASE-013 with 143 iterations and 1.18M/3M input tokens
+  # over 143 iterations, 0 of 1 criteria graded. Iterations and input were NOT binding, so the
+  # binding rung was wall clock: ~19s per LLM round-trip because this host was running three other
+  # lanes' tier-2 judges (DF-WARPFS-85, consensus, scheduler) at load 30-67. Raised one rung.
+  max_time: "90m"
   max_input_tokens: "3M"
   max_output_tokens: "384k"
   static_analysis_diagnostics: false

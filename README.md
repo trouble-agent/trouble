@@ -297,6 +297,11 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
   indirection and the precedence (`flag > env > file > default`) that
   `trouble config explain` reports, enforced by
   `internal/lifecycle/envdocs_doc_test.go`.
+* [docs/reference/error-codes.md](docs/reference/error-codes.md) — every
+  `TROUBLE-*` code the daemon can emit, grouped by family, each with its class
+  (`permanent` / `transient`) and the operator action it implies; generated from
+  the declarations in `internal/types` by `specs/tools/generate_error_codes.py`
+  and drift-checked by `internal/types/errorcodes_doc_test.go`.
 
 ## Getting the source
 
@@ -313,12 +318,12 @@ go version          # → go version go1.26.x <os>/<arch>
 
 A distro-packaged Go older than 1.26 can be used with `GOTOOLCHAIN=auto`, but do
 not rely on that setting to fetch the required toolchain on a fresh `HOME`. This
-module pins `go1.26.9` in `go.mod`; install its launcher and download it manually
+module pins `go1.26.11` in `go.mod`; install its launcher and download it manually
 before running the `go install` commands below:
 
 ```
-go install golang.org/dl/go1.26.9@latest
-go1.26.9 download
+go install golang.org/dl/go1.26.11@latest
+go1.26.11 download
 ```
 
 After that prerequisite, the `go install` commands below use the supported Go

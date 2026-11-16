@@ -349,4 +349,8 @@ All directories are `0700`, all files are `0600`.
 
 See `examples/config.toml` and `examples/trouble.env`. Precedence is
 flag > env > file > default. Unknown file keys are fatal (TROUBLE-LIFECYCLE-001);
-unknown env keys are ignored with a near-miss hint.
+unknown env keys are ignored silently (no near-miss hint, no warning).
+
+Every `TROUBLE_*` variable — the derived twin of each config key plus the
+literal exceptions — is documented in
+[docs/reference/env-vars.md](../docs/reference/env-vars.md).

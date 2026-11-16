@@ -160,8 +160,11 @@ the caller's log line for the record's `sig` and `kind`.
 `payload["scrub"]`, the `by_rule` map, `bytes_in/bytes_out`, `truncated`, `rules_version` and the
 engine (`re2`). `Engine.Stats()` (process-cumulative) adds `calls`, `refused_bytes`, `invalid_utf8`,
 `timeouts`, `fail_closed` and `boundary_refusals`. A rising `timeouts`/`fail_closed` rate means
-payloads are being dropped, not redacted: check host load against `scrub.rule_timeout` (250 ms
-default) before anything else.
+payloads are being dropped, not redacted: the budget is `scrub.rule_timeout` (250 ms of CPU time for
+one rule evaluation, default), and the engine already subtracts the runqueue wait the host imposed
+on the rule, so host load alone no longer explains it — look for a rule that is genuinely burning
+its budget (a payload shape that made an alternation pathological), and check the
+`scrub: rule_timeout fence ...` log line for the discount it applied.
 
 **Knobs that are safe to use.** `scrub.pii_mode = "keep"` and per-project `pii_mode` are the
 documented escape hatches for PII rules (`pii_email_ip`, `pii_identity_kv`); `scrub.path_mode` /

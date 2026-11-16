@@ -144,7 +144,7 @@ its generic flattening, so this package owns its schema without the precedence e
 [scrub]
 rules_version     = 1              # bumped ONLY when the mandatory set changes (§4)
 max_bytes_default = 262144
-rule_timeout      = "250ms"
+rule_timeout      = "250ms"       # CPU time for ONE rule evaluation, not wall time (§3.8)
 prefilter         = true           # anchored alternation fast path
 boundary_verify   = true           # fixed; any other value is SCRUB-002
 entropy           = true           # optional rule 14
@@ -428,7 +428,7 @@ value. `ByRule` keys are rule names from the closed set of §3.3 plus validated 
 |---|---|---|
 | Input exceeds the target's `max_bytes`, target truncates | TROUBLE-SCRUB-003 (transient, counted) | head kept to the last `\n` inside the budget, `Truncated=true`, marker appended, call **succeeds** |
 | Input exceeds `max_bytes`, target refuses | TROUBLE-SCRUB-003 (transient, counted) | no output, no partial output, caller treats the payload as unavailable and emits a `gap` record |
-| A rule's evaluation exceeds `rule_timeout` (250 ms default) | TROUBLE-SCRUB-005 (transient) | fail closed: `Value=nil`, `Redactions=0`, `fail_closed` incremented, caller emits a `gap` with cause `scrub_failed` |
+| A rule's evaluation exceeds `rule_timeout` (250 ms default) | TROUBLE-SCRUB-005 (transient) | fail closed: `Value=nil`, `Redactions=0`, `fail_closed` incremented, caller emits a `gap` with cause `scrub_failed`. The budget is **CPU time for that rule**: the engine samples the running thread's runqueue wait (`/proc/thread-self/schedstat`) and charges the rule its elapsed time minus that wait, so host descheduling cannot fail a payload closed. A host without schedstat measures 0 wait and the raw wall clock applies |
 | A rule returns an engine error (bad state, counter overflow) | TROUBLE-SCRUB-004 (permanent) / TROUBLE-SCRUB-005 | fail closed, same as above |
 | Non-UTF-8 bytes, any target except `spool` | TROUBLE-SCRUB-007 (permanent) | fail closed. RE2 operates on invalid UTF-8 as bytes, so case-folding and `.` semantics degrade and a secret adjacent to an invalid byte can slip a boundary; refusing is the only safe answer |
 | Non-UTF-8 bytes after decompression on `spool` | TROUBLE-SCRUB-007 (permanent) | fail closed; the spool payload is always reconstructed as valid UTF-8 JSON before it is written |
@@ -550,7 +550,7 @@ which table scrubbed each ledger line, so a forensic read never has to guess.
 | TROUBLE-SCRUB-002 | permanent | config invalid: unknown key, attempt to modify a built-in mandatory rule, duplicate rule name, >64 rules, bad rule name, unknown project, config-authored `dsn_part`/`path_allowlist` rule | fatal at boot; `trouble config explain` prints the offending dotted key | boot failure, no record |
 | TROUBLE-SCRUB-003 | transient | input exceeded the target's `max_bytes` | truncate-and-mark, or refuse per §3.1; never partial output | `payload.error_code` + `truncated` flag on the record; `gap` on refuse |
 | TROUBLE-SCRUB-004 | permanent | a single rule produced more than 2^31-1 replacements on one value | fail closed; `fail_closed` incremented | `payload.error_code` on the caller's `gap` record |
-| TROUBLE-SCRUB-005 | transient | rule evaluation exceeded `rule_timeout` (250 ms) | fail closed; `timeouts` incremented | caller's `gap` record, cause `scrub_failed` |
+| TROUBLE-SCRUB-005 | transient | rule evaluation exceeded `rule_timeout` (250 ms of CPU time for that rule; runqueue wait the host imposed is discounted, §3.8) | fail closed; `timeouts` incremented | caller's `gap` record, cause `scrub_failed` |
 | TROUBLE-SCRUB-006 | permanent | a mandatory rule is absent from the active rule set | boot refusal; the ledger writer refuses to append if it could ever appear at runtime | boot failure; `payload.error_code` on the refusal path |
 | TROUBLE-SCRUB-007 | permanent | input is not valid UTF-8 and the target is not the binary-allowed one (`spool`, post-decompression) | fail closed; `invalid_utf8` incremented | caller's `gap` record, cause `scrub_invalid_utf8` |
 | TROUBLE-SCRUB-008 | permanent | persistence-boundary re-scan matched a mandatory rule pattern | the record is refused by `internal/ledger`; `boundary_refusals` incremented; a `lifecycle`-kind ledger note is written by SPEC-12 (the refusal itself is recorded, never the offending bytes) | the refusal note's `payload.error_code` |

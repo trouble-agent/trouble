@@ -385,11 +385,8 @@ func (e *Engine) pass(ctx context.Context, tbl *ruleTable, target types.ScrubTar
 			e.st.failClosed.Add(1)
 			return nil, err
 		}
-		if d := time.Since(start); e.cfg.ruleTimeout > 0 && d > e.cfg.ruleTimeout {
-			e.st.timeouts.Add(1)
-			e.st.failClosed.Add(1)
-			return nil, errf(types.CodeScrub005, ReasonRuleTimeout, r.name,
-				fmt.Sprintf("rule evaluation exceeded %s", e.cfg.ruleTimeout), nil)
+		if spans, err = e.ruleBudget(r.compiledRule, tbl, buf, reserved, spans, time.Since(start)); err != nil {
+			return nil, err
 		}
 		if len(spans) > 0 {
 			buf = e.applyRuleSpans(buf, spans, r.replace)
@@ -478,53 +475,62 @@ func (e *Engine) spansFor(tbl *ruleTable, name string, target types.ScrubTarget,
 
 // ruleSpans dispatches one rule to its scanner (SPEC-02 §3.5).
 func (e *Engine) ruleSpans(r *compiledRule, tbl *ruleTable, buf []byte, reserved []span) ([]span, error) {
+	spans, exempt, err := e.evalRuleSpans(r, tbl, buf, reserved)
+	if exempt > 0 {
+		e.st.exemptValues.Add(uint64(exempt))
+	}
+	return spans, err
+}
+
+// evalRuleSpans evaluates one rule and reports how many candidate values its
+// exemptions left unchanged. It mutates nothing: the engine counters are the
+// caller's business (ruleSpans above), so the rule-timeout fence can repeat an
+// evaluation without inflating them (see timeoutfence.go).
+func (e *Engine) evalRuleSpans(r *compiledRule, tbl *ruleTable, buf []byte, reserved []span) ([]span, int, error) {
 	switch r.kind {
 	case kindRegex:
 		spans := r.regexSpans(buf, reserved)
+		exempt := 0
 		if r.exemptIP {
 			var skipped int
 			spans, skipped = filterExemptSpans(buf, spans, r.strictQuad)
-			if skipped > 0 {
-				e.st.exemptValues.Add(uint64(skipped))
-			}
+			exempt += skipped
 		}
 		if r.exemptPath {
 			var skipped int
 			spans, skipped = filterPathExemptSpans(buf, spans)
-			if skipped > 0 {
-				e.st.exemptValues.Add(uint64(skipped))
-			}
+			exempt += skipped
 		}
-		return spans, nil
+		return spans, exempt, nil
 	case kindPrefix:
-		return prefixSpans(buf, r.begins), nil
+		return prefixSpans(buf, r.begins), 0, nil
 	case kindEntropy:
-		return entropySpans(buf, r.extend), nil
+		return entropySpans(buf, r.extend), 0, nil
 	case kindDSNPart:
 		if len(r.begins) > 0 && r.begins[0] == "secret" {
-			return dsnSecretSpans(buf, e.sh), nil
+			return dsnSecretSpans(buf, e.sh), 0, nil
 		}
-		return dsnAnySpans(buf, e.sh), nil
+		return dsnAnySpans(buf, e.sh), 0, nil
 	case kindPathAllowlist:
 		mode := pathModeDisclosure
 		if len(r.begins) > 0 && r.begins[0] == "home_root" {
 			mode = pathModeHomeRoot
 		}
-		return pathSpans(buf, mode, tbl.allowlist, tbl.homeRoots), nil
+		return pathSpans(buf, mode, tbl.allowlist, tbl.homeRoots), 0, nil
 	case kindTestScrub:
 		if r.testSleep > 0 {
 			time.Sleep(r.testSleep)
 		}
 		if r.testFail != nil {
-			return nil, errf(types.CodeScrub004, ReasonRuleError, r.name, "rule failed", r.testFail)
+			return nil, 0, errf(types.CodeScrub004, ReasonRuleError, r.name, "rule failed", r.testFail)
 		}
 		if r.testOverflow {
-			return nil, errf(types.CodeScrub004, ReasonReplacementLimit, r.name,
+			return nil, 0, errf(types.CodeScrub004, ReasonReplacementLimit, r.name,
 				"rule produced more than 2^31-1 replacements on one value", nil)
 		}
-		return nil, nil
+		return nil, 0, nil
 	}
-	return nil, errf(types.CodeScrub004, ReasonRuleError, r.name, "unknown rule kind", nil)
+	return nil, 0, errf(types.CodeScrub004, ReasonRuleError, r.name, "unknown rule kind", nil)
 }
 
 // ScrubFields scrubs a bundle (payload field name -> target class) in ONE pass
@@ -669,11 +675,8 @@ func (e *Engine) ScrubFields(ctx context.Context, projectID string, fields map[s
 					e.st.failClosed.Add(1)
 					return nil, res, err
 				}
-				if d := time.Since(start); e.cfg.ruleTimeout > 0 && d > e.cfg.ruleTimeout {
-					e.st.timeouts.Add(1)
-					e.st.failClosed.Add(1)
-					return nil, res, errf(types.CodeScrub005, ReasonRuleTimeout, r.name,
-						fmt.Sprintf("rule evaluation exceeded %s", e.cfg.ruleTimeout), nil)
+				if spans, err = e.ruleBudget(r.compiledRule, tbl, f.buf, reserved, spans, time.Since(start)); err != nil {
+					return nil, res, err
 				}
 				if len(spans) > 0 {
 					f.buf = e.applyRuleSpans(f.buf, spans, r.replace)

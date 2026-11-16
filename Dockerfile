@@ -18,7 +18,7 @@
 # (65532), a CA bundle and tzdata, so the daemon can run unprivileged and still
 # do TLS + local-time arithmetic without a hand-rolled FROM scratch layer.
 
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.26.11-bookworm
 
 # --------------------------------------------------------------------------
 # Stage 1 — builder

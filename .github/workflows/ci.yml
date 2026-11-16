@@ -30,6 +30,18 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # RELEASE-013: the compiler a release ships is part of the release. The
+      # toolchain floor lives in go.mod (`toolchain go1.26.11`), and this gate
+      # makes a regression to a vulnerable standard library fail CI instead of
+      # shipping. It is a real gate: on go1.26.10 this step exits non-zero on
+      # GO-2026-6859 (net/http, fixed 1.26.11) with reachable symbol traces.
+      - name: Vulnerability scan (RELEASE-013 gate)
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          go version
+          govulncheck ./...
+
       - name: Test (short mode)
         run: go test -short ./... -count=1
 

@@ -7,20 +7,37 @@
   "dispatched": 1,
   "worker_model": "openai/gpt-6.1-terra",
   "worker_provider": "xkiro",
+  "finished_at": "2026-11-16T20:32:00Z",
   "workers": [
     {
       "id": "QA-TROUBLE-030",
       "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-030",
       "branch": "wt/QA-TROUBLE-030",
-      "seam": "internal/scrub/engine.go (rule_timeout check), internal/loadfence (exported schedstat wait helper), internal/scrub tests"
+      "seam": "internal/scrub/engine.go (rule_timeout check), internal/loadfence (exported schedstat wait helper), internal/scrub tests",
+      "outcome": "closed",
+      "commits": [
+        "72c253d (worker) fix: charge a rule its CPU time, not the host's descheduling",
+        "69d3e54 (rebased onto main) same fix, merged ff",
+        "25bbafd (foreman) harden the fence's rescued-payload arms against host load",
+        "efa20c0 (foreman) assert the fence's sampling invariant, not a sample count"
+      ],
+      "judge": "run 4cf85eab / verdict d062680f — tier1 PASS (secrets+tests), tier2 PASS, overall PASS at efa20c0",
+      "residual": "tier-2 notes one uncovered failure path: the load>=40 reproduction lives in the commit message and code comments, not as a re-runnable script in the tree. A follow-up row should add a scripted load reproduction (or a make target) so the fence's regression guard is executable."
     }
+  ],
+  "worker_dispatch_history": [
+    "attempt 1 (pid 3177811) died with 'Gateway disconnected; turn outcome is unknown' before any turn — zero write, re-dispatched",
+    "attempt 2 (pid 3660972) delivered 72c253d"
   ],
   "excluded_ready_rows": {
     "RELEASE-012": "release-readiness sweep belongs to the releng lane; cut is owner-gated",
-    "TRBL-122, TRBL-133, QA-TROUBLE-26/27/28, QA-TROUBLE-DOCS-1..005, QA-TROUBLE-README-10, QA-TROUBLE-REVIEW-1/2": "QA-harness rows; owner is the fleet QA battery under ~/.hermes/scripts + the qa/bunker-qa lane, not this repo (a trouble worktree worker cannot commit them)",
+    "TRBL-122, TRBL-133, QA-TROUBLE-26/27/28, QA-TROUBLE-DOCS-1..005, QA-TROUBLE-README-10, QA-TROUBLE-REVIEW-1/2": "QA-harness rows; owner is the fleet QA battery under ~/.hermes/scripts + the qa/bunker-qa lane, not this repo",
     "TRBL-135": "scope is the gitreins co-harness repo, not trouble",
-    "QA-TROUBLE-17-R3, -R3-R2, -R3-R2-R2": "perf-budget grading needs a quiet, unthrottled graded box; this host is at load_avg 28.0 (16 cores) so no perf grading here",
-    "DOC-24, DOC-27": "each is a multi-file docs+drift-gate build; deferred to the next tick because wave budget is 1 this tick"
+    "QA-TROUBLE-17-R3, -R3-R2, -R3-R2-R2": "perf-budget grading needs a quiet, unthrottled graded box; this host ran at load_avg 28-50",
+    "DOC-24, DOC-27": "multi-file docs+drift-gate builds; deferred because WAVE_BUDGET=1 and the P1 queue-gating row took the slot"
   },
-  "notes": "WAVE_BUDGET=1 (hard ceiling from the tick prompt): serial wave of one worker. Pick is the P1 code row that gates tier-1 for the whole queue. DuckBrain read leg blocked by the unattended curl+credential-file gate; memory leg reported unverified this tick."
+  "board_chores": [
+    "INT-CI-7-R2 un-stranded: in_progress + worker_status no_change + no commits on wt/INT-CI-7-R2 (tip f945eef already in main) -> pending with the stress-repro/lastFlushTrigger plan in foreman_note"
+  ],
+  "notes": "DuckBrain read and write legs were gate-blocked on the unattended surface (curl + credential-file chain, silence != consent). Memory/handoff leg is UNVERIFIED for this tick; the durable record is this manifest plus the board rows."
 }

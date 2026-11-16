@@ -140,6 +140,19 @@ func TestScrubBudget(t *testing.T) {
 	if raceEnabled {
 		t.Skip("§3.9 budgets are host measurements taken without instrumentation; see race_test.go")
 	}
+	leasePath, err := loadfence.SuiteLeasePath()
+	if err != nil {
+		t.Fatalf("resolve scrub budget suite lease: %v", err)
+	}
+	lease, err := loadfence.AcquireSuiteLease(leasePath)
+	if err != nil {
+		t.Fatalf("acquire scrub budget suite lease: %v", err)
+	}
+	defer func() {
+		if err := lease.Release(); err != nil {
+			t.Errorf("release scrub budget suite lease: %v", err)
+		}
+	}()
 	// The documented deviation factor is a quiet-host number (4x the §3.9
 	// per-KiB targets): under full-suite parallel load the µs-scale loop
 	// measurements absorb the host's scheduling delay, and the same code that

@@ -239,6 +239,16 @@ func TestDeriveNeverBlocks(t *testing.T) {
 	budget := deriveBudgetFor(load)
 	suiteFactor, _ := loadfence.SuiteContention(waitFrac)
 	budget = time.Duration(float64(budget) * suiteFactor)
+	measurement := fmt.Sprintf("derivation measured %s/call (budget %s; suite-wait %.2f → x%.2f)", per, budget, waitFrac, suiteFactor)
+	// Above the host-gate ceiling, this timing is not a product verdict even
+	// when it happens to fit the widened budget. Skip the whole host-measured
+	// arm, but retain the measured value in the reason so a loaded run cannot
+	// look like an unmeasured pass or a bare timing failure. The quiet/unloaded
+	// arm below remains the regression gate.
+	if loadfence.AboveHostGate(load) {
+		t.Skipf("%s", loadfence.HostGateSkipText("TestDeriveNeverBlocks", measurement, load))
+		return
+	}
 	if per > budget {
 		loadfence.MissHostGateFatal(t, "TestDeriveNeverBlocks",
 			fmt.Sprintf("derivation took %s/call, want ≤%s (load_avg_1m=%.2f; required load < %.2f; the quiet-host budget is 20µs; suite-wait %.2f → x%.2f)", per, budget, load, loadfence.HostGateLoadCeiling, waitFrac, suiteFactor),

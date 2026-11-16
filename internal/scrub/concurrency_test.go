@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
@@ -32,6 +33,42 @@ func TestConcurrencySharedEngine(t *testing.T) {
 	}
 	const goroutines = 16
 	const rounds = 200
+	errs := runConcurrentScrub(e, payloads, want, goroutines, rounds)
+	for _, msg := range errs {
+		t.Error(msg)
+	}
+	// A worker returns after its first error. Its unfinished iterations must not
+	// be mistaken for lost counter increments, or one timeout becomes two test
+	// failures with the second one reporting a misleading expected total.
+	if len(errs) == 0 {
+		if got := e.Stats().Calls; got != uint64(goroutines*rounds+len(payloads)) {
+			t.Errorf("calls = %d, want %d (the atomic counters must add up)", got, goroutines*rounds+len(payloads))
+		}
+	}
+}
+
+func TestConcurrencySharedEngineTimeoutReportsOnlyTimeout(t *testing.T) {
+	const goroutines = 1
+	const rounds = 2
+	payloads := []string{"quiet payload"}
+	e := newTestEngineWithRule(t, "[scrub]\nrule_timeout = \"5ms\"\n", testRuleOpts{sleep: 40 * time.Millisecond})
+
+	errs := runConcurrentScrub(e, payloads, nil, goroutines, rounds)
+	if len(errs) != 1 {
+		t.Fatalf("timeout run returned %d worker errors, want exactly one: %v", len(errs), errs)
+	}
+	if !strings.Contains(errs[0], string(types.CodeScrub005)) {
+		t.Fatalf("worker error = %q, want a rule-timeout error", errs[0])
+	}
+	if strings.Contains(errs[0], "calls =") {
+		t.Fatalf("worker error also reported a counter failure: %q", errs[0])
+	}
+	if got := e.Stats().Calls; got != 1 {
+		t.Fatalf("calls = %d, want one completed call before the worker returned", got)
+	}
+}
+
+func runConcurrentScrub(e *Engine, payloads, want []string, goroutines, rounds int) []string {
 	var wg sync.WaitGroup
 	errs := make(chan string, goroutines)
 	for g := 0; g < goroutines; g++ {
@@ -46,7 +83,7 @@ func TestConcurrencySharedEngine(t *testing.T) {
 					errs <- err.Error()
 					return
 				}
-				if out != want[idx] {
+				if want != nil && out != want[idx] {
 					errs <- "output differs between goroutines: " + out
 					return
 				}
@@ -59,10 +96,9 @@ func TestConcurrencySharedEngine(t *testing.T) {
 	}
 	wg.Wait()
 	close(errs)
+	out := make([]string, 0, len(errs))
 	for msg := range errs {
-		t.Error(msg)
+		out = append(out, msg)
 	}
-	if got := e.Stats().Calls; got != uint64(goroutines*rounds+len(payloads)) {
-		t.Errorf("calls = %d, want %d (the atomic counters must add up)", got, goroutines*rounds+len(payloads))
-	}
+	return out
 }

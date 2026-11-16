@@ -25,11 +25,16 @@
 # sends the repo" or "trouble never runs git"; a command is what an operator
 # pastes, and that is what has to work.
 #
+# Scope: check every reader-facing page that contains executable `trouble <verb>`
+# snippets (README.md, docs/cmd.md and docs/operations.md). docs/llm.md and
+# docs/sentinel-compat.md are intentionally excluded because they contain no such
+# snippets; including them would fail closed on an empty extraction, not check a
+# documented CLI surface.
+#
 # Usage:
-#   scripts/docs_check.sh                    # check docs/operations.md
-#   DOCS_CHECK_DOC=other.md scripts/...      # check another page (used by the
-#                                            # red proof, which must not edit
-#                                            # the tracked document)
+#   scripts/docs_check.sh                    # check the default document set
+#   DOCS_CHECK_DOC=other.md scripts/...      # check one page (used by the red
+#                                            # proof, without editing the page)
 #   BIN=bin scripts/docs_check.sh            # reuse an already-built binary
 #
 # Exit: 0 every documented verb resolves · 1 a documented verb does not resolve
@@ -39,15 +44,14 @@
 set -u
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DOC=${DOCS_CHECK_DOC:-$ROOT/docs/operations.md}
+if [ -n "${DOCS_CHECK_DOC:-}" ]; then
+	DOCS=("$DOCS_CHECK_DOC")
+else
+	DOCS=("$ROOT/README.md" "$ROOT/docs/cmd.md" "$ROOT/docs/operations.md")
+fi
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-
-if [ ! -f "$DOC" ]; then
-	echo "docs-check: FAIL — no such document: $DOC" >&2
-	exit 2
-fi
 
 # Build once, into the scratch dir: the gate must not clobber bin/ and does not
 # care about the link-time stamps (`--help` is identical either way).
@@ -63,73 +67,85 @@ elif [ ! -x "$BIN" ]; then
 	exit 2
 fi
 
-# 1. The code surface of the document: fenced blocks verbatim, plus each inline
-#    backtick span on a prose line.
-awk '
-	/^[[:space:]]*```/ { fence = !fence; if (!fence) next; next }
-	fence { print; next }
-	{
-		line = $0
-		while (match(line, /`[^`]+`/)) {
-			print substr(line, RSTART + 1, RLENGTH - 2)
-			line = substr(line, RSTART + RLENGTH)
-		}
-	}
-' "$DOC" > "$TMP/code.txt"
-
-# 2. `trouble <verb>` occurrences inside that code surface, one verb per line,
-#    and only in COMMAND POSITION: start of a line, after a `$` prompt, or after
-#    a shell operator (`|`, `&&`, `;`, `(`). Fenced shell blocks also carry
-#    prose — `docker compose ps   # trouble turns healthy on the next run` is a
-#    comment, not an instruction — and a runbook gate that flags English would
-#    be turned off rather than fixed, which is the failure mode this gate exists
-#    to prevent.
-grep -oE '(^|[$|;&(][[:space:]]*)(bin/)?trouble[[:space:]]+[a-z][a-z0-9-]*' "$TMP/code.txt" \
-	| sed -E 's/.*(bin\/)?trouble[[:space:]]+//' \
-	| sort -u > "$TMP/verbs.txt"
-
-VERBS=$(grep -c . "$TMP/verbs.txt" || true)
-if [ "$VERBS" -eq 0 ]; then
-	echo "docs-check: FAIL — extracted no documented verbs from $DOC;" >&2
-	echo "            the extractor has drifted from the document's shape, which would" >&2
-	echo "            make this gate vacuous rather than green." >&2
-	exit 2
-fi
-
-# 3. The advertised surface, once.
+# 1. The advertised surface, once.
 if ! "$BIN" --help > "$TMP/help.txt" 2>&1; then
 	echo "docs-check: FAIL — '$BIN --help' exited non-zero" >&2
 	exit 2
 fi
 
 STATUS=0
-while IFS= read -r verb; do
-	[ -n "$verb" ] || continue
-
-	# (a) operator-visible: a usage line for this verb in `trouble --help`.
-	if ! grep -qE "^[[:space:]]*trouble[[:space:]]+${verb}([[:space:]]|\$)" "$TMP/help.txt"; then
-		echo "docs-check: FAIL — $DOC names 'trouble $verb' but 'trouble --help' has no such verb" >&2
-		STATUS=1
-		continue
+for DOC in "${DOCS[@]}"; do
+	if [ ! -f "$DOC" ]; then
+		echo "docs-check: FAIL — no such document: $DOC" >&2
+		exit 2
 	fi
 
-	# (b) dispatched: the binary must not answer it with `unknown command`.
-	out=$("$BIN" "$verb" --help 2>&1)
-	case "$out" in
-	*unknown\ command*)
-		echo "docs-check: FAIL — $DOC names 'trouble $verb' but the CLI rejects it:" >&2
-		printf '            %s\n' "$(printf '%s\n' "$out" | head -1)" >&2
-		STATUS=1
-		continue
-		;;
-	esac
+	# 1. The code surface of the document: fenced blocks verbatim, plus each
+	#    inline backtick span on a prose line.
+	awk '
+		/^[[:space:]]*```/ { fence = !fence; if (!fence) next; next }
+		fence { print; next }
+		{
+			line = $0
+			while (match(line, /`[^`]+`/)) {
+				print substr(line, RSTART + 1, RLENGTH - 2)
+				line = substr(line, RSTART + RLENGTH)
+			}
+		}
+	' "$DOC" > "$TMP/code.txt"
 
-	echo "docs-check: ok    trouble $verb"
-done < "$TMP/verbs.txt"
+	# 2. `trouble <verb>` occurrences inside that code surface, one verb per
+	#    line, and only in COMMAND POSITION: start of a line, after a `$` prompt,
+	#    or after a shell operator (`|`, `&&`, `;`, `(`). Fenced shell blocks also
+	#    carry prose — `docker compose ps   # trouble turns healthy on the next
+	#    run` is a comment, not an instruction.
+	grep -oE '(^|[$|;&(][[:space:]]*)(bin/)?trouble[[:space:]]+[a-z][a-z0-9-]*' "$TMP/code.txt" \
+		| sed -E 's/.*(bin\/)?trouble[[:space:]]+//' \
+		| sort -u > "$TMP/verbs.txt"
+
+	VERBS=$(grep -c . "$TMP/verbs.txt" || true)
+	if [ "$VERBS" -eq 0 ]; then
+		echo "docs-check: FAIL — extracted no documented verbs from $DOC;" >&2
+		echo "            the extractor has drifted from the document's shape, which would" >&2
+		echo "            make this gate vacuous rather than green." >&2
+		exit 2
+	fi
+
+	PAGE_STATUS=0
+	while IFS= read -r verb; do
+		[ -n "$verb" ] || continue
+
+		# (a) operator-visible: a usage line for this verb in `trouble --help`.
+		if ! grep -qE "^[[:space:]]*trouble[[:space:]]+${verb}([[:space:]]|$)" "$TMP/help.txt"; then
+			echo "docs-check: FAIL — $DOC names 'trouble $verb' but 'trouble --help' has no such verb" >&2
+			PAGE_STATUS=1
+			continue
+		fi
+
+		# (b) dispatched: the binary must not answer it with `unknown command`.
+		out=$("$BIN" "$verb" --help 2>&1)
+		case "$out" in
+		*unknown\ command*)
+			echo "docs-check: FAIL — $DOC names 'trouble $verb' but the CLI rejects it:" >&2
+			printf '            %s\\n' "$(printf '%s\\n' "$out" | head -1)" >&2
+			PAGE_STATUS=1
+			continue
+			;;
+		esac
+
+		echo "docs-check: ok    trouble $verb"
+	done < "$TMP/verbs.txt"
+
+	if [ "$PAGE_STATUS" -ne 0 ]; then
+		echo "docs-check: FAIL — $DOC documents at least one verb the CLI does not dispatch" >&2
+		STATUS=1
+	else
+		echo "docs-check: PASS — $VERBS documented verb(s) in $DOC all resolve"
+	fi
+done
 
 if [ "$STATUS" -ne 0 ]; then
-	echo "docs-check: FAIL — $DOC documents at least one verb the CLI does not dispatch" >&2
 	exit 1
 fi
 
-echo "docs-check: PASS — $VERBS documented verb(s) in $DOC all resolve"
+echo "docs-check: PASS — all ${#DOCS[@]} document(s) passed"

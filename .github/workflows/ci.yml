@@ -35,3 +35,6 @@ jobs:
 
       - name: Spec selfcheck
         run: python3 specs/tools/selfcheck.py
+
+      - name: Docs gate
+        run: bash scripts/docs_check.sh

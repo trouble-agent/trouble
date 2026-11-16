@@ -1,0 +1,26 @@
+{
+  "tick": "trouble-foreman-2026-11-16-18-21-04",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "a12a86e21c8d4d6525556ead6e867010f2ea6fab",
+  "wave_budget": 1,
+  "dispatched": 1,
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "workers": [
+    {
+      "id": "QA-TROUBLE-030",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-030",
+      "branch": "wt/QA-TROUBLE-030",
+      "seam": "internal/scrub/engine.go (rule_timeout check), internal/loadfence (exported schedstat wait helper), internal/scrub tests"
+    }
+  ],
+  "excluded_ready_rows": {
+    "RELEASE-012": "release-readiness sweep belongs to the releng lane; cut is owner-gated",
+    "TRBL-122, TRBL-133, QA-TROUBLE-26/27/28, QA-TROUBLE-DOCS-1..005, QA-TROUBLE-README-10, QA-TROUBLE-REVIEW-1/2": "QA-harness rows; owner is the fleet QA battery under ~/.hermes/scripts + the qa/bunker-qa lane, not this repo (a trouble worktree worker cannot commit them)",
+    "TRBL-135": "scope is the gitreins co-harness repo, not trouble",
+    "QA-TROUBLE-17-R3, -R3-R2, -R3-R2-R2": "perf-budget grading needs a quiet, unthrottled graded box; this host is at load_avg 28.0 (16 cores) so no perf grading here",
+    "DOC-24, DOC-27": "each is a multi-file docs+drift-gate build; deferred to the next tick because wave budget is 1 this tick"
+  },
+  "notes": "WAVE_BUDGET=1 (hard ceiling from the tick prompt): serial wave of one worker. Pick is the P1 code row that gates tier-1 for the whole queue. DuckBrain read leg blocked by the unattended curl+credential-file gate; memory leg reported unverified this tick."
+}

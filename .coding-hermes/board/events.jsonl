@@ -593,3 +593,4 @@
 {"id":588,"timestamp":"2026-11-16T16:08:53Z","event_type":"task_completed","task_id":"DOC-25","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":589,"timestamp":"2026-11-16T17:19:19Z","event_type":"task_updated","task_id":"DOC-26","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
 {"id":590,"timestamp":"2026-11-16T17:19:20Z","event_type":"task_updated","task_id":"QA-TROUBLE-25","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":591,"timestamp":"2026-11-16T18:39:58Z","event_type":"task_dispatched","task_id":"QA-TROUBLE-030","actor":"foreman","detail":"wave trouble-foreman-2026-11-16-18-21-04: 1-worker serial wave (WAVE_BUDGET=1); worktree /home/kara/worktrees/trouble-QA-TROUBLE-030 branch wt/QA-TROUBLE-030 base a12a86e; worker openai/gpt-6.1-terra@xkiro","marker":null}

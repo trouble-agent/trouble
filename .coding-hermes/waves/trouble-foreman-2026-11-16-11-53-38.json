@@ -1,0 +1,11 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-11-16-11-53-38",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "3c90748e5ccd3cf8b6b5ef89b76d0ee2b797f1aa",
+  "wave_budget": 9,
+  "workers": [
+    {"row":"QA-TROUBLE-029","worktree":"/home/kara/worktrees/trouble-QA-TROUBLE-029","branch":"wt/QA-TROUBLE-029","base_sha":"3c90748e5ccd3cf8b6b5ef89b76d0ee2b797f1aa","brief":"/home/kara/.hermes/cache/scratch/brief-QA-TROUBLE-029.txt","model":"openai/gpt-6.1-terra","provider":"xkiro","status":"dispatched"},
+    {"row":"TRBL-137","worktree":"/home/kara/worktrees/trouble-TRBL-137","branch":"wt/TRBL-137","base_sha":"3c90748e5ccd3cf8b6b5ef89b76d0ee2b797f1aa","brief":"/home/kara/.hermes/cache/scratch/brief-TRBL-137.txt","model":"openai/gpt-6.1-terra","provider":"xkiro","status":"dispatched"}
+  ]
+}

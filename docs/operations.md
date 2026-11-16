@@ -50,6 +50,22 @@ ledger sequence stall), `trouble ledger verify` against its state root (non-zero
 corruption), and `trouble install --check` on the host itself (13 on any refusable condition).
 `make docs-check` fails the build if this page names a verb the CLI does not dispatch.
 
+### Board integrity check
+
+The read-only `trouble board integrity` command checks completed board rows in
+`.coding-hermes/board/tasks.jsonl` against Git history. It examines each cited
+`commit_hash` in the current object database, unmerged branches, and reflog; it
+never edits the board or repository. From the repository root, run:
+
+```
+./bin/trouble board integrity
+```
+
+The report prints `Total rows examined: N` and `Unresolved closes: N` after the
+per-row results. Exit `0` means all cited commits resolve; exit `1` means an
+unresolved close was found; exit `2` means validation could not run because the
+board could not be read or decoded.
+
 ## 3. Recovery
 
 * **Torn last line** (process killed mid-write, ENOSPC during a batch write): the fragment is

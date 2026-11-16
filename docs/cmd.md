@@ -161,7 +161,26 @@ trouble hub drain [--timeout DURATION]  consume the stream into the ledger, then
 trouble ledger status [--json]          the LedgerStatus stanza: writer, index, disk, loss window
 trouble ledger verify [--day YYYY-MM-DD] [--json]   hole/torn/corrupt/hash walk of the files
 trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]   rewrite one day into a new generation
+trouble board integrity                    validate completed board-row commit citations
 ```
+
+### `trouble board integrity`
+
+`trouble board integrity` is a read-only check for completed rows in
+`.coding-hermes/board/tasks.jsonl`. It validates each non-empty `commit_hash`
+against the repository's Git history, including the current object database,
+unmerged branches, and reflog entries. It does not edit the board or repository.
+
+Run it from the repository root so the command checks that checkout:
+
+```
+./bin/trouble board integrity
+```
+
+The command prints one result per cited row, followed by `Total rows examined: N`
+and `Unresolved closes: N`. It exits `0` when every cited commit resolves, `1`
+when at least one completed row has an unresolved close, and `2` when the board
+cannot be read or decoded (a validation error).
 
 `trouble upgrade --to` names the PATH of the binary to stage, which is copied over
 the running one: a version string is not resolved to an artifact, so `--to v0.1.1`

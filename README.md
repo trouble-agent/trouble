@@ -291,6 +291,12 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
   compatibility matrix: routes, item types, encodings, size caps, auth forms
   and every deliberate divergence from upstream Sentry or the SPEC-04 text,
   enforced by the `TestCompatMatrix*` drift checks.
+* [docs/reference/env-vars.md](docs/reference/env-vars.md) — the `TROUBLE_*`
+  environment surface: the derivation rule, the full key-to-variable table, the
+  literal exceptions the config registry does not derive, the `*_env` secret
+  indirection and the precedence (`flag > env > file > default`) that
+  `trouble config explain` reports, enforced by
+  `internal/lifecycle/envdocs_doc_test.go`.
 
 ## Getting the source
 

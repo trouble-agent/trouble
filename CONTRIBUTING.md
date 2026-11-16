@@ -28,7 +28,7 @@ make check               # the v0.1 exit gate: selfcheck + schema-check + vet
 make check-host          # host-measured gates verbosely, with fence verdicts
 make conformance         # the registry conformance gate (SPEC-06 §2.4)
 make smoke               # version triple, config explain, topology
-make smoke-e2e           # 24 live assertions against both binaries
+make smoke-e2e           # 60 live assertions against both binaries
 make ac-matrix           # the AC matrix over the SPEC-INDEX contract
 make schema-check        # a descriptor edit without a regenerated schema fails
 ```

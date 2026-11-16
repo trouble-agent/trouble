@@ -5,6 +5,13 @@ them and the subsystem packages. It is the operator-facing complement to
 SPEC-12 §2 (the CLI surface) and §4 (boot/drain), and it is the only place that
 describes how the packages meet.
 
+Every `TROUBLE-*` refusal named in this document — what the CLI prints and what
+the daemon answers with — is catalogued with its class and first operator action
+in [docs/reference/error-codes.md](reference/error-codes.md). That page is
+generated from the `ErrorCode` declarations in `internal/types` and gated by
+`go test ./internal/types/ -run TestErrorCodeReference`, so a code is either in
+both places or the gate is red.
+
 ## The three layers
 
 ```

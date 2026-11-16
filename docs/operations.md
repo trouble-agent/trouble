@@ -391,6 +391,13 @@ stays inside the closed draft 2020-12 keyword subset. A descriptor edit without 
 binary as the daemon, serving server-rendered pages and htmx fragments from the SPEC-01 in-memory
 index. It writes nothing to the ledger. Reads default to `127.0.0.1:7644`.
 
+**The codes this section names.** Every `TROUBLE-DASHBOARD-*` refusal below — and every code in
+the other twelve families this document mentions — carries its class and its first operator action
+in [docs/reference/error-codes.md](reference/error-codes.md). That page is generated from the
+`ErrorCode` declarations in `internal/types`, and `go test ./internal/types/ -run
+TestErrorCodeReference` fails when the page and the declarations diverge in either direction, so a
+code printed in a log or an HTTP body is always one lookup away from its meaning.
+
 **The route table in full, one hop away.** All 20 registrable rows — the 7 pages, `/health.json`,
 the 3 POST actions, the 7 polling partials, `/static/{asset}` and the unknown-partial guard — are
 listed with their method, path, scope, auth and request/response shapes in
@@ -1144,6 +1151,12 @@ runs mutating skill plays as `check_mode` downstream. There is no approve verb i
 
 `internal/lifecycle` owns whether the daemon is allowed to run and replaceable
 without losing work.
+
+**The codes this section names.** The `TROUBLE-LIFECYCLE-*` refusals below (and the
+`TROUBLE-LEDGER`/`TROUBLE-SCRUB` codes they name) are catalogued with their class and
+first operator action in [docs/reference/error-codes.md](reference/error-codes.md) —
+generated from the `ErrorCode` declarations and gated by
+`go test ./internal/types/ -run TestErrorCodeReference`.
 
 **Config precedence.** flag > env > file > default. `trouble config explain` prints
 one row per key with its source and source_ref; secret-class keys are replaced by

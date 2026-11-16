@@ -1,0 +1,20 @@
+trouble — licensing
+
+trouble is licensed under the GNU Affero General Public License v3.0
+(AGPL-3.0), see LICENSE.
+
+Why AGPL: trouble is an application — a hub daemon (troubled) that others
+can run as a service. AGPL-3.0 requires that anyone who modifies and runs
+the hub — including as a network service — shares the modified source.
+
+Client SDK carve-out (planned): the trouble client/agent CLI is intended as
+an embedding surface. When it is extracted into its own distribution unit,
+that unit will be re-licensed MIT (see LICENSE-MIT-previous.md for the
+original permissive text applied to the pre-AGPL history). Until that
+extraction lands, the whole module is AGPL-3.0.
+
+SPDX: currently-AGPL tree carries 'SPDX-License-Identifier: AGPL-3.0-only'
+as files are touched; do not restamp the whole tree in one commit.
+
+Decision: Bane 2026-11-15 (voice): 'Maybe AGPL... this one also feels like
+a bit of an application. So you might want to wrap it up a bit better.'

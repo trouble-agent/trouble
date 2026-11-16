@@ -584,3 +584,9 @@
 {"id":579,"timestamp":"2026-11-16T12:47:07Z","event_type":"task_updated","task_id":"TRBL-137","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
 {"id":580,"timestamp":"2026-11-16T13:35:10Z","event_type":"task_completed","task_id":"TRBL-137","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":581,"timestamp":"2026-11-16T13:35:28Z","event_type":"task_completed","task_id":"QA-TROUBLE-029","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":582,"timestamp":"2026-11-16T14:03:29Z","event_type":"task_updated","task_id":"RELEASE-013","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":583,"timestamp":"2026-11-16T14:03:29Z","event_type":"task_updated","task_id":"QA-TROUBLE-25","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":584,"timestamp":"2026-11-16T14:03:29Z","event_type":"task_updated","task_id":"DOC-22","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":585,"timestamp":"2026-11-16T14:03:29Z","event_type":"task_updated","task_id":"DOC-25","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":586,"timestamp":"2026-11-16T14:03:29Z","event_type":"task_updated","task_id":"DOC-26","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":587,"timestamp":"2026-11-16T16:00:26Z","event_type":"task_created","task_id":"QA-TROUBLE-030","actor":"foreman","detail":"{\"id\":\"QA-TROUBLE-030\",\"status\":\"pending\"}","marker":null}

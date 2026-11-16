@@ -1,0 +1,24 @@
+{
+  "tick": "trouble-foreman-2026-11-16-13-48-05",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "e0b025b8155b487504d82b3c68961a48c68afc5c",
+  "wave_budget": 9,
+  "dispatched": 5,
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "workers": [
+    {"id": "RELEASE-013", "worktree": "/home/kara/worktrees/trouble-RELEASE-013", "branch": "wt/RELEASE-013", "seam": "go.mod, Dockerfile, .github/workflows/ci.yml"},
+    {"id": "QA-TROUBLE-25", "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-25", "branch": "wt/QA-TROUBLE-25", "seam": "internal/app, internal/ledger"},
+    {"id": "DOC-22", "worktree": "/home/kara/worktrees/trouble-DOC-22", "branch": "wt/DOC-22", "seam": "docs/v0.1-ac-status.md"},
+    {"id": "DOC-25", "worktree": "/home/kara/worktrees/trouble-DOC-25", "branch": "wt/DOC-25", "seam": "docs/reference/error-codes.md (new), docs/operations.md, docs/cmd.md, internal/types doc test"},
+    {"id": "DOC-26", "worktree": "/home/kara/worktrees/trouble-DOC-26", "branch": "wt/DOC-26", "seam": "docs/reference/env-vars.md (new), README.md, deploy/README.md, examples/trouble.env, internal/lifecycle doc test"}
+  ],
+  "excluded_ready_rows": {
+    "TRBL-122, TRBL-133, QA-TROUBLE-26/27/28, QA-TROUBLE-DOCS-003/004/005, QA-TROUBLE-README-10": "harness rows; owner is the fleet QA battery under ~/.hermes/scripts + QA lane, not this repo (a worker in a trouble worktree cannot commit them)",
+    "TRBL-135": "scope is the gitreins co-harness repo, not trouble",
+    "RELEASE-012": "release-readiness sweep belongs to the releng lane",
+    "QA-TROUBLE-17-R3-R2-R2, QA-TROUBLE-17-R3-R3-R4": "perf grading needs a quiet unthrottled graded box; this host is at load_avg 12.5 (16 cores) so no perf run here",
+    "DOC-24, DOC-27": "both must edit README/deploy-README link hubs that DOC-26 owns this wave; deferred one tick to keep merges conflict-free"
+  }
+}

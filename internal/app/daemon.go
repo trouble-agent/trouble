@@ -142,7 +142,7 @@ var bootPhaseNames = []string{
 	"sensors_build", "subsystems", "registry", "skill_library", "llm_port",
 	"ladder", "sensors_probe", "checker_mirror", "dashboard_config",
 	"sensors_start", "dashboard_serve", "hub_runtime", "sentinel_start",
-	"background_loops", "ready",
+	"background_loops", "ingest_admission", "ready",
 }
 
 // BootPhaseNames returns the §4.1 startup phase names in execution order.
@@ -628,6 +628,18 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 				log.Error("forward", "err", err)
 			}
 		}()
+	}
+
+	// 13f. QA-TROUBLE-25: READY is a promise that the daemon admits the
+	// documented on-ramp POST (SPEC-04 §2.4), and that admission is one ledger
+	// append. A boot that has just written its own burst can still be draining
+	// it, so the promise is PROVEN before it is made: one append is timed
+	// against the sentinel's ledger_wait, and READY waits until it fits
+	// (ingest_admission.go states the measurement and the rejected alternative).
+	phase("ingest_admission")
+	if err := d.awaitIngestAdmission(ctx); err != nil {
+		d.bootFailure(ctx, types.CodeLifecycle003, err)
+		return nil, err
 	}
 
 	phase("ready")

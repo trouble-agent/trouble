@@ -67,6 +67,28 @@ func logLines(lines []string) string {
 	return strings.Join(lines, " | ")
 }
 
+// waitForLifecycleOps polls the ledger until the expected lifecycle count is
+// durable. The deadline is deliberately bounded: reconnect installs the new
+// consumer before the lifecycle append begins, so callers must not treat the
+// consumer swap as proof that the record is already visible.
+func waitForLifecycleOps(t *testing.T, ledger *fakeLedger, op string, want int, within time.Duration) {
+	t.Helper()
+	started := time.Now()
+	deadline := started.Add(within)
+	polls := 0
+	for {
+		polls++
+		got := lifecycleOps(ledger, op)
+		if got == want {
+			return
+		}
+		if got > want || !time.Now().Before(deadline) {
+			t.Fatalf("%s records = %d want exactly %d after %d polls over %s", op, got, want, polls, time.Since(started).Round(time.Millisecond))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // logSink captures the runtime's diagnostics (RuntimeConfig.Log).
 type logSink struct {
 	mu    sync.Mutex
@@ -415,9 +437,10 @@ func TestGenuineRedisFailureIsStillARedisLoss(t *testing.T) {
 	// itself is the only thing that may.
 	f.comeBack()
 	waitFor(t, 8*time.Second, "the supervisor to rewire the queue", func() bool { return rt.Consumer() != stale })
-	if n := lifecycleOps(ledger, "redis_restored"); n != 1 {
-		t.Fatalf("redis_restored records = %d want exactly 1", n)
-	}
+	// Consumer replacement and lifecycle durability are separate observations:
+	// reconnect starts the new consumer after publishing the record, while the
+	// ledger append itself may still be completing on a loaded runner.
+	waitForLifecycleOps(t, ledger, "redis_restored", 1, 2*time.Second)
 	if mode := rt.RuntimeMode(); mode != ModeUp {
 		t.Fatalf("mode after the rewire = %q want up", mode)
 	}

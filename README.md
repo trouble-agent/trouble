@@ -237,12 +237,15 @@ model pin is compiled in.
 
 `internal/boardintegrity` validates completed board rows against git history and backs the
 `trouble board integrity` command, catching closes whose cited commits no longer resolve.
+Import rule: stdlib only, and `cmd/trouble` is its only importer.
 
 `internal/portability` is the source-invariant guard that keeps Linux-only code behind build
 constraints (TRBL-002); it has no runtime code, only the test beside it.
 
-`internal/loadfence` provides GREEN/SKIP/VOID verdicts for host-measured gates, keeping
-host pressure explicit instead of turning an ungradeable measurement into a product failure.
+`internal/loadfence` keeps host pressure explicit for host-measured gates: under the fence a
+slow run stays a metric, and above it the gate SKIPs and names the measurement instead of
+FAILing the product. Import rule: stdlib only, imported from `_test.go` files of the packages
+whose gates are host-measured.
 
 Operational detail (what to look at when one of them misbehaves, and the runbook
 facts that surprise people) lives in `docs/operations.md` §12–§18.

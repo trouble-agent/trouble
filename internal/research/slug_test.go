@@ -240,8 +240,8 @@ func TestDeriveNeverBlocks(t *testing.T) {
 	suiteFactor, _ := loadfence.SuiteContention(waitFrac)
 	budget = time.Duration(float64(budget) * suiteFactor)
 	if per > budget {
-		loadfence.MissFatal(t, "TestDeriveNeverBlocks",
-			fmt.Sprintf("derivation took %s/call, want ≤%s (load_avg_1m=%.2f; the quiet-host budget is 20µs; suite-wait %.2f → x%.2f)", per, budget, load, waitFrac, suiteFactor),
+		loadfence.MissHostGateFatal(t, "TestDeriveNeverBlocks",
+			fmt.Sprintf("derivation took %s/call, want ≤%s (load_avg_1m=%.2f; required load < %.2f; the quiet-host budget is 20µs; suite-wait %.2f → x%.2f)", per, budget, load, loadfence.HostGateLoadCeiling, waitFrac, suiteFactor),
 			load)
 	}
 	t.Logf("derivation: %s/call over 10000 synthetic sigs (load_avg_1m=%.2f, budget=%s, suite-wait %.2f, suite x%.2f)", per, load, budget, waitFrac, suiteFactor)

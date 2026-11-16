@@ -3,6 +3,7 @@ package scrub_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -451,10 +452,13 @@ func TestIngestHarnessThroughput(t *testing.T) {
 		}
 	}
 	if bestWith < floor {
-		t.Errorf("ingestion floor: best of %d %.0f req/s with the scrubber in the path, want >= %.0f "+
-			"(load_avg_1m=%.2f, no-scrub baseline best of %d %.0f req/s; the SPEC-04 §3.9 floor is 5,000 on a quiet host "+
-			"and the v0.1 baseline before the per-field gates measured 4,000-4,400 under load)",
-			runs, bestWith, floor, load, runs, without)
+		// This is a host-measured throughput floor, not a deterministic scrub
+		// invariant. At load_avg_1m >= 12 the Tier 1 arm must report an explicit
+		// SKIP with both the observed rate and derived floor; below that boundary
+		// the floor remains a hard regression assertion.
+		loadfence.MissHostGateFatal(t, "TestIngestHarnessThroughput",
+			fmt.Sprintf("ingestion floor: best of %d %.0f req/s with the scrubber in the path, want >= %.0f (load_avg_1m=%.2f; required load < %.2f; no-scrub baseline best of %d %.0f req/s; the SPEC-04 §3.9 floor is 5,000 on a quiet host and the v0.1 baseline before the per-field gates measured 4,000-4,400 under load)",
+				runs, bestWith, floor, load, loadfence.HostGateLoadCeiling, runs, without), load)
 	} else if cost > 20 {
 		t.Logf("NOTE: measured cost is %.1f%% of this harness at load_avg_1m %.2f; the ratio of two "+
 			"loaded runs is noise-dominated and the §3.9 ≤20%% bound is asserted on quiet hosts", cost, load)

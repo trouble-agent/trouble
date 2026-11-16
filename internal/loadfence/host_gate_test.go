@@ -20,7 +20,9 @@ func TestHostGateCeiling(t *testing.T) {
 	}{
 		{0, false},
 		{3.9, false},
-		{15.99, false},
+		{11.99, false},
+		{12, true}, // the Tier 1 arm must never FAIL at the requested load boundary
+		{15.99, true},
 		{HostGateLoadCeiling - 0.01, false},
 		{HostGateLoadCeiling, true}, // boundary: at the ceiling it is already unmeasurable
 		{20.99, true},               // the measured 2026-10-23 failure point
@@ -53,6 +55,7 @@ func TestHostGateSkipTextNamesEverything(t *testing.T) {
 			gate,
 			"SKIP",
 			"loadfence.HostGateLoadCeiling", // the shared constant, named in the message
+			"required load",
 			"20.99",
 			"measured rate/latency/structural result", // the measurement itself
 		} {

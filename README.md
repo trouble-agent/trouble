@@ -235,6 +235,15 @@ worktree through the scheduler's own admission path, with a durable queue behind
 it. Both are configuration-only clients: no lab layout, board path, repo list or
 model pin is compiled in.
 
+`internal/boardintegrity` validates completed board rows against git history and backs the
+`trouble board integrity` command, catching closes whose cited commits no longer resolve.
+
+`internal/portability` is the source-invariant guard that keeps Linux-only code behind build
+constraints (TRBL-002); it has no runtime code, only the test beside it.
+
+`internal/loadfence` provides GREEN/SKIP/VOID verdicts for host-measured gates, keeping
+host pressure explicit instead of turning an ungradeable measurement into a product failure.
+
 Operational detail (what to look at when one of them misbehaves, and the runbook
 facts that surprise people) lives in `docs/operations.md` §12–§18.
 

@@ -1,0 +1,17 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-11-16-10-04-27",
+  "project": "trouble",
+  "base": "origin/main",
+  "base_sha": "f945eefa36c3c091bb6b74a6ee840f3ed21fafd5",
+  "wave_budget": 12,
+  "wave_size": 4,
+  "wave_size_note": "Capped at 4 of 12: host load_avg was 16.7 on 16 cores at dispatch, already above the TRBL-132 threshold. Each extra Go worker compiles and runs tests on the same box; the board's own recurrence rows record load-scaled gate reds. 4 disjoint file scopes is the load-sane maximum.",
+  "workers": [
+    {"task_id": "TRBL-136", "worktree": "/home/kara/worktrees/trouble-TRBL-136", "branch": "wt/TRBL-136", "base_sha": "f945eef", "scope": "internal/hub/"},
+    {"task_id": "TRBL-132", "worktree": "/home/kara/worktrees/trouble-TRBL-132", "branch": "wt/TRBL-132", "base_sha": "f945eef", "scope": "internal/research/, internal/scrub/, internal/loadfence/"},
+    {"task_id": "INT-CI-7-R2", "worktree": "/home/kara/worktrees/trouble-INT-CI-7-R2", "branch": "wt/INT-CI-7-R2", "base_sha": "f945eef", "scope": "internal/app/, internal/ledger/"},
+    {"task_id": "DOC-23", "worktree": "/home/kara/worktrees/trouble-DOC-23", "branch": "wt/DOC-23", "base_sha": "f945eef", "scope": "scripts/docs_check.sh, .github/workflows/ci.yml, Makefile"}
+  ],
+  "merge_order": ["TRBL-136", "DOC-23", "INT-CI-7-R2", "TRBL-132"],
+  "status": "dispatching"
+}

@@ -348,8 +348,8 @@ All directories are `0700`, all files are `0600`.
 ## Configuration
 
 See `examples/config.toml` and `examples/trouble.env`. Precedence is
-flag > env > file > default. Unknown file keys are fatal (TROUBLE-LIFECYCLE-001);
-unknown env keys are ignored silently (no near-miss hint, no warning).
+flag > env > file > default. Unknown file keys are fatal (TROUBLE-LIFECYCLE-001).
+Stray `TROUBLE_*` env keys are never fatal: each is ignored and recorded in the boot `config` record (`payload.hint`), and a near-miss name (within edit distance 2 of a real variable) gets one boot WARN naming the variable it resembles.
 
 Every `TROUBLE_*` variable — the derived twin of each config key plus the
 literal exceptions — is documented in

@@ -171,7 +171,7 @@ func TestEnvDocsEveryLiteralIsDocumented(t *testing.T) {
 
 // TestEnvDocsKeepsTheCanonicalStatements stops the page being gutted while the
 // two gates above stay green: the derivation rule, the precedence quote and the
-// no-near-miss statement are the reason the page exists.
+// near-miss limits statement are the reason the page exists.
 func TestEnvDocsKeepsTheCanonicalStatements(t *testing.T) {
 	root := repoRootForDocs(t)
 	body, err := os.ReadFile(filepath.Join(root, envDocsPath))
@@ -187,7 +187,7 @@ func TestEnvDocsKeepsTheCanonicalStatements(t *testing.T) {
 		{"derivation rule (source line)", "internal/lifecycle/config.go:2269"},
 		{"flag spelling (source line)", "internal/lifecycle/config.go:2272"},
 		{"precedence quote", "flag > env > file > default"},
-		{"no near-miss hint on stray env keys", "* **There is no near-miss hint.**"},
+		{"near-miss limits on a stray env key", "* **No `config explain` row, no exit code, no value.**"},
 		{"secret indirection row", "server.redis.password_env"},
 	}
 	var missing []string

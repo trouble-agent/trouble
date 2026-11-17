@@ -337,13 +337,18 @@ state_root  /home/<user>/.local/state/trouble  default  builtin
 
 ## 6. What the binary does **not** do
 
-* **There is no near-miss hint.** A misspelled `TROUBLE_*` variable is silently
-  ignored: it produces no row in `config explain`, no warning on stderr and no
-  non-zero exit. Verified on the built binary —
-  `TROUBLE_SENSORS_JOURNALD_QUEUE_BYTES_TYPO=999 trouble config explain --json`
-  exits 0, contains no `typo`-bearing row and no `env_unknown` row. (The
-  correction that adds a hint is a separate change; this page states the shipped
-  behaviour only.)
+* **No `config explain` row, no exit code, no value.** A stray `TROUBLE_*` name
+  the registry does not know is ignored — never fatal — and when it is within edit
+  distance 2 of a real variable the boot logs exactly one
+  `level=WARN msg="unknown env key" name=... did_you_mean=...` line naming the
+  variable it resembles, and the boot `config` record carries `payload.hint`
+  (`{name, hint}` rows). What it still does **not** do: produce a row in
+  `config explain` (a stray name won nothing, so it has no provenance to report),
+  exit non-zero, or print the stray *value* — the value is the thing most likely
+  to be a secret, so it reaches neither the log nor the record. Verified on the
+  built binary: `TROUBLE_INGEST_BINDS=... troubled --state_root <scratch>` prints
+  that WARN as its first line and then boots unchanged;
+  `TROUBLE_NONSENSE=...` prints nothing at all.
 * **Unknown file keys are different.** A key the registry does not know in the
   TOML file is fatal: `TROUBLE-LIFECYCLE-001` (`deploy/README.md:351`).
 * **A `TROUBLE_*` name that is not in §2 or §3 is inert.** Only registry-derived

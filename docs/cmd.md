@@ -46,7 +46,7 @@ troubled [--config <path>] [-v] [--version] [--<key> <value>]...
 | `-v` | debug logging |
 | `--version` | the version triple, exit 0 |
 | `-h` / `--help` | the daemon's real surface, exit 0 |
-| `--<key> <value>`, `--<key>=<value>`, bare `--<key>` | any registered key: `a.b_c` → `--a-b_c` (`state_root` → `--state_root`, `secrets.environment_file` → `--secrets-environment_file`). A flag beats env, file and default. |
+| `--<key> <value>`, `--<key>=<value>`, bare `--<key>` | any registered key: `a.b_c` → `--a-b_c` (`state_root` → `--state_root`, `secrets.environment_file` → `--secrets-environment_file`). Precedence and the full key list: [configuration reference](reference/config.md#precedence-and-flag-spelling). |
 
 A scratch or second instance therefore needs no edit to the shipped file:
 

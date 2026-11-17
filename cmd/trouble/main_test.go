@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/trouble-agent/trouble/internal/dashboard"
+	"github.com/trouble-agent/trouble/internal/lifecycle"
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
@@ -232,6 +233,65 @@ func captureStderr(t *testing.T, fn func()) string {
 	out := <-done
 	_ = r.Close()
 	return out
+}
+
+// captureStdout runs fn with os.Stdout redirected to a pipe and returns what it
+// wrote. The generated configuration reference is printed to stdout, so the
+// test proves the CLI stream the operator (and the redirect in the docs) gets,
+// not a helper's return value.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	done := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	func() {
+		defer func() {
+			os.Stdout = old
+			_ = w.Close()
+		}()
+		fn()
+	}()
+	out := <-done
+	_ = r.Close()
+	return out
+}
+
+// TestConfigExplainMarkdownIsTheReference pins the CLI half of the DOC-24
+// contract: `trouble config explain --markdown` prints exactly what the library
+// generator produces (which is what the page and its drift gate compare), and
+// it refuses to be combined with the row-selecting flags rather than silently
+// ignoring one of them.
+func TestConfigExplainMarkdownIsTheReference(t *testing.T) {
+	var code int
+	out := captureStdout(t, func() { code = run([]string{"config", "explain", "--markdown"}) })
+	if code != 0 {
+		t.Fatalf("config explain --markdown exited %d, want 0", code)
+	}
+	want, err := lifecycle.ConfigReferenceMarkdown()
+	if err != nil {
+		t.Fatalf("ConfigReferenceMarkdown: %v", err)
+	}
+	if out != want {
+		t.Fatalf("stdout (%d bytes) != generator output (%d bytes); the CLI and the library must produce the same page", len(out), len(want))
+	}
+
+	stderr := captureStderr(t, func() {
+		code = run([]string{"config", "explain", "--markdown", "--json"})
+	})
+	if code != 2 {
+		t.Fatalf("--markdown with --json exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "drop --key and --json") {
+		t.Fatalf("refusal message = %q, want it to name the conflicting flags", stderr)
+	}
 }
 
 // unsetEnv removes an environment variable for the duration of the test. A

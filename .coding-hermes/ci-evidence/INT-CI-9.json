@@ -1,0 +1,47 @@
+{
+  "row": "INT-CI-9",
+  "title": "Hosted CI red: internal/loadfence TestThreadWaitSnapshotMeasuresRealDescheduling measures no runqueue wait on the GitHub runner",
+  "repo": "trouble-agent/trouble",
+  "workflow": "ci",
+  "job": "build, vet, test, spec selfcheck",
+  "step": "Test (short mode)",
+  "red": {
+    "run_id": 44049265682,
+    "commit": "051a1992d5fbc5a5ca23b3341e4237e66e57eae4",
+    "conclusion": "failure",
+    "created_at": "2026-11-17T08:44:08Z",
+    "failed_test": "TestThreadWaitSnapshotMeasuresRealDescheduling",
+    "message": "threadwait_test.go:140: no runqueue wait measured across three 80.449546ms windows with 3 competitors on 1 P: the sample is inert"
+  },
+  "green": [
+    {
+      "run_id": 44055521153,
+      "commit": "ff7c98a",
+      "role": "fix commit merged (worker de7f72e on wt/INT-CI-9)",
+      "conclusion": "success",
+      "created_at": "2026-11-17T09:25:59Z"
+    },
+    {
+      "run_id": 44056208366,
+      "commit": "8e3e8ce",
+      "role": "board commit after the merge",
+      "conclusion": "success",
+      "created_at": "2026-11-17T09:30:35Z"
+    }
+  ],
+  "local_gates": {
+    "go_build": "clean",
+    "go_vet": "clean",
+    "target_test_count5": "ok github.com/trouble-agent/trouble/internal/loadfence 3.037s (5/5 PASS)",
+    "package": "ok 3.103s"
+  },
+  "change": {
+    "commit": "de7f72edb49e668a5395fa4795dfcfbe7004ab42",
+    "files": ["internal/loadfence/threadwait_test.go"],
+    "insertions": 161,
+    "deletions": 38,
+    "mechanism": "Goroutines multiplex onto GOMAXPROCS OS threads, so 3 spinning competitors on 1 P are ONE runnable thread: the Go scheduler preempts in-process while the kernel never enqueues, so schedstat field 2 stays flat and the sample reads inert on a quiet runner. The control now escalates the RUNNABLE THREAD COUNT and the window: 1P/3 competitors -> NumCPU P/NumCPU -> NumCPU+2 P/NumCPU+8 competitors, 40ms -> 100ms -> 250ms windows, failing loudly if the sample is still inert after the full ladder."
+  },
+  "open_question": "The top rung is derived from runtime.NumCPU(), so a 2-core runner tops out at 4 P / 10 competitors — the same regime that was inert at 051a199 could still read 0 there. A floor on the top rung (e.g. >= 16 competitors absolute) would close that; it is not yet implemented.",
+  "verification_note": "CI conclusions above were read from `gh run list --repo trouble-agent/trouble --json databaseId,conclusion,headSha,createdAt` on 2026-11-17, not inferred."
+}

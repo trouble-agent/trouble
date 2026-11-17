@@ -33,6 +33,39 @@ type pending struct {
 	drops uint64
 }
 
+// FlushEvent reports one durable commit — one write plus one fdatasync — as the
+// writer actually performed it, together with the condition that closed the
+// batch (SPEC-01 §3.5, §3.5a). It exists so a caller can attribute a commit to
+// a trigger instead of inferring it from a process-wide counter: FsyncCalls
+// counts every commit in the process, so a delta taken over it cannot
+// distinguish a split batch from an unrelated concurrent write that landed in
+// the same window.
+type FlushEvent struct {
+	// Trigger is the condition that closed the batch: one of the
+	// FlushTrigger* constants.
+	Trigger string
+	// Records is the number of records made durable by this commit.
+	Records int
+	// SeqFrom/SeqTo bound the seq range the commit allocated.
+	SeqFrom uint64
+	SeqTo   uint64
+}
+
+// Flush triggers (SPEC-01 §3.5): a batch closes on the size threshold, on the
+// fsync window, on a rotation request, or on the shutdown tail. PerLineSync is
+// the test-only §7 diagnostic, where every record pays its own commit.
+const (
+	FlushTriggerSize     = "size"
+	FlushTriggerWindow   = "window"
+	FlushTriggerRotate   = "rotate"
+	FlushTriggerShutdown = "shutdown"
+	FlushTriggerPerLine  = "per-line"
+)
+
+// flushObserver wraps the observer func so it can live in an atomic.Pointer
+// (a func value is not itself addressable).
+type flushObserver struct{ fn func(FlushEvent) }
+
 // headFile is the HEAD hint (SPEC-01 §3.4 rule 7): never a source of truth.
 type headFile struct {
 	LastSeq uint64 `json:"last_seq"`
@@ -128,6 +161,11 @@ type writer struct {
 	degradedPayload atomic.Bool
 	budgetChecked   atomic.Int64
 
+	// obs is the optional durable-commit observer (diagnostics only): called on
+	// the writer goroutine after a commit is durable. Nil by default, so the
+	// steady state costs one atomic load per commit.
+	obs atomic.Pointer[flushObserver]
+
 	headMu   sync.Mutex
 	lastHead time.Time
 }
@@ -196,11 +234,11 @@ func (w *writer) run() {
 	timer := time.NewTimer(window)
 	defer timer.Stop()
 	batch := make([]*pending, 0, maxBatch)
-	flush := func() {
+	flush := func(trigger string) {
 		if len(batch) == 0 {
 			return
 		}
-		w.flushBatch(batch)
+		w.flushBatch(batch, trigger)
 		batch = batch[:0]
 		if !timer.Stop() {
 			select {
@@ -220,12 +258,12 @@ func (w *writer) run() {
 				// mid-batch, because rotation is legal only between batches —
 				// and the shutdown housekeeping (rotation, holes, the open
 				// refusal fold) then gets a batch of its own.
-				flush()
+				flush(FlushTriggerShutdown)
 				w.beforeBatch()
 				if len(w.house) > 0 {
 					batch = append(batch, w.house...)
 					w.house = nil
-					flush()
+					flush(FlushTriggerShutdown)
 				}
 				w.closeCurrent()
 				return
@@ -243,19 +281,19 @@ func (w *writer) run() {
 			}
 			batch = append(batch, p)
 			if len(batch) >= maxBatch {
-				flush()
+				flush(FlushTriggerSize)
 			}
 		case <-timer.C:
-			flush()
+			flush(FlushTriggerWindow)
 			timer.Reset(window)
 		case replyCh := <-w.rotateReq:
-			flush()
+			flush(FlushTriggerRotate)
 			w.beforeBatch()
 			err := w.curErr()
 			if len(w.house) > 0 {
 				batch = append(batch, w.house...)
 				w.house = nil
-				flush()
+				flush(FlushTriggerRotate)
 			}
 			part := 0
 			if w.cur != nil {
@@ -776,7 +814,7 @@ func (w *writer) requestRotate(now time.Time) (int, error) {
 // to one write and one fdatasync, which is what makes the batch path's
 // durable-on-return-per-batch contract a property of the same code the single
 // path has always used (§3.5a).
-func (w *writer) flushBatch(batch []*pending) {
+func (w *writer) flushBatch(batch []*pending, trigger string) {
 	if len(batch) == 0 {
 		return
 	}
@@ -860,6 +898,11 @@ func (w *writer) flushBatch(batch []*pending) {
 	w.cur.bytes += int64(buf.Len())
 	w.cur.records += int64(len(recs))
 	last := recs[len(recs)-1]
+	// The commit is durable: report its shape and the condition that closed it
+	// BEFORE the acks, so a caller waiting on AppendBatch and a caller reading
+	// the event stream can never disagree about which commit carried its
+	// records.
+	w.notifyFlush(FlushEvent{Trigger: trigger, Records: len(recs), SeqFrom: from, SeqTo: last.Seq})
 	w.lastSeq.Store(last.Seq)
 	w.mu.Lock()
 	w.st.bytes = w.cur.bytes
@@ -875,6 +918,31 @@ func (w *writer) flushBatch(batch []*pending) {
 			p.done <- nil
 		}
 	}
+}
+
+// notifyFlush delivers a durable-commit event to the installed observer, if
+// any. The observer runs on the writer goroutine and must not block: it exists
+// for diagnostics, so a slow observer would sit on the commit path.
+func (w *writer) notifyFlush(ev FlushEvent) {
+	if o := w.obs.Load(); o != nil && o.fn != nil {
+		o.fn(ev)
+	}
+}
+
+// SetFlushObserver installs (nil clears) a diagnostic observer called on the
+// writer goroutine after every durable commit, with the commit's shape and the
+// trigger that closed its batch. It is what makes a durability assertion
+// attributable: FsyncCalls is a process-wide counter, so it can rise for a
+// commit that has nothing to do with the batch a caller just wrote.
+func (l *Ledger) SetFlushObserver(fn func(FlushEvent)) {
+	if l == nil || l.w == nil {
+		return
+	}
+	if fn == nil {
+		l.w.obs.Store(nil)
+		return
+	}
+	l.w.obs.Store(&flushObserver{fn: fn})
 }
 
 // maybeWriteHead refreshes the HEAD hint. HEAD is a hint, never a source of
@@ -933,6 +1001,7 @@ func (w *writer) writeOne(p *pending) {
 	w.fsyncCalls.Add(1)
 	w.cur.bytes += int64(len(line))
 	w.cur.records++
+	w.notifyFlush(FlushEvent{Trigger: FlushTriggerPerLine, Records: 1, SeqFrom: p.rec.Seq, SeqTo: p.rec.Seq})
 	w.lastSeq.Store(p.rec.Seq)
 	w.mu.Lock()
 	w.st.bytes = w.cur.bytes

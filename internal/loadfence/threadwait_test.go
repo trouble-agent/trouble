@@ -111,9 +111,40 @@ type waitPressure struct {
 // host by construction rather than by an absolute number that is generous on a
 // small runner and inert on a big one.
 func waitPressureLadder() []waitPressure {
-	ncpu := runtime.NumCPU()
+	return waitPressureLadderFor(runtime.NumCPU())
+}
+
+// Ladder floors (TRBL-139). Deriving every rung from NumCPU alone leaves a
+// small runner on exactly the regime that read inert at 051a199: a 2-core
+// runner tops out at 4 P / 10 competitors, which is a thread count the kernel
+// can schedule without ever enqueueing this thread, so the top rung can still
+// measure 0 ns and fail a correct instrument. The top rung therefore has an
+// ABSOLUTE floor as well as the proportional one — enough runnable threads that
+// a host of any size must time-slice them — while a large host keeps its
+// proportional rung and pays nothing extra for the floor.
+const (
+	// waitLadderTopProcsFloor is the smallest top-rung thread count. Eight OS
+	// threads is more than any runner this gate targets has cores, so the
+	// kernel must deschedule at least one of them.
+	waitLadderTopProcsFloor = 8
+	// waitLadderTopCompetitorsFloor is the smallest top-rung competitor queue.
+	// Twice the procs floor: the queue outlives one full time slice per thread.
+	waitLadderTopCompetitorsFloor = 16
+)
+
+// waitPressureLadderFor builds the ladder for an explicit core count so the
+// floor is unit-testable on a machine of any size (a 16-core dev box cannot
+// exercise the 2-core branch by running it).
+func waitPressureLadderFor(ncpu int) []waitPressure {
 	if ncpu < 2 {
 		ncpu = 2
+	}
+	topProcs, topCompetitors := ncpu+2, ncpu+8
+	if topProcs < waitLadderTopProcsFloor {
+		topProcs = waitLadderTopProcsFloor
+	}
+	if topCompetitors < waitLadderTopCompetitorsFloor {
+		topCompetitors = waitLadderTopCompetitorsFloor
 	}
 	return []waitPressure{
 		// The original shape, kept as the first rung: minimal pressure, so a
@@ -124,12 +155,60 @@ func waitPressureLadder() []waitPressure {
 		// One thread per core with a competitor queue as long as the thread
 		// pool: saturates the host's cores without oversubscribing them.
 		{name: fmt.Sprintf("%d P (NumCPU), %d competitors", ncpu, ncpu), gomaxprocs: ncpu, competitors: ncpu, window: 100 * time.Millisecond},
-		// Two runnable threads MORE than the host has cores — Go's own default
-		// thread count on this host, plus two — and a competitor queue longer
-		// than the thread pool, which is the regime where the kernel must
-		// time-slice a quiet box. Cost is what an ordinary Go program on this
-		// host already pays, for a quarter of a second.
-		{name: fmt.Sprintf("%d P (NumCPU+2), %d competitors", ncpu+2, ncpu+8), gomaxprocs: ncpu + 2, competitors: ncpu + 8, window: 250 * time.Millisecond},
+		// More runnable threads than the host has cores — Go's own default
+		// thread count on this host, plus two, floored so a small runner still
+		// oversubscribes — and a competitor queue longer than the thread pool,
+		// which is the regime where the kernel must time-slice a quiet box.
+		// Cost is what an ordinary Go program on this host already pays, for a
+		// quarter of a second.
+		{name: fmt.Sprintf("%d P (max(NumCPU+2, %d)), %d competitors (max(NumCPU+8, %d))", topProcs, waitLadderTopProcsFloor, topCompetitors, waitLadderTopCompetitorsFloor), gomaxprocs: topProcs, competitors: topCompetitors, window: 250 * time.Millisecond},
+	}
+}
+
+// TestWaitPressureLadderFloorsSmallHosts pins the TRBL-139 floor: the union of
+// a 2-core CI runner and a 16-core dev box must both end on a rung that
+// oversubscribes the host, and the ladder must stay bounded (cheapest-first,
+// three rungs, <= 390 ms of windows) so it can run inside a -short package.
+func TestWaitPressureLadderFloorsSmallHosts(t *testing.T) {
+	for _, tc := range []struct {
+		ncpu           int
+		wantProcsFloor int
+		wantCompFloor  int
+	}{
+		{1, waitLadderTopProcsFloor, waitLadderTopCompetitorsFloor},
+		{2, waitLadderTopProcsFloor, waitLadderTopCompetitorsFloor},
+		{4, waitLadderTopProcsFloor, waitLadderTopCompetitorsFloor},
+		{8, waitLadderTopProcsFloor, waitLadderTopCompetitorsFloor},
+		{16, 18, 24},
+		{64, 66, 72},
+	} {
+		ladder := waitPressureLadderFor(tc.ncpu)
+		if len(ladder) != 3 {
+			t.Fatalf("ncpu=%d: ladder has %d rungs, want 3 (bounded cost)", tc.ncpu, len(ladder))
+		}
+		top := ladder[len(ladder)-1]
+		if top.gomaxprocs < tc.wantProcsFloor || top.competitors < tc.wantCompFloor {
+			t.Fatalf("ncpu=%d: top rung is %d P / %d competitors, want at least %d P / %d competitors; a small runner would stay on the regime that read inert at 051a199",
+				tc.ncpu, top.gomaxprocs, top.competitors, tc.wantProcsFloor, tc.wantCompFloor)
+		}
+		// The rung has to oversubscribe the host it was built for, or the
+		// kernel has no reason to enqueue this thread.
+		if top.competitors <= top.gomaxprocs {
+			t.Fatalf("ncpu=%d: top rung competitors %d <= procs %d: the queue never outlives the thread pool", tc.ncpu, top.competitors, top.gomaxprocs)
+		}
+		var total time.Duration
+		for i, rung := range ladder {
+			total += rung.window
+			if rung.competitors <= 0 || rung.gomaxprocs <= 0 || rung.window <= 0 {
+				t.Fatalf("ncpu=%d: rung %d is degenerate: %+v", tc.ncpu, i, rung)
+			}
+			if i > 0 && rung.window < ladder[i-1].window {
+				t.Fatalf("ncpu=%d: rung %d window %s < rung %d window %s: the ladder must escalate, not de-escalate", tc.ncpu, i, rung.window, i-1, ladder[i-1].window)
+			}
+		}
+		if total > 400*time.Millisecond {
+			t.Fatalf("ncpu=%d: ladder windows total %s, want <= 400ms so the control stays inside a -short package", tc.ncpu, total)
+		}
 	}
 }
 

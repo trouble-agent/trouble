@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,54 @@ func TestStallCheckDeadHealthURLIsNotGreen(t *testing.T) {
 	}
 	if v.Class != "liveness_surface_unreadable" {
 		t.Errorf("class: got %q, want liveness_surface_unreadable", v.Class)
+	}
+}
+
+// TestStallCheckNamesTheURLItCouldNotReach pins the second half of TRBL-124: the
+// verdict for an unreachable --health-url has to name the surface that was not
+// contacted. The earlier fix honoured the URL but threw the fetch error away, so
+// an operator got a non-zero exit with no way to tell WHICH surface was down
+// (the local dashboard and the configured URL can point at different hosts).
+func TestStallCheckNamesTheURLItCouldNotReach(t *testing.T) {
+	cfg := stallSetup(t)
+	fresh := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := writeHeartbeat(cfg.Lifecycle.HeartbeatPath, types.Heartbeat{TS: fresh, LedgerLastSeq: 1, LedgerLastTS: fresh}); err != nil {
+		t.Fatal(err)
+	}
+	cfg.HealthURL = "http://127.0.0.1:1/health.json"
+
+	v, err := stallCheck(context.Background(), cfg, &http.Client{Timeout: time.Second}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Exit == 0 {
+		t.Fatalf("exit 0 against a DEAD configured health URL")
+	}
+	if !strings.Contains(v.Reason, cfg.HealthURL) {
+		t.Fatalf("reason %q does not name the configured health URL %q: an operator cannot tell which surface was unreachable", v.Reason, cfg.HealthURL)
+	}
+}
+
+// TestStallCheckNamesTheURLOnAStalledLedger covers the other verdict the operator
+// can actually see: when the heartbeat fallback carries a stale seq, the row is
+// a ledger_stall (009) whose message must ALSO carry the unreachable surface.
+func TestStallCheckNamesTheURLOnAStalledLedger(t *testing.T) {
+	cfg := stallSetup(t)
+	stale := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339Nano)
+	if err := writeHeartbeat(cfg.Lifecycle.HeartbeatPath, types.Heartbeat{TS: stale, LedgerLastSeq: 7, LedgerLastTS: stale}); err != nil {
+		t.Fatal(err)
+	}
+	cfg.HealthURL = "http://127.0.0.1:1/health.json"
+
+	v, err := stallCheck(context.Background(), cfg, &http.Client{Timeout: time.Second}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Exit == 0 {
+		t.Fatalf("exit 0 for a stalled ledger behind a dead health URL")
+	}
+	if !strings.Contains(v.Reason, cfg.HealthURL) {
+		t.Fatalf("reason %q does not name the configured health URL %q", v.Reason, cfg.HealthURL)
 	}
 }
 

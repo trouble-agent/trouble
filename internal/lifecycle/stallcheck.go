@@ -90,11 +90,25 @@ func stallCheck(ctx context.Context, cfg Config, client *http.Client, now time.T
 
 	health, ok, err := fetchHealth(ctx, cfg, client)
 	class := ""
+	// TRBL-124 (residual): the failure path threw `err` away, so an unreachable
+	// --health-url produced a verdict that never named the surface it could not
+	// reach — the second half of the row's acceptance criteria. Resolve the same
+	// URL fetchHealth used and carry the failure into whatever verdict is
+	// printed, including the heartbeat fallback and the ledger readings that
+	// follow it. An operator must be able to tell WHICH surface was unreachable
+	// from the alarm alone.
+	healthURL := resolvedHealthURL(cfg)
+	fetchReason := ""
 	if err != nil || !ok {
+		if err != nil {
+			fetchReason = fmt.Sprintf("health surface %s unreadable: %v", healthURL, err)
+		} else {
+			fetchReason = fmt.Sprintf("health surface %s returned no usable body", healthURL)
+		}
 		// fallback to heartbeat.json
 		hb, err2 := ReadHeartbeat(cfg.Lifecycle.HeartbeatPath)
 		if err2 != nil {
-			return Verdict{Class: "heartbeat_stale", Code: string(types.CodeLifecycle008), Exit: 8, Reason: "health and heartbeat unreadable"}, nil
+			return Verdict{Class: "heartbeat_stale", Code: string(types.CodeLifecycle008), Exit: 8, Reason: fetchReason + "; heartbeat unreadable"}, nil
 		}
 		health = types.HealthResponse{
 			LedgerLastSeq: hb.LedgerLastSeq,
@@ -135,7 +149,7 @@ func stallCheck(ctx context.Context, cfg Config, client *http.Client, now time.T
 			Exit:        9,
 			SeqAgeS:     seqAge,
 			BreachCount: st.BreachCount,
-			Reason:      fmt.Sprintf("seq %d unchanged for %.0fs", health.LedgerLastSeq, seqAge),
+			Reason:      ledgerStallReason(fetchReason, health.LedgerLastSeq, seqAge),
 		}
 		st.Seq = health.LedgerLastSeq
 		st.TS = health.LedgerLastTS
@@ -162,9 +176,33 @@ func stallCheck(ctx context.Context, cfg Config, client *http.Client, now time.T
 	st.LastCheckTS = types.NowUTC()
 	var v Verdict
 	if class != "" {
-		v = Verdict{Class: class, Code: string(types.CodeLifecycle008), Exit: 8, SeqAgeS: seqAge}
+		v = Verdict{Class: class, Code: string(types.CodeLifecycle008), Exit: 8, SeqAgeS: seqAge, Reason: fetchReason}
 	}
 	return v, saveCheckerState(cfg.Checker.StateFile, st)
+}
+
+// ledgerStallReason names the ledger reading AND, when the health surface that
+// was supposed to produce it could not be reached, the surface itself. Without
+// it an operator sees "seq unchanged" for a checker that never contacted the
+// URL it was pointed at (TRBL-124).
+func ledgerStallReason(fetchReason string, seq uint64, seqAgeS float64) string {
+	reason := fmt.Sprintf("seq %d unchanged for %.0fs", seq, seqAgeS)
+	if fetchReason != "" {
+		return fetchReason + "; " + reason
+	}
+	return reason
+}
+
+// resolvedHealthURL is the single place that decides which health surface the
+// stall checker contacts: the configured --health-url / config health_url when
+// set, otherwise the local dashboard bind. fetchHealth and the failure verdict
+// both call it, so the URL a failure NAMES is always the URL that was tried
+// (TRBL-124).
+func resolvedHealthURL(cfg Config) string {
+	if url := strings.TrimSpace(cfg.HealthURL); url != "" {
+		return url
+	}
+	return "http://" + cfg.Dashboard.Bind + "/health.json"
 }
 
 func fetchHealth(ctx context.Context, cfg Config, client *http.Client) (types.HealthResponse, bool, error) {
@@ -175,10 +213,7 @@ func fetchHealth(ctx context.Context, cfg Config, client *http.Client) (types.He
 	// remote endpoint and you got a green verdict for a URL that was never
 	// contacted: the operator believes they monitored one surface while the
 	// checker watched another.
-	url := strings.TrimSpace(cfg.HealthURL)
-	if url == "" {
-		url = "http://" + cfg.Dashboard.Bind + "/health.json"
-	}
+	url := resolvedHealthURL(cfg)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return types.HealthResponse{}, false, err

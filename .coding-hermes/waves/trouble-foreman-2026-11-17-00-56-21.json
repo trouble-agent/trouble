@@ -1,0 +1,52 @@
+{
+  "tick": "trouble-foreman-2026-11-17-00-56-21",
+  "base": "92e9aaf",
+  "budget": 5,
+  "workers": 3,
+  "wave": [
+    {
+      "id": "DOC-24",
+      "title": "configuration reference generated from the CLI, with a drift gate",
+      "worktree": "/home/kara/worktrees/trouble-DOC-24",
+      "branch": "wt/DOC-24",
+      "base_sha": "92e9aaf",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "max_turns": 1500
+    },
+    {
+      "id": "DOC-27",
+      "title": "near-miss hints: make the two pages' claim true of the binary",
+      "worktree": "/home/kara/worktrees/trouble-DOC-27",
+      "branch": "wt/DOC-27",
+      "base_sha": "92e9aaf",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "max_turns": 1200
+    },
+    {
+      "id": "INT-CI-7-R2",
+      "title": "boot batch boundary must be one durable commit under a 3G cap",
+      "worktree": "/home/kara/worktrees/trouble-INT-CI-7-R2",
+      "branch": "wt/INT-CI-7-R2",
+      "base_sha": "92e9aaf",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "max_turns": 1500
+    }
+  ],
+  "excluded": [
+    {
+      "id": "QA-TROUBLE-17-R3-R2-R2",
+      "why": "perf budget root cause needs a quiet grading box to be trusted; this host is at load 26-35 (hermes state.db backup: sqlite .dump + xz -T0, running since 18:00Z, plus the duckbrain vitest battery). Excluded again by measurement, not by taste. The lane AC ends on a clean 8-vCPU bytes-per-req cell, which is a QA-lane measurement anyway."
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-2",
+      "why": "blocked: bunker-mvp root filesystem measured 95% (137G/150G, 7.6G free) at 2026-11-17T05:40Z; the launch threshold is 94%. Reclamation is the QA lane's act, disk-free runs elsewhere."
+    },
+    {
+      "id": "QA-TROUBLE-REVIEW-2",
+      "why": "same bunker-mvp disk block as QA-TROUBLE-DOCS-2 (95% measured)."
+    }
+  ]
+}

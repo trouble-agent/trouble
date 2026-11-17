@@ -596,3 +596,6 @@
 {"id":591,"timestamp":"2026-11-16T18:39:58Z","event_type":"task_dispatched","task_id":"QA-TROUBLE-030","actor":"foreman","detail":"wave trouble-foreman-2026-11-16-18-21-04: 1-worker serial wave (WAVE_BUDGET=1); worktree /home/kara/worktrees/trouble-QA-TROUBLE-030 branch wt/QA-TROUBLE-030 base a12a86e; worker openai/gpt-6.1-terra@xkiro","marker":null}
 {"id":592,"timestamp":"2026-11-16T18:41:38Z","event_type":"task_updated","task_id":"INT-CI-7-R2","actor":"foreman","detail":"{\"status\":\"pending\"}","marker":null}
 {"id":593,"timestamp":"2026-11-16T20:31:23Z","event_type":"task_completed","task_id":"QA-TROUBLE-030","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":594,"timestamp":"2026-11-17T01:20:48Z","event_type":"task_updated","task_id":"DOC-24","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":595,"timestamp":"2026-11-17T01:20:48Z","event_type":"task_updated","task_id":"DOC-27","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":596,"timestamp":"2026-11-17T01:20:48Z","event_type":"task_updated","task_id":"INT-CI-7-R2","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}

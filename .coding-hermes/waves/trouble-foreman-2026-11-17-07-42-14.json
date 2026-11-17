@@ -1,0 +1,46 @@
+{
+  "tick": "trouble-foreman-2026-11-17-07-42-14",
+  "base": "db132d9",
+  "budget": 10,
+  "workers": 1,
+  "resumed_waves": [
+    {
+      "wave": "trouble-foreman-2026-11-17-00-56-21",
+      "resumed_at": "2026-11-17T07:42:14Z",
+      "outcome": {
+        "DOC-24": "merged b6498b9 (worker had committed, merge never ran); lifecycle+cmd tests green on the merged tree",
+        "DOC-27": "merged 1971208 after a mechanical docs/operations.md union; lifecycle+app+cmd tests green",
+        "INT-CI-7-R2": "worker left an uncommitted 393-line tree; gated it (4/4 TestBootBatch PASS), committed 7382a56 in-worktree, merged db132d9"
+      }
+    }
+  ],
+  "wave": [
+    {
+      "id": "QA-TROUBLE-17-R3-R2-R2",
+      "title": "perf-budget calibration: contention scaled by the host's own core count",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R3-R2-R2",
+      "branch": "wt/QA-TROUBLE-17-R3-R2-R2",
+      "base_sha": "92e9aaf",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "max_turns": 1200
+    }
+  ],
+  "excluded": [
+    {"id": "QA-TROUBLE-DOCS-1", "why": "routed to qa-foreman: harness launch defect in bunker-qa.sh"},
+    {"id": "QA-TROUBLE-REVIEW-1", "why": "routed to qa-foreman: launch identity binding in the harness driver"},
+    {"id": "QA-TROUBLE-README-10", "why": "routed to qa-foreman: second collect pass is a harness act"},
+    {"id": "QA-TROUBLE-DOCS-2", "why": "routed to qa-foreman; its disk blocker is CLEARED (bunker-mvp / 78%, 33G free, measured this tick)"},
+    {"id": "QA-TROUBLE-REVIEW-2", "why": "routed to qa-foreman; same cleared disk gate"},
+    {"id": "QA-TROUBLE-DOCS-003/004/005", "why": "routed to qa-foreman: battery cell defects (DOCKER_HOST order, GOTOOLCHAIN pin, /tmp state root)"},
+    {"id": "QA-TROUBLE-26", "why": "routed to qa-foreman: ui-probe port list + JIT token store"},
+    {"id": "QA-TROUBLE-27", "why": "routed to qa-foreman: collect single-attempt abort"},
+    {"id": "QA-TROUBLE-28", "why": "routed to qa-foreman / fleet script hygiene: qa ledger appender lives in ~/.hermes, not this repo"},
+    {"id": "TRBL-122", "why": "routed to qa-foreman: fleet-class bunker-qa.sh lock silence"},
+    {"id": "TRBL-133", "why": "routed to the dogfood lane: battery terminalization + evidence retention are harness acts"},
+    {"id": "RELEASE-012", "why": "routed to releng: cut/no-cut is releng's decision; first publication is owner-gated"},
+    {"id": "TRBL-135", "why": "routed to gitreins upstream: tier-2 artifact/ceiling live in the tool; TRBL-132 holds the config half"},
+    {"id": "QA-TROUBLE-17-R3", "why": "consolidated into -R3-R2-R2 (one defect, one row)"},
+    {"id": "QA-TROUBLE-17-R3-R2", "why": "consolidated into -R3-R2-R2 (one defect, one row)"}
+  ]
+}

@@ -22,10 +22,12 @@ Re-running the generator on this tree produces no diff.
 * **default** — the built-in default: what a host with no config file, no
   `TROUBLE_*` variable and no key flag runs. Paths are written as templates
   (`${XDG_STATE_HOME:-~/.local/state}`, `~`) rather than one host's paths, so the
-  cell is the same bytes on every host.
+  cell is the same bytes on every host; the page is rendered under a pinned
+  `HOME` and `XDG_*` environment, so a host that leaves them unset changes no
+  cell either.
 * **from** — the layer that supplied the value printed on this page. It reads
   `default` on every row: the page is generated against an absent config file with
-  no environment and no key flag, so the built-in default is always what won.
+  no `TROUBLE_*` variable and no key flag, so the built-in default is always what won.
   `trouble config explain` on a configured host reports `file`, `env` or `flag` for
   the keys that host overrides.
 * **meaning** — what the key does to the running daemon, not a restatement of its

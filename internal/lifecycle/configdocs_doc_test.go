@@ -112,6 +112,101 @@ func TestConfigReferenceMatchesGenerator(t *testing.T) {
 		configDocsPath, len(gotLines), len(wantLines), configDocsPath)
 }
 
+// TestConfigReferenceIsHostIndependent takes the page's own header claim — "a
+// host with no config file, no TROUBLE_* variable and no key flag" produces the
+// documented defaults — literally: the bytes must not depend on the environment
+// the generator ran in.
+//
+// This is the class the first cut of the generator missed. Its default cells
+// came out of the resolver, which reads HOME, XDG_STATE_HOME, XDG_CONFIG_HOME
+// and XDG_RUNTIME_DIR; with HOME unset the resolver falls back to
+// /var/lib/trouble and /etc/trouble, and those two literals are not templates,
+// so eight cells said something different from what the same generator printed
+// on a host with a home directory. The test renders the page once under this
+// process's inherited environment (the way the CLI and the drift gate run) and
+// then under four others, and requires one set of bytes from all of them.
+func TestConfigReferenceIsHostIndependent(t *testing.T) {
+	// Baseline: whatever this process inherited, untouched. This is the "as
+	// today" half of the criterion, and it is also what the drift gate compares
+	// the committed page against.
+	baseline, err := ConfigReferenceMarkdown()
+	if err != nil {
+		t.Fatalf("generate under the inherited environment: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{"home-set", map[string]string{"HOME": "/home/operator"}},
+		{"home-unset", map[string]string{}},
+		{"other-home", map[string]string{"HOME": "/tmp/someotherhome"}},
+		{"unusual-xdg", map[string]string{
+			"HOME":            "/home/operator",
+			"XDG_STATE_HOME":  "/opt/unusual/state",
+			"XDG_CONFIG_HOME": "/opt/unusual/config",
+		}},
+	}
+
+	// Host strings that must never survive into a cell: the bare-host fallbacks
+	// this generator must not print, and the sentinel the pinning uses, which a
+	// value escaping template() would leak verbatim.
+	forbidden := []string{"/var/lib/trouble", "/etc/trouble", configDocPinnedHome}
+	if home := os.Getenv("HOME"); home != "" && home != "/" {
+		forbidden = append(forbidden, home)
+	}
+
+	for _, c := range cases {
+		// Control every variable the defaults and the templating read, one
+		// variable at a time: an inherited value left in place would make the
+		// case test this host instead of the code. An empty value is the way to
+		// clear one for the duration of a test (t.Setenv restores it after).
+		for _, name := range []string{"HOME", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR"} {
+			t.Setenv(name, "")
+		}
+		for name, value := range c.env {
+			t.Setenv(name, value)
+		}
+
+		got, err := ConfigReferenceMarkdown()
+		if err != nil {
+			t.Fatalf("%s: generate: %v", c.name, err)
+		}
+		for _, leak := range append(forbidden, caseValues(c.env)...) {
+			if strings.Contains(got, leak) {
+				t.Fatalf("%s: the page carries the host path %q; a default cell must be a template, not this host's directory", c.name, leak)
+			}
+		}
+		if got != baseline {
+			t.Fatalf("%s: the page is not the same bytes as under the inherited environment (%s)", c.name, configDocsFirstDiff(got, baseline))
+		}
+	}
+}
+
+// caseValues returns one case's environment values, for the leak scan.
+func caseValues(env map[string]string) []string {
+	out := make([]string, 0, len(env))
+	for _, v := range env {
+		if len(v) > 1 {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// configDocsFirstDiff names the first line where two renderings disagree: a
+// whole-page diff is not a usable failure message.
+func configDocsFirstDiff(got, want string) string {
+	gotLines := strings.Split(got, "\n")
+	wantLines := strings.Split(want, "\n")
+	for i := 0; i < len(gotLines) && i < len(wantLines); i++ {
+		if gotLines[i] != wantLines[i] {
+			return fmt.Sprintf("line %d:\n  this environment: %q\n  baseline:         %q", i+1, gotLines[i], wantLines[i])
+		}
+	}
+	return fmt.Sprintf("%d lines against %d", len(gotLines), len(wantLines))
+}
+
 // TestConfigReferenceCoversRegistry fails when the page and the registry
 // disagree in either direction, and when the count the page states is not the
 // count the binary actually exposes.

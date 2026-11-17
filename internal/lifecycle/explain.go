@@ -56,6 +56,14 @@ func WriteConfigRecord(w RecordWriter, r Resolved) error {
 			break
 		}
 	}
+	// payload.hint carries every stray TROUBLE_* name the environment set to
+	// something that is not a registry key (SPEC-12 §3.1: ignored but recorded),
+	// with the real variable attached when the name is within edit distance 2 of
+	// one. Rows are {name, hint} only — the stray VALUE is a plausibly-typed
+	// secret and is deliberately absent, both here and in the boot WARN.
+	if hints := r.EnvHints(); len(hints) > 0 {
+		payload["hint"] = hints
+	}
 	_, err := w.Append(context.Background(), types.RecordDraft{
 		Kind:    types.KConfig,
 		Actor:   Actor(types.ActorDaemon, "troubled"),

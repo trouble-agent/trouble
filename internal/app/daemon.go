@@ -177,6 +177,21 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 1b. the unknown-environment hint (SPEC-12 §3.1). A stray TROUBLE_* name
+	// is ignored — never fatal, no behaviour change — but a name that is within
+	// edit distance 2 of a real variable is a typo, and a typo must not be
+	// silent: this is the path a plaintext secret takes when it is written into
+	// a name that only looks like the secret variable the operator meant. One
+	// WARN per near-miss, emitted before any later step can refuse the boot,
+	// naming the variable the operator set and the real one it resembles. An
+	// unrelated stray name carries no hint and stays silent. The value is never
+	// logged, here or in the record: the name is the diagnostic.
+	for _, h := range res.EnvHints() {
+		if h.Hint == "" {
+			continue
+		}
+		log.Warn("unknown env key", "name", h.Name, "did_you_mean", h.Hint)
+	}
 	cfg := res.Config
 	// origin.host_id is the stable host identity SPEC-12 §3.7 requires (a derived
 	// id, never the hostname): the whole cross-host dedup path keys on it, so a

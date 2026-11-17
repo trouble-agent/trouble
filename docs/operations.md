@@ -1164,8 +1164,13 @@ generated from the `ErrorCode` declarations and gated by
 **Config precedence.** flag > env > file > default. `trouble config explain` prints
 one row per key with its source and source_ref; secret-class keys are replaced by
 `[REDACTED:config]`. There is no reveal flag. Unknown keys in the config file are
-fatal (TROUBLE-LIFECYCLE-001); stray `TROUBLE_*` environment variables are ignored
-with a near-miss hint when the name is close to a real key.
+fatal (TROUBLE-LIFECYCLE-001).
+Stray `TROUBLE_*` env keys are never fatal: each is ignored and recorded in the boot `config` record (`payload.hint`), and a near-miss name (within edit distance 2 of a real variable) gets one boot WARN naming the variable it resembles.
+
+The authoritative list of real names — the derived twin of every config key plus
+the literal exceptions — is [docs/reference/env-vars.md](reference/env-vars.md).
+Check a name against it rather than waiting for a hint: an unrelated stray name is
+recorded but silent, and no hint of any kind replaces reading the list.
 
 **State root.** The daemon refuses to start if `state_root` resolves under `/tmp`
 or `/var/tmp`, is on a remote filesystem, or is not `0700`. Secret-bearing files

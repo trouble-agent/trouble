@@ -18,7 +18,6 @@ package lifecycle
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -107,9 +106,18 @@ const configDocPathSecret = "secrets.environment_file"
 //
 //	go run ./cmd/trouble config explain --markdown > docs/reference/config.md
 //
-// and re-running it on an unchanged tree produces no diff — the drift gate
-// compares the committed file against this function's output byte for byte.
+// and re-running it on an unchanged tree produces no diff on ANY host: the page
+// is rendered under the pinned environment in configDocPinnedEnv, so an unset
+// HOME or another operator's XDG layout cannot move a default cell. The drift
+// gate compares the committed file against this function's output byte for byte.
 func ConfigReferenceMarkdown() (string, error) {
+	return withPinnedDocEnv(configReferenceMarkdown)
+}
+
+// configReferenceMarkdown is ConfigReferenceMarkdown under the pinned
+// environment: every read of HOME/XDG_* the resolver and the renderer perform
+// sees the sentinels, and nothing here sees this host's values.
+func configReferenceMarkdown() (string, error) {
 	res, err := Resolve(nil, []string{}, configReferenceAbsentPath)
 	if err != nil {
 		return "", fmt.Errorf("config reference: resolve defaults: %w", err)
@@ -189,7 +197,7 @@ func renderConfigReference(rows []types.ConfigValue, cfg Config) (string, error)
 	}
 
 	var b strings.Builder
-	paths := configDocPathsFor()
+	paths := configDocPathsPinned()
 
 	fmt.Fprintf(&b, "# Configuration reference\n\n")
 	fmt.Fprintf(&b, "Every configuration key the binary exposes at HEAD, grouped by TOML table.\n")
@@ -211,10 +219,12 @@ func renderConfigReference(rows []types.ConfigValue, cfg Config) (string, error)
 	fmt.Fprintf(&b, "* **default** — the built-in default: what a host with no config file, no\n")
 	fmt.Fprintf(&b, "  `TROUBLE_*` variable and no key flag runs. Paths are written as templates\n")
 	fmt.Fprintf(&b, "  (`${XDG_STATE_HOME:-~/.local/state}`, `~`) rather than one host's paths, so the\n")
-	fmt.Fprintf(&b, "  cell is the same bytes on every host.\n")
+	fmt.Fprintf(&b, "  cell is the same bytes on every host; the page is rendered under a pinned\n")
+	fmt.Fprintf(&b, "  `HOME` and `XDG_*` environment, so a host that leaves them unset changes no\n")
+	fmt.Fprintf(&b, "  cell either.\n")
 	fmt.Fprintf(&b, "* **from** — the layer that supplied the value printed on this page. It reads\n")
 	fmt.Fprintf(&b, "  `default` on every row: the page is generated against an absent config file with\n")
-	fmt.Fprintf(&b, "  no environment and no key flag, so the built-in default is always what won.\n")
+	fmt.Fprintf(&b, "  no `TROUBLE_*` variable and no key flag, so the built-in default is always what won.\n")
 	fmt.Fprintf(&b, "  `trouble config explain` on a configured host reports `file`, `env` or `flag` for\n")
 	fmt.Fprintf(&b, "  the keys that host overrides.\n")
 	fmt.Fprintf(&b, "* **meaning** — what the key does to the running daemon, not a restatement of its\n")
@@ -285,30 +295,94 @@ func configDocGroup(key string) string {
 }
 
 // configDocPaths are the three host directories the generated page templates
-// away: the two XDG bases and the home directory. They are read from the same
-// environment the defaults use, so a host that sets XDG_STATE_HOME or
-// XDG_CONFIG_HOME still produces the same bytes as one that does not.
+// away: the two XDG bases and the home directory.
 type configDocPaths struct {
 	home       string
 	stateBase  string
 	configBase string
 }
 
-// configDocPathsFor reads the directories to template from the environment.
-func configDocPathsFor() configDocPaths {
-	home, err := os.UserHomeDir()
+// configDocPinned* are the directories the page is rendered under.
+//
+// They are constants, not a read of this host's environment, because the
+// default cells come out of the same environment the daemon's defaults read
+// (defaultStateRoot, defaultConfigPath, defaultEnvFile). A generator that read
+// the ambient environment prints one host's paths — and with HOME unset the
+// resolver falls back to /var/lib/trouble and /etc/trouble, literals that no
+// template removes, so those cells would say "this is the default on a host
+// with no home" on a bare host and "~/.local/state/trouble" everywhere else.
+// Rendering under these sentinels makes the page a function of the code alone:
+// every absolute path the defaults produce starts with one of them, and
+// template() turns them back into the documented ~/${XDG_*} forms.
+const (
+	configDocPinnedHome    = "/nonexistent/trouble-config-reference/home"
+	configDocPinnedState   = configDocPinnedHome + "/.local/state"
+	configDocPinnedConfig  = configDocPinnedHome + "/.config"
+	configDocPinnedRuntime = "/nonexistent/trouble-config-reference/run"
+)
+
+// configDocPinnedEnv is the environment ConfigReferenceMarkdown renders under.
+// XDG_RUNTIME_DIR is here for the same reason the paths are: the systemd_scope
+// default reads it, so the same tree generated from a login shell and from cron
+// would otherwise print `user` and `system` for the same key.
+var configDocPinnedEnv = []struct{ name, value string }{
+	{"HOME", configDocPinnedHome},
+	{"XDG_STATE_HOME", configDocPinnedState},
+	{"XDG_CONFIG_HOME", configDocPinnedConfig},
+	{"XDG_RUNTIME_DIR", configDocPinnedRuntime},
+}
+
+// withPinnedDocEnv runs fn with configDocPinnedEnv applied, restoring the
+// caller's environment afterwards even when fn fails.
+func withPinnedDocEnv(fn func() (string, error)) (string, error) {
+	restore, err := pinDocEnv()
 	if err != nil {
-		home = ""
+		return "", err
 	}
-	stateBase := os.Getenv("XDG_STATE_HOME")
-	if stateBase == "" && home != "" {
-		stateBase = filepath.Join(home, ".local", "state")
+	defer restore()
+	return fn()
+}
+
+// pinDocEnv applies configDocPinnedEnv and returns its undo. The undo restores
+// the exact previous state: a variable this host had unset is unset again, not
+// left as the empty string.
+func pinDocEnv() (func(), error) {
+	type saved struct {
+		name  string
+		value string
+		set   bool
 	}
-	configBase := os.Getenv("XDG_CONFIG_HOME")
-	if configBase == "" && home != "" {
-		configBase = filepath.Join(home, ".config")
+	prev := make([]saved, 0, len(configDocPinnedEnv))
+	restore := func() {
+		for _, s := range prev {
+			if s.set {
+				_ = os.Setenv(s.name, s.value)
+				continue
+			}
+			_ = os.Unsetenv(s.name)
+		}
 	}
-	return configDocPaths{home: home, stateBase: stateBase, configBase: configBase}
+	for _, e := range configDocPinnedEnv {
+		v, ok := os.LookupEnv(e.name)
+		prev = append(prev, saved{name: e.name, value: v, set: ok})
+		if err := os.Setenv(e.name, e.value); err != nil {
+			restore()
+			return nil, fmt.Errorf("config reference: pin %s: %w", e.name, err)
+		}
+	}
+	return restore, nil
+}
+
+// configDocPathsPinned returns the directories template() rewrites. They are
+// the pinned sentinels above and never a read of the environment: the templating
+// and the pinning have to name the same strings, and a host value here would
+// leave a cell silently carrying this host's path.
+func configDocPathsPinned() configDocPaths {
+	return configDocPaths{
+		home:       configDocPinnedHome,
+		stateBase:  configDocPinnedState,
+		configBase: configDocPinnedConfig,
+	}
 }
 
 // template replaces the generating host's directories with the templates the

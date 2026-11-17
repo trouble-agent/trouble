@@ -354,3 +354,7 @@ unknown env keys are ignored silently (no near-miss hint, no warning).
 Every `TROUBLE_*` variable — the derived twin of each config key plus the
 literal exceptions — is documented in
 [docs/reference/env-vars.md](../docs/reference/env-vars.md).
+
+Every configuration key — its type, built-in default and operator meaning — is
+in [docs/reference/config.md](../docs/reference/config.md), generated from
+`trouble config explain --markdown` and drift-checked by a Go test.

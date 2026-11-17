@@ -1161,11 +1161,15 @@ first operator action in [docs/reference/error-codes.md](reference/error-codes.m
 generated from the `ErrorCode` declarations and gated by
 `go test ./internal/types/ -run TestErrorCodeReference`.
 
-**Config precedence.** flag > env > file > default. `trouble config explain` prints
-one row per key with its source and source_ref; secret-class keys are replaced by
-`[REDACTED:config]`. There is no reveal flag. Unknown keys in the config file are
-fatal (TROUBLE-LIFECYCLE-001); stray `TROUBLE_*` environment variables are ignored
-with a near-miss hint when the name is close to a real key.
+**Config keys.** Every registered key — its type, built-in default and operator
+meaning — is a row in the generated
+[configuration reference](reference/config.md), which is also where the
+precedence statement is quoted; `state_root` below is one of its rows.
+`trouble config explain` prints one row per key with its source and source_ref;
+secret-class keys are replaced by `[REDACTED:config]`. There is no reveal flag.
+Unknown keys in the config file are fatal (TROUBLE-LIFECYCLE-001); stray
+`TROUBLE_*` environment variables are ignored with a near-miss hint when the name
+is close to a real key.
 
 **State root.** The daemon refuses to start if `state_root` resolves under `/tmp`
 or `/var/tmp`, is on a remote filesystem, or is not `0700`. Secret-bearing files

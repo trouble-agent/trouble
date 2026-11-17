@@ -294,9 +294,12 @@ quickstart documents its loopback `?sentry_key=<public_key>` authentication form
 * [docs/reference/env-vars.md](docs/reference/env-vars.md) — the `TROUBLE_*`
   environment surface: the derivation rule, the full key-to-variable table, the
   literal exceptions the config registry does not derive, the `*_env` secret
-  indirection and the precedence (`flag > env > file > default`) that
-  `trouble config explain` reports, enforced by
-  `internal/lifecycle/envdocs_doc_test.go`.
+  indirection and the precedence that `trouble config explain` reports, enforced
+  by `internal/lifecycle/envdocs_doc_test.go`.
+* [docs/reference/config.md](docs/reference/config.md) — every configuration key,
+  grouped by TOML table, with its type, built-in default and operator meaning;
+  generated from `trouble config explain --markdown` and drift-checked by
+  `internal/lifecycle/configdocs_doc_test.go`.
 * [docs/reference/error-codes.md](docs/reference/error-codes.md) — every
   `TROUBLE-*` code the daemon can emit, grouped by family, each with its class
   (`permanent` / `transient`) and the operator action it implies; generated from

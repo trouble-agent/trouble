@@ -479,8 +479,22 @@ func cmdConfig(args []string) int {
 	registerStateRootFlags(fs)
 	key := fs.String("key", "", "show these keys only (comma-separated)")
 	asJSON := fs.Bool("json", false, "machine-readable ConfigValue[]")
+	asMarkdown := fs.Bool("markdown", false, "the generated configuration reference (docs/reference/config.md)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
+	}
+	if *asMarkdown {
+		if *key != "" || *asJSON {
+			fmt.Fprint(os.Stderr, "config explain: --markdown writes the whole reference; drop --key and --json\n")
+			return 2
+		}
+		doc, err := lifecycle.ConfigReferenceMarkdown()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "config explain: %v\n", err)
+			return 13
+		}
+		fmt.Print(doc)
+		return 0
 	}
 	res, code := resolve(fs.Args())
 	if code != 0 {

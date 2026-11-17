@@ -900,8 +900,8 @@ func TestBudgetDashboardScaling(t *testing.T) {
 		// tightens a budget below the reference number.
 		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 0.5, Load: 0}, 20 * time.Millisecond},
 		// Busy reference-class box: 1 × (1 + 19/16) → the 2× ceiling.
-		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 19}, 40 * time.Millisecond},
-		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 80}, 40 * time.Millisecond}, // the ceiling
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 19, Cores: loadfence.CalibReferenceCores}, 40 * time.Millisecond},
+		{loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 80, Cores: loadfence.CalibReferenceCores}, 40 * time.Millisecond}, // the ceiling
 	}
 	for _, c := range renderCases {
 		if got := dashboardRenderBudget(c.prof); got != c.want {
@@ -919,10 +919,10 @@ func TestBudgetDashboardScaling(t *testing.T) {
 		// Blip in the pilot: clamp at the reference floor.
 		{loadfence.Profile{CPUMultiple: 0.5, Load: 0}, 90},
 		// Busy reference-class box: 90 / (1 + 19/16) = 90 / 2.1875 = 41.1.
-		{loadfence.Profile{CPUMultiple: 1, Load: 19}, 41.142857142857},
+		{loadfence.Profile{CPUMultiple: 1, Load: 19, Cores: loadfence.CalibReferenceCores}, 41.142857142857},
 		// Clamps: 90 / 3.9375 = 22.9 → the 0.4× floor; deep oversubscription.
-		{loadfence.Profile{CPUMultiple: 1, Load: 31}, 40},
-		{loadfence.Profile{CPUMultiple: 1, Load: 80}, 40},
+		{loadfence.Profile{CPUMultiple: 1, Load: 31, Cores: loadfence.CalibReferenceCores}, 40},
+		{loadfence.Profile{CPUMultiple: 1, Load: 80, Cores: loadfence.CalibReferenceCores}, 40},
 	}
 	for _, c := range rpsCases {
 		if got := dashboardRPSFloor(c.prof); math.Abs(got-c.want) > 0.01 {
@@ -1059,7 +1059,7 @@ func TestBudgetDashboardLoadFenceIsForceable(t *testing.T) {
 	if !loadfence.Oversubscribed(loadAvgDashboard()) {
 		t.Fatalf("load 50 does not cross the %v fence: the forced SKIP path is unreachable", loadfence.FenceLoadAvg)
 	}
-	// 2 × (1 + 50/16) = 8.25 → the 40 ms ceiling.
+	// 2 × (1 + 50/host cores) → past the ceiling; the ceiling is what is asserted.
 	if got, want := dashboardRenderBudget(prof), 2*renderP99; got != want {
 		t.Errorf("dashboardRenderBudget(forced) = %v; want the %v ceiling", got, want)
 	}

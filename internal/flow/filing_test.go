@@ -228,7 +228,11 @@ func TestDedupRowsScaling(t *testing.T) {
 		{8, 120, 200},  // slow and heavily contended still floors at 200
 	}
 	for _, c := range cases {
-		prof := loadfence.Profile{IOMultiple: c.io, CPUMultiple: 1, Load: c.load}
+		// Cores pinned to the reference host: the expectations below are that
+		// host's arithmetic, and a fixture must not move with the CI runner's
+		// vCPU count (QA-TROUBLE-17: contention divides by the measuring
+		// host's cores, so a Profile that leaves Cores zero means "this box").
+		prof := loadfence.Profile{IOMultiple: c.io, CPUMultiple: 1, Load: c.load, Cores: loadfence.CalibReferenceCores}
 		if got := dedupRowsForHost(prof); got != c.want {
 			t.Errorf("dedupRowsForHost(io %.2f, load %.2f) = %d, want %d (scale %.4f)",
 				c.io, c.load, got, c.want, prof.Scale())

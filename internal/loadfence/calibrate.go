@@ -5,8 +5,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,15 +31,27 @@ import (
 //	              durability pilot (fsync 16 x 4 KiB blocks), each expressed as
 //	              a multiple of the reference host's own numbers from SPEC-01
 //	              §1 (blockSize 1421 MiB/s, fsync p50 2.0 ms, p95 2.5 ms).
-//	CPUMultiple — a fixed integer pilot, expressed as a multiple of the
-//	              reference class's cost. It does not know which box is quiet or
-//	              busy; it knows what one unit of work costs here.
+//	CPUMultiple — a MIXED pilot (a tight integer loop plus an allocation
+//	              phase, a mutex-contention phase and a cache-line-strided
+//	              memory sweep), expressed as a multiple of the reference
+//	              class's cost. It does not know which box is quiet or busy; it
+//	              knows what one unit of mixed gated work costs here. A tight
+//	              integer loop alone is blind to the allocation-, lock- and
+//	              memory-bound cost that dominates the gated workloads, and read
+//	              an 8-vCPU host FASTER than the reference while that host ran
+//	              them ~3x slower (QA-TROUBLE-17).
 //
 // Load is still carried, because a descheduled box is a genuine cause of a slow
 // measurement, so a budget is scaled by the host's own throughput AND by the
-// contention it is running under:
+// contention it is running under. Contention is divided by the core count of
+// the host doing the measuring, NOT by the reference host's 16: an 8-vCPU box
+// at load 3.45 is 0.43 runnable threads per core, so it is 1.43x descheduled —
+// dividing by the reference count instead priced that same box at 1.22x and
+// left the small boxes these batteries run on systematically under-loosened
+// (QA-TROUBLE-17: four clean-machine batteries graded red against hosted CI
+// green at one SHA, from this denominator alone).
 //
-//	scale = max(1, IOMultiple) x (1 + load_avg_1m / CalibReferenceCores)
+//	scale = max(1, IOMultiple) x (1 + load_avg_1m / host cores)
 //
 // Everything is clamped so a host can only ever LOOSEN a budget relative to the
 // reference numbers, never tighten it: a budget the reference host meets must
@@ -52,7 +66,12 @@ const (
 	EnvCalibOverride = "TROUBLE_HOST_CALIB"
 
 	// CalibReferenceCores is the core count the reference host's measurements
-	// were taken on (SPEC-01 §1: kernel 7.0.0-30-generic, 16 cores).
+	// were taken on (SPEC-01 §1: kernel 7.0.0-30-generic, 16 cores). It is the
+	// REFERENCE BASELINE — the class the pilots' absolute costs and the spec
+	// floors describe. It is NEVER the contention divisor: contention is
+	// divided by the measuring host's own cores (Profile.CoreCount), because
+	// load_avg_1m counts that host's runnable threads, not the reference
+	// host's (QA-TROUBLE-17).
 	CalibReferenceCores = 16
 
 	// The I/O pilot's shape and the reference host's cost for it. SPEC-01 §1
@@ -64,12 +83,39 @@ const (
 	refWriteMiBs      = 1421.0
 	refFsyncMillis    = 2.0
 
-	// ComputeOps sizes the CPU pilot. Sized for ~30 ms on the reference class:
-	// long enough that the timing is not dominated by clock resolution and short
-	// enough to pay once per test binary, and run best-of-3 so a descheduling
-	// blip cannot inflate the multiple.
+	// ComputeOps sizes one unit of tight integer work — the window the
+	// suite-wait probes in this package run under. It is deliberately NOT the
+	// whole CPU pilot: the pilot is mixed (see MeasureComputePilot), and its
+	// integer phase takes pilotIntegerOps so that a fast register loop cannot
+	// dominate the price of alloc-, lock- and memory-bound work.
 	ComputeOps = 8_000_000
-	pilotRuns  = 3
+
+	// The mixed CPU pilot's phases, each sized to a few milliseconds on the
+	// reference class: long enough that clock resolution and GC phase do not
+	// dominate, short enough to pay once per test binary (the whole pilot is
+	// ~35 ms there). pilotRuns runs are timed and the FASTEST is kept, so a
+	// descheduling blip cannot inflate the multiple.
+	//
+	//	pilotIntegerOps  tight integer loop (kept: the cheapest possible work,
+	//	                 so a box with a fast ALU but slow memory cannot look
+	//	                 uniformly fast)
+	//	pilotAllocOps    96-byte heap objects held in a small ring, so the
+	//	                 allocator, the heap and the GC/scavenger all pay
+	//	pilotLock*       goroutines taking one mutex, i.e. lock handoff and
+	//	                 goroutine wake-up cost (the shape of a concurrent
+	//	                 gated workload, not a parallel benchmark: the worker
+	//	                 count is fixed, so core count does not inflate it)
+	//	pilotSweep*      a cache-line-strided read-modify-write sweep of a
+	//	                 buffer bigger than L2, i.e. memory traffic
+	pilotIntegerOps  = ComputeOps / 2
+	pilotAllocOps    = 250_000
+	pilotAllocRing   = 64
+	pilotLockWorkers = 4
+	pilotLockOps     = 200_000
+	pilotSweepBytes  = 16 << 20
+	pilotSweepPasses = 6
+	pilotSweepStride = 64
+	pilotRuns        = 5
 )
 
 // RefWriteSeconds is the reference host's cost for the write+read pilot.
@@ -81,12 +127,20 @@ const RefFsyncSeconds = float64(calibFsyncBlocks) * refFsyncMillis / 1000.0
 // RefIOPilotSeconds is the reference host's cost for the whole I/O pilot.
 const RefIOPilotSeconds = RefWriteSeconds + RefFsyncSeconds
 
-// ComputeReferenceSeconds is the reference class's cost for the CPU pilot,
-// measured in isolation on the reference-class box (kernel 7.0.0-30-generic,
-// Go 1.26.5, load_avg < 1): 21.3 ms. Only the RATIO matters, so the constant
-// has to be the same class of machine the spec's numbers came from, not the
-// same machine; a box at 2x this number gets a 2x looser CPU-bound budget.
-const ComputeReferenceSeconds = 0.0213
+// ComputeReferenceSeconds is the reference class's cost for the whole mixed
+// CPU pilot, measured in isolation on a reference-class box (16 cores, kernel
+// 7.0.0-38-generic, Go 1.26.11): 26.1 ms. Measured 2026-11-17 as the minimum of
+// twelve freshly-started binaries' best-of-five runs (26.1-30.8 ms across the
+// twelve) — fresh processes, because a heap churned by earlier tests inflates
+// the allocation phase and a gate measures a fresh binary. The constant is set
+// at the cheapest observation rather than at the quiet-box capability floor so
+// the pilot can only read a genuine slowdown: a quiet box below this number is
+// clamped to 1 and never tightens a budget, while a loaded or slower box reads
+// above it and loosens (the loosening direction is the only direction a budget
+// may move). Only the RATIO matters, so the constant has to be the same CLASS
+// of machine the spec's numbers came from, not the same machine; a box at 2x
+// this number gets a 2x looser CPU-bound budget.
+const ComputeReferenceSeconds = 0.0261
 
 // Profile is one run's measured machine profile.
 type Profile struct {
@@ -94,13 +148,38 @@ type Profile struct {
 	CPUMultiple float64 `json:"cpu_multiple"`
 	Load        float64 `json:"load_avg_1m"`
 	Forced      bool    `json:"forced"` // EnvCalibOverride replaced both pilots
+
+	// Cores is the core count contention is divided by: the cores of the host
+	// that produced Load. Measure sets it to runtime.NumCPU(); a hand-built
+	// profile (a fixture modelling a specific box) may set it explicitly, and
+	// zero means "this host" so a caller that only knows the load still gets
+	// the right arithmetic. It is never CalibReferenceCores unless that is
+	// literally this host's core count.
+	Cores int `json:"cores,omitempty"`
 }
 
-// Contention is the load-derived factor: one runnable thread per reference core
-// deschedules a single-threaded measurement by ~2x (the first-order model the
-// boot budget in internal/app uses).
+// CoreCount is the contention divisor: the core count of the host whose
+// load_avg_1m this profile carries, defaulting to runtime.NumCPU() when the
+// profile did not record one. Always >= 1 so PerCore's quotient is defined.
+func (p Profile) CoreCount() int {
+	if p.Cores > 0 {
+		return p.Cores
+	}
+	if n := runtime.NumCPU(); n > 0 {
+		return n
+	}
+	return 1
+}
+
+// Contention is the load-derived factor: one runnable thread per core of THIS
+// host deschedules a single-threaded measurement by ~2x (the first-order model
+// the boot budget in internal/app uses). The divisor is the host's own core
+// count: load_avg_1m counts this host's runnable threads, so an 8-core box at
+// load 3.45 is 1.43x contended, and pricing it against the reference host's 16
+// cores (1.22x) under-loosens every budget on boxes smaller than the reference
+// (QA-TROUBLE-17).
 func (p Profile) Contention() float64 {
-	c := 1 + PerCore(p.Load, CalibReferenceCores)
+	c := 1 + PerCore(p.Load, p.CoreCount())
 	if c < 1 {
 		return 1
 	}
@@ -125,8 +204,12 @@ func (p Profile) String() string {
 	if p.Forced {
 		v = "forced by " + EnvCalibOverride
 	}
+	// The divisor printed is the one actually used (Profile.CoreCount), so an
+	// operator reading "load 3.45/8 cores" can check the arithmetic against
+	// `nproc` on the box that produced it (QA-TROUBLE-17: this line used to
+	// print the reference host's 16 on every host).
 	return "io x" + f2(p.IOMultiple) + " cpu x" + f2(p.CPUMultiple) +
-		" load " + f2(p.Load) + "/" + strconv.Itoa(CalibReferenceCores) + " cores" +
+		" load " + f2(p.Load) + "/" + strconv.Itoa(p.CoreCount()) + " cores" +
 		" (contention x" + f2(p.Contention()) + ", " + v + ")"
 }
 
@@ -144,10 +227,10 @@ func Measure(dir string) Profile {
 	load := LoadAvg1()
 	if v := strings.TrimSpace(os.Getenv(EnvCalibOverride)); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil && f > 0 {
-			return Profile{IOMultiple: f, CPUMultiple: f, Load: load, Forced: true}
+			return Profile{IOMultiple: f, CPUMultiple: f, Load: load, Cores: runtime.NumCPU(), Forced: true}
 		}
 	}
-	p := Profile{Load: load, IOMultiple: 1, CPUMultiple: 1}
+	p := Profile{Load: load, IOMultiple: 1, CPUMultiple: 1, Cores: runtime.NumCPU()}
 	if dir != "" {
 		if sec, err := MeasureIOPilot(dir); err == nil && sec > 0 {
 			p.IOMultiple = sec / RefIOPilotSeconds
@@ -224,17 +307,31 @@ func ioPilotOnce(dir string, run int) (float64, error) {
 	return writeRead + fsync, nil
 }
 
-// MeasureComputePilot returns the best of pilotRuns runs of the fixed integer
-// workload, in seconds. The result is stashed in an exported sink so the
-// compiler cannot delete a loop whose only cost is the timing.
+// MeasureComputePilot returns the best of pilotRuns runs of the MIXED
+// workload, in seconds.
+//
+// The pilot is mixed on purpose (QA-TROUBLE-17). A tight integer loop prices
+// an ALU and nothing else: on the 8-vCPU QA bunker it measured 0.71 (faster
+// than the reference class, clamped to 1 — no loosening at all) while the
+// gated workloads on that box ran ~3x slower, because their cost is
+// allocation, lock handoff and memory traffic, none of which a register loop
+// touches. The pilot therefore pays four prices in one wall-clock window:
+// tight integer work, 96-byte heap objects (allocator + scavenger), goroutines
+// contending on one mutex (lock handoff and wake-up), and a cache-line-strided
+// read-modify-write sweep of a buffer larger than L2 (memory traffic). The
+// worker count and object size are fixed, so the pilot prices ONE unit of work
+// — it is not a parallel benchmark that a bigger box wins for free.
+//
+// The result is stashed in an exported sink so the compiler cannot delete
+// phases whose only cost is the timing.
 func MeasureComputePilot() float64 {
 	best := 0.0
 	for i := 0; i < pilotRuns; i++ {
 		start := time.Now()
-		x := uint64(14695981039346656037)
-		for j := uint64(1); j <= ComputeOps; j++ {
-			x = (x ^ j) * 1099511628211
-		}
+		x := pilotIntegerPhase(pilotIntegerOps)
+		x ^= pilotAllocPhase(pilotAllocOps)
+		x ^= pilotLockPhase(pilotLockWorkers, pilotLockOps)
+		x ^= pilotMemoryPhase(make([]byte, pilotSweepBytes), pilotSweepPasses)
 		sec := time.Since(start).Seconds()
 		ComputeSink = x
 		if best == 0 || sec < best {
@@ -242,6 +339,78 @@ func MeasureComputePilot() float64 {
 		}
 	}
 	return best
+}
+
+// pilotIntegerPhase is the tight-loop phase: the cheapest possible work, kept
+// so a box with a fast ALU but slow memory cannot look uniformly fast.
+func pilotIntegerPhase(ops uint64) uint64 {
+	x := uint64(14695981039346656037)
+	for j := uint64(1); j <= ops; j++ {
+		x = (x ^ j) * 1099511628211
+	}
+	return x
+}
+
+// pilotAlloc is the allocation phase's unit object: 96 bytes, i.e. a real heap
+// object past the tiny-object fast path, so the phase pays heap growth and GC
+// scan work rather than a stack promotion.
+type pilotAlloc [12]uint64
+
+// pilotAllocPhase allocates ops objects and keeps the last pilotAllocRing of
+// them reachable, so the allocations cannot be optimised away and the
+// scavenger has something to do — the cost of alloc-heavy work, not the cost of
+// a loop the compiler could see through.
+func pilotAllocPhase(ops int) uint64 {
+	ring := make([]*pilotAlloc, pilotAllocRing)
+	var sum uint64
+	for i := 0; i < ops; i++ {
+		a := new(pilotAlloc)
+		a[0] = uint64(i)
+		sum += a[0]
+		ring[i%pilotAllocRing] = a
+	}
+	for _, a := range ring {
+		if a != nil {
+			sum += a[0]
+		}
+	}
+	return sum
+}
+
+// pilotLockPhase runs a fixed number of goroutines through one mutex, so the
+// window pays lock handoff and goroutine wake-up — the shape of concurrent
+// gated work (a shared index, a writer seat) rather than raw parallel CPU.
+func pilotLockPhase(workers, ops int) uint64 {
+	var mu sync.Mutex
+	var counter uint64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func(seed uint64) {
+			defer wg.Done()
+			for i := 0; i < ops; i++ {
+				mu.Lock()
+				counter += seed
+				mu.Unlock()
+			}
+		}(uint64(w + 1))
+	}
+	wg.Wait()
+	return counter
+}
+
+// pilotMemoryPhase is a cache-line-strided read-modify-write sweep: every 64th
+// byte of a buffer larger than L2 is touched, so the window pays memory
+// traffic instead of cache hits.
+func pilotMemoryPhase(buf []byte, passes int) uint64 {
+	var sum uint64
+	for p := 0; p < passes; p++ {
+		for i := 0; i < len(buf); i += pilotSweepStride {
+			buf[i]++
+			sum += uint64(buf[i])
+		}
+	}
+	return sum
 }
 
 // ComputeSink keeps the pilot's result observable.

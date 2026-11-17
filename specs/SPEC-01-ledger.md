@@ -1255,12 +1255,13 @@ same commit rebuilt the same 512 MiB fixture in 9,747 ms at 51.6 MiB/s on a clea
 (bar 9,000 ms / 60 MiB/s → FAIL) while a dev box at load_avg 10.78 was graded 30,000 ms / 20 MiB/s → PASS —
 a 3.3× looser bar for the busier box. `internal/loadfence` resolves a per-host **Profile** from two pilots
 plus load: an I/O pilot (write+read 8 MiB, then 16 fsyncs of 4 KiB blocks, expressed as a multiple of the
-§1 reference numbers), a CPU pilot (fixed integer workload vs a 21.3 ms reference cost), and load_avg_1m
-over 16 reference cores. The scale a budget consumes is
-`max(1, measured_multiple) × (1 + load_avg_1m / 16)` — clamped so a host can only ever LOOSEN a budget
-relative to the reference numbers, never tighten one (a budget the reference host meets must stay meetable
-here), and `TROUBLE_HOST_CALIB` pins the multiples so an operator override still wins over automatic
-calibration. Rules the tests follow:
+§1 reference numbers), a CPU pilot (a mixed workload — tight integer work, allocation, mutex handoff and
+memory traffic — against a 26.1 ms reference-class cost, §7b), and load_avg_1m over the measuring HOST's
+own cores. The scale a budget consumes is
+`max(1, measured_multiple) × (1 + load_avg_1m / host cores)` — clamped so a host can only ever LOOSEN a
+budget relative to the reference numbers, never tighten one (a budget the reference host meets must stay
+meetable here), and `TROUBLE_HOST_CALIB` pins the multiples so an operator override still wins over
+automatic calibration. Rules the tests follow:
 
 1. `TestRebuildBudget` (§7 row `index_test.go`): the enforced 9,000 ms budget is multiplied by `Scale()`, and
    the 60 MiB/s scan-rate floor is divided by it (`60 / Scale()`) — a TIME scales up with the box's
@@ -1349,6 +1350,46 @@ calibration. Rules the tests follow:
 
 No §7 number is relaxed: a reference-class host meets every original figure, and every scaled assertion
 still fails on a genuine multi-x regression regardless of which host it lands on.
+
+### 7b. Contention divides by the host's own cores, and the CPU pilot is mixed (QA-TROUBLE-17)
+
+Four clean-machine QA batteries graded one product tree red on the §7 host-measured budgets while hosted
+CI was green at the same SHA. Both defects were in the calibration, not in the product, and both are in
+the line the failing run printed: `io x1.22 cpu x0.71 load 1.01/16 cores` on a box whose `nproc` is 8.
+
+1. **The contention divisor is the measuring host's core count.** load_avg_1m counts THIS host's runnable
+   threads, so the per-core pressure it states is `load_avg_1m / runtime.NumCPU()`. Dividing by the
+   reference host's 16 priced the 8-vCPU bunker at `1 + 3.45/16 = 1.22×` when its own run queue was
+   `1 + 3.45/8 = 1.43×` per core, so the loosening was systematically too small on exactly the smaller
+   boxes the batteries run on. `CalibReferenceCores` (16) remains the reference baseline the pilots'
+   absolute costs and these floors describe; it is no longer a divisor anywhere. A `Profile` records the
+   core count it measured on (`Cores`), a profile that records none means the current host, and the
+   calibration summary line prints the divisor actually used (`load 3.45/8 cores`), so the arithmetic can
+   be checked against `nproc` on the box that produced it. The regression over the old arithmetic is
+   `TestContentionDividesByHostCores`: 8 cores at load 3.45 must read ≈1.43×, and a 16-denominator
+   reading (≈1.22×) fails it.
+2. **The CPU pilot prices mixed work, not an ALU.** A tight integer loop measured the 8-vCPU bunker
+   FASTER than the reference class (0.71, clamped to 1.0 — no loosening) while the gated workloads on
+   that box ran ~3x slower, because their cost is allocation, lock handoff and memory traffic, none of
+   which a register loop touches. `MeasureComputePilot` now pays four prices in one wall-clock window:
+   tight integer work, 96-byte heap objects held in a small ring (allocator plus scavenger), a fixed
+   number of goroutines taking one mutex (lock handoff and wake-up), and a cache-line-strided
+   read-modify-write sweep of a 16 MiB buffer (memory traffic). Phase sizes and the worker count are
+   fixed, so the pilot prices ONE unit of work and a larger box does not win it for free. The
+   reference-class cost of the whole mixed pilot is 26.1 ms (16 cores, kernel 7.0.0-38-generic, Go
+   1.26.11; minimum of twelve freshly-started binaries' best-of-five runs on 2026-11-17), replacing the
+   integer pilot's 21.3 ms.
+3. **The floors stay the §1 reference-class measurements.** The absolute numbers in §7 are unchanged:
+   they are what the reference class — kernel 7.0.0-30-generic or later, Go 1.26.x, 16 cores, 1,421 MiB/s
+   block I/O, fsync p50 2.0 ms — meets on a quiet host, and the per-host factor above is the only thing
+   that moves them. A quiet reference-class host measures both multiples at or below 1, both clamps hold
+   them at 1, and every §7 figure is asserted exactly. A slower or smaller host loosens by its own
+   measured cost and its own per-core load, which is the only direction a budget may move.
+
+`TestComputePilotMeasuresMixedWork` proofs item 2 in both directions: the mixed pilot must cost
+materially more than its integer phase alone, each non-integer phase must cost measurable time, the
+memory phase must cost orders of magnitude more over 16 MiB than over 1 KiB, and the allocation phase
+must cost more than the same iteration count writing into one reused object.
 
 ## 8. hilo impact
 

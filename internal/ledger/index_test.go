@@ -105,7 +105,7 @@ func TestRebuildBudget(t *testing.T) {
 	// at 51.6 MiB/s on a clean JIT box at load 3.99 (bar 9,000 ms / 60 MiB/s →
 	// FAIL) while a dev box at load 10.78 got 30,000 ms / 20 MiB/s and passed.
 	// The bar now follows the box's own measured throughput and load via
-	// loadfence.Measure().Scale(): I/O-pilot multiple x (1 + load/16), clamped
+	// loadfence.Measure().Scale(): I/O-pilot multiple x (1 + load/host cores), clamped
 	// so a budget is only ever loosened, never tightened. On a quiet
 	// reference-class host the scale is 1 and the spec numbers are enforced
 	// exactly as before; TROUBLE_HOST_CALIB pins the scale for falsification.

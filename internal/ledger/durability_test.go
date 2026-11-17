@@ -154,7 +154,7 @@ func TestFsyncCountIsStructural(t *testing.T) {
 // (measured 515k rec/s on the reference host — a 5× margin). The floor is a
 // reference-host measurement, so it is graded against the host's own measured
 // I/O throughput and load via loadfence.Measure().Scale() (SPEC-01 §7a):
-// scale = max(1, IOMultiple) × (1 + load_avg_1m/16), clamped so a host can
+// scale = max(1, IOMultiple) × (1 + load_avg_1m/host cores), clamped so a host can
 // only ever LOOSEN the bar relative to the reference number, never tighten it
 // — on a quiet reference-class host the scale is 1 and the spec's 100,000
 // rec/s is enforced exactly.
@@ -420,7 +420,7 @@ func TestPerLineRegression(t *testing.T) {
 // amortizedFloorFor scales the SPEC-01 §7 amortized-throughput floor
 // (100,000 rec/s on the reference host) by the host's measured I/O-bound
 // calibration factor (SPEC-01 §7a): 100000 / Scale(), where
-// Scale() = max(1, IOMultiple) × (1 + load_avg_1m/16). A RATE floor divides by
+// Scale() = max(1, IOMultiple) × (1 + load_avg_1m/host cores). A RATE floor divides by
 // the scale (a TIME budget multiplies), so on a quiet reference-class host the
 // scale is 1 and the spec's 100,000 is asserted exactly; the clamp means a
 // host can only ever LOOSEN the bar, never tighten it.
@@ -464,12 +464,12 @@ func TestAmortizedFloorScaling(t *testing.T) {
 		},
 		{
 			name: "busy run queue, healthy disk: contention term only",
-			prof: loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 4.4},
+			prof: loadfence.Profile{IOMultiple: 1, CPUMultiple: 1, Load: 4.4, Cores: loadfence.CalibReferenceCores},
 			want: 100000.0 / (1 + 4.4/16),
 		},
 		{
 			name: "TRBL-050: contended disk at unchanged load_avg — the pilot sees what load_avg cannot",
-			prof: loadfence.Profile{IOMultiple: 3, CPUMultiple: 1, Load: 4.4},
+			prof: loadfence.Profile{IOMultiple: 3, CPUMultiple: 1, Load: 4.4, Cores: loadfence.CalibReferenceCores},
 			want: 100000.0 / (3.0 * (1 + 4.4/16)),
 		},
 		{
@@ -479,12 +479,12 @@ func TestAmortizedFloorScaling(t *testing.T) {
 		},
 		{
 			name: "worst table case just below the fence: floor still many x the per-line mode",
-			prof: loadfence.Profile{IOMultiple: 5, CPUMultiple: 1, Load: 44},
+			prof: loadfence.Profile{IOMultiple: 5, CPUMultiple: 1, Load: 44, Cores: loadfence.CalibReferenceCores},
 			want: 100000.0 / (5.0 * (1 + 44.0/16)),
 		},
 		{
 			name: "NaN multiple degrades to the reference (clamp1), contention still applies",
-			prof: loadfence.Profile{IOMultiple: math.NaN(), CPUMultiple: math.NaN(), Load: 4},
+			prof: loadfence.Profile{IOMultiple: math.NaN(), CPUMultiple: math.NaN(), Load: 4, Cores: loadfence.CalibReferenceCores},
 			want: 100000.0 / (1 + 4.0/16),
 		},
 	}

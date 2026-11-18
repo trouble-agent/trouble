@@ -614,3 +614,9 @@
 {"id":609,"timestamp":"2026-11-17T09:18:47Z","event_type":"task_updated","task_id":"INT-CI-9","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
 {"id":610,"timestamp":"2026-11-17T09:26:16Z","event_type":"task_completed","task_id":"INT-CI-7-R2","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":611,"timestamp":"2026-11-17T09:26:16Z","event_type":"task_completed","task_id":"INT-CI-7-R2","actor":"foreman","detail":"commit 7382a56 merged db132d9; tier2 COMPLETE run b2d1f093; tier1 red only on internal/scrub TestScrubBudget (baseline)","marker":null}
+{"id":612,"timestamp":"2026-11-18T22:07:30Z","event_type":"task_completed","task_id":"TRBL-124","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":613,"timestamp":"2026-11-18T22:07:30Z","event_type":"task_completed","task_id":"INT-CI-9","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":614,"timestamp":"2026-11-18T22:07:30Z","event_type":"task_completed","task_id":"TRBL-128","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":615,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-130","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":616,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-132","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":617,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-136","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

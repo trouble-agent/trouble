@@ -620,3 +620,5 @@
 {"id":615,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-130","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":616,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-132","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":617,"timestamp":"2026-11-18T22:07:31Z","event_type":"task_completed","task_id":"TRBL-136","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":618,"timestamp":"2026-11-18T22:10:20Z","event_type":"task_created","task_id":"QA-TROUBLE-17-R4","actor":"foreman","detail":"{\"id\":\"QA-TROUBLE-17-R4\",\"status\":\"pending\"}","marker":null}
+{"id":619,"timestamp":"2026-11-18T22:10:27Z","event_type":"task_completed","task_id":"DOC-27","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

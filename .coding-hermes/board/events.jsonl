@@ -635,3 +635,4 @@
 {"id":630,"timestamp":"2026-11-20T11:58:29Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R3","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":631,"timestamp":"2026-11-20T11:58:29Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R3-R2","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":632,"timestamp":"2026-11-20T12:06:16Z","event_type":"task_completed","task_id":"TRBL-142","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":633,"timestamp":"2026-11-20T12:15:14Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R4","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

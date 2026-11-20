@@ -926,3 +926,126 @@ cycle. Changes to the frozen `types.Module` interface are blast-radius-maximal b
 forbidden in v0.1; changes inside the package stay behind `Call`. No fleet repo, unit, board or
 configuration is modified by this spec: `${STATE_ROOT}` is a default, not a fleet path, and the polkit
 artifact is written only by an explicit `trouble install --polkit` on the host that runs the daemon.
+
+## 8a. Toolset — the wrap-vs-build verdict (amendment TRBL-139)
+
+Provenance: kanban card `t_4a8a2008` (toolset verdict, 2026-09-16), landed as board row TRBL-139. This
+section adds nothing to the frozen surface above; it records, for each external tool the verdict
+considered, which way the wrap-vs-build call went, which stage of the §2.3 call contract governs an
+invocation of it, and — the part that decays fastest — where the shipped tree diverged and why.
+
+Two laws govern every entry below:
+
+- **The wrap-vs-build verdict never adds a dependency silently.** `go.mod` at this amendment carries
+  exactly four direct requires (`BurntSushi/toml` v1.6.0, `godbus/dbus/v5`, `redis/go-redis/v9`,
+  `golang.org/x/sys`). Any entry whose verdict is *wrap* must either already appear there or be recorded
+  as deferred; an entry that appears in neither list is a bug in this section, not a licence to add one.
+- **The no-shell rule outranks convenience.** §3.11 refuses a shell and arbitrary argv without exception,
+  so a tool whose only interface is a CLI process is only reachable as a *fixed, module-owned argv* (the
+  `internal/lifecycle/ops.go` pattern), never as a user-supplied command line. Where a library exists,
+  the wrap-vs-build verdict prefers it; where the only option is a GPL CLI whose output the daemon would
+  have to parse, the verdict is build.
+
+Status vocabulary used below: **shipped** (code in the tree does the job today), **seam** (an interface
+exists and is compiled only behind a build tag), **deferred** (no code; the verdict is recorded so a
+future round inherits the decision rather than re-litigating it).
+
+### 8a.1 gopsutil — process metrics
+
+| Field | Value |
+|---|---|
+| Source library + licence | `github.com/shirou/gopsutil/v4` — BSD-3-Clause |
+| wrap-vs-build verdict | **build**: read procfs directly in Go, do not wrap gopsutil |
+| Governing guard | `validate` (typed args only) then `dry-run` — every consumer is a pure read, so stages 3 and 6 run and stage 4 never does; `proc.*` mutation modules additionally pass `authorize` (scope grants, a3–a7) |
+| Shipped status | **shipped** — `internal/app/proc.go`, `internal/registry/modules_proc.go`, `internal/sensors/psi.go`, `internal/sensors/disk_statfs_linux.go`, `internal/loadfence/{loadfence,memcap,threadwait}.go` |
+| Divergence + reason | gopsutil is absent from `go.mod`. The wrap-vs-build verdict flipped to build because (a) the artifacts must cross-compile cgo-free to `windows/amd64` and `darwin`, and (b) the fields this daemon actually fences on — PSI pressure, `statfs` headroom, cgroup memory ceilings, per-thread runnable counts — are either unavailable or shaped differently in gopsutil. The divergence is accepted, not pending: gopsutil would be a second, weaker source for data already read exactly. |
+
+### 8a.2 go-systemd / sdjournal — journald reading
+
+| Field | Value |
+|---|---|
+| Source library + licence | `github.com/coreos/go-systemd/v22` (`sdjournal`) — Apache-2.0 |
+| wrap-vs-build verdict | **wrap**, behind an explicit build tag; the default artifact uses a supervised `journalctl -f` child |
+| Governing guard | `dry-run` only (`check_mode`); the follower never mutates, so its records are SPEC-05 `kind=verify` evidence, not §2.3 apply records |
+| Shipped status | **seam** — `internal/sensors/journald_sdjournal.go` carries `//go:build journald_sdjournal` and fixes the interface only; `internal/sensors/journald_subprocess.go` carries `//go:build !journald_sdjournal` and `journalBackend()` returns `"subprocess"`; the child is located by `exec.LookPath("journalctl")` (`internal/sensors/psi.go`, `internal/sensors/substrate.go`) |
+| Divergence + reason | The wrap-vs-build verdict was wrap, and the tree honours it as a *seam* rather than a live path: cgo would break the static, cross-compiled release artifacts, so the tag is off in every v0.1 artifact and the interface is left for a v1.0 implementation to fill without touching a caller. Recorded as seam, not as shipped — `/health` reporting through `journalBackend()` is the only observable today. |
+
+### 8a.3 yq or dasel — log/config query
+
+| Field | Value |
+|---|---|
+| Source library + licence | `mikefarah/yq` (MIT) / `tomwright/dasel` (MIT) — both CLI-first |
+| wrap-vs-build verdict | **build**: typed decode in Go, no query CLI |
+| Governing guard | `validate` (schema + unknown-key rejection); config never reaches `apply` |
+| Shipped status | **shipped** — `internal/registry/modules_config.go` plus the `BurntSushi/toml` v1.6.0 decoder (MIT) already in `go.mod` |
+| Divergence + reason | Neither yq nor dasel appears in the tree (the only `yq` matches are substrings of `quickstart`). The wrap-vs-build verdict went to build because a config query language is exactly the arbitrary-evaluation surface §3.11 forbids, and because the config surface is a fixed struct whose unknown-key rejection is part of the `validate` stage's contract — a query CLI cannot make that guarantee. |
+
+### 8a.4 git apply — patch application
+
+| Field | Value |
+|---|---|
+| Source library + licence | `git`'s `apply` subcommand — GPL-2.0 |
+| wrap-vs-build verdict | **build**: an in-process unified-diff applier, not a `git apply` child |
+| Governing guard | all six (§2.3 stages 1–6, `authorize` → `audit`) — `file.patch` mutates, so the intent record must precede the write and `verify` must see the post-image |
+| Shipped status | **shipped** — `internal/registry/modules_file.go` (`filePatchModule`): all-or-nothing through a temp file plus a rename, `RollbackInvertible() == true` |
+| Divergence + reason | No code shells out to `git apply`; `git` appears only as a read-only probe in `internal/boardintegrity/integrity.go` (`cat-file`, `branch --contains`, `reflog`). The wrap-vs-build verdict flipped to build for three reasons: a GPL child cannot be relied on inside the appliance, §3.11 forbids handing it a user-supplied patch argument, and §3.5's point-of-no-return rule needs the before-image in Go memory so `Rollback` can be produced without re-reading a file that is already half-written. |
+
+### 8a.5 iproute2 JSON — network state
+
+| Field | Value |
+|---|---|
+| Source library + licence | `iproute2` (`ip -j`) — GPL-2.0 |
+| wrap-vs-build verdict | **build**: netlink/procfs in Go; never `ip -j` |
+| Governing guard | `dry-run` (read-only observation), `audit` on the outcome record |
+| Shipped status | **deferred** — no `ip -j` invocation exists anywhere in the tree, and no netlink reader has landed. The only shipped network primitive is bind-host resolution: `internal/lifecycle/bindholder_linux.go` calls `net.LookupHost` to confirm the host the daemon binds for (stdlib `net`, no licence surface) |
+| Divergence + reason | The wrap-vs-build verdict is build, and the honest status is deferred: the interface, address and route dimensions the verdict imagined have no consumer in v0.1, so inventing a reader would be code without a caller. Recorded here so the next round starts from the decision, not from `ip -j`. |
+
+### 8a.6 bubblewrap — sandboxed exec
+
+| Field | Value |
+|---|---|
+| Source library + licence | `containers/bubblewrap` — LGPL-2.0-or-later |
+| wrap-vs-build verdict | **build** (no exec surface to sandbox); wrap only if v1.0 adds a real exec module |
+| Governing guard | would be `authorize` (a4 capability) then `apply`; today the guard that matters is the *absence* of a stage 4 path |
+| Shipped status | **deferred** — `git grep -i bubblewrap` returns zero hits |
+| Divergence + reason | The wrap-vs-build verdict is build because there is nothing to contain: the daemon never executes an agent-chosen command (§3.11), and the only children it spawns are module-owned fixed argvs — `systemctl` in `internal/lifecycle/ops.go`, `journalctl` in `internal/sensors/psi.go`. Wrapping bubblewrap now would add an LGPL binary to the artifact to sandbox a process that is never created. |
+
+### 8a.7 gojq — JSON filtering
+
+| Field | Value |
+|---|---|
+| Source library + licence | `itchyny/gojq` — MIT |
+| wrap-vs-build verdict | **build**: `encoding/json` plus typed structs |
+| Governing guard | `validate`; JSON filtering happens at ingest (`internal/scrub/`), below the registry |
+| Shipped status | **deferred** — zero hits for `gojq`; the tree filters with `encoding/json` into concrete types |
+| Divergence + reason | The wrap-vs-build verdict is build for the same reason as 8a.3: a general expression evaluator over untrusted payloads is an arbitrary-evaluation surface, and the ingest path needs byte-exact, bounded decoding — not a query language whose per-expression cost the daemon cannot fence. |
+
+### 8a.8 smartctl — disk health
+
+| Field | Value |
+|---|---|
+| Source library + licence | `smartmontools` (`smartctl`) — GPL-2.0 |
+| wrap-vs-build verdict | **build**: `statfs` headroom in Go; SMART is not a v0.1 sensor |
+| Governing guard | `dry-run` + `audit` (pure read); none of the mutating stages |
+| Shipped status | **deferred** for SMART — `smartctl` appears nowhere; the disk signal that does ship is `internal/sensors/disk_statfs_linux.go` (with `disk_statfs_other.go` for non-Linux) |
+| Divergence + reason | The wrap-vs-build verdict is build, and the divergence from the verdict's ambition is deliberate: SMART needs a privileged device handle, breaks the cross-compile matrix, and answers a question (`is this disk dying?`) the daemon's headroom fence does not depend on. Headroom is `statfs`; SMART waits for a consumer that acts on it. |
+
+### 8a.9 Thin-Go carve-outs — signal, DNS, certificate readout
+
+These are the cases where the wrap-vs-build verdict was *build* from the start because the platform
+already ships the primitive. They are listed so the next round does not mistake their absence for an
+oversight.
+
+| Carve-out | Primitive | Shipped status | Divergence + reason |
+|---|---|---|---|
+| Signal handling | stdlib `os/signal` | **shipped** — `cmd/troubled/main.go` (`signal.NotifyContext` for SIGTERM/SIGINT), `internal/sensors/sensors.go` (SIGHUP reload) | none; wrapping a signal library over `os/signal` would be pure indirection |
+| DNS resolution | stdlib `net` (`LookupHost`) | **shipped, narrow** — `internal/lifecycle/bindholder_linux.go` only, to confirm the bind host resolves before the listener is created | The wrap-vs-build verdict is build and stays narrow on purpose: a resolver module would put attacker-influenced names on a code path with a timeout, and nothing in v0.1 needs it |
+| Certificate readout | stdlib `crypto/x509` | **deferred** — zero `x509` references in the tree | The wrap-vs-build verdict is build (stdlib), but there is no consumer: expiry monitoring is a sentinel concern that has not been specified. Recorded as deferred rather than implemented blind |
+
+### 8a.10 What this amendment does not change
+
+- No frozen surface (§2.1, §2.3, §3.6, §3.11) is edited, renumbered or relaxed. §8a is an addition.
+- No dependency is added: the wrap-vs-build verdict as written adds zero modules to `go.mod`.
+- Three entries are **seam** or **deferred**, and they stay that way until a consumer exists. A future
+  round closing one of them re-opens this section by letter suffix (§8a.1a, §8a.5a, …) rather than
+  rewriting the verdict, so the divergence history remains readable.

@@ -629,3 +629,8 @@
 {"id":624,"timestamp":"2026-11-20T06:31:32Z","event_type":"task_completed","task_id":"TRBL-139","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":625,"timestamp":"2026-11-20T06:31:50Z","event_type":"task_completed","task_id":"TRBL-139","actor":"foreman","detail":"SPEC-06 8a toolset wrap-vs-build addendum: commit 339ca70, tier2 PASS verdict 36a0e277 (ollama-cloud lane; deepseek lane 402 -> INCOMPLETE 77cfd408 retained), tier1 PASS, selfcheck PASS (361 paths/0 missing), wrap-vs-build=24","marker":null}
 {"id":626,"timestamp":"2026-11-20T06:44:18Z","event_type":"task_created","task_id":"TRBL-142","actor":"foreman","detail":"{\"id\":\"TRBL-142\",\"status\":\"pending\"}","marker":null}
+{"id":627,"timestamp":"2026-11-20T11:53:43Z","event_type":"task_updated","task_id":"QA-TROUBLE-17-R4","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":628,"timestamp":"2026-11-20T11:58:18Z","event_type":"task_completed","task_id":"DOC-22","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":629,"timestamp":"2026-11-20T11:58:29Z","event_type":"task_completed","task_id":"DOC-26","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":630,"timestamp":"2026-11-20T11:58:29Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R3","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":631,"timestamp":"2026-11-20T11:58:29Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R3-R2","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

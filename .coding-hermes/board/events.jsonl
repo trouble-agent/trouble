@@ -626,3 +626,5 @@
 {"id":621,"timestamp":"2026-11-19T00:51:40Z","event_type":"task_created","task_id":"TRBL-139","actor":"foreman","detail":"{\"id\":\"TRBL-139\",\"status\":\"pending\"}","marker":null}
 {"id":622,"timestamp":"2026-11-19T00:53:48Z","event_type":"task_created","task_id":"TRBL-140","actor":"foreman","detail":"{\"id\":\"TRBL-140\",\"status\":\"pending\"}","marker":null}
 {"id":623,"timestamp":"2026-11-19T00:53:48Z","event_type":"task_created","task_id":"TRBL-141","actor":"foreman","detail":"{\"id\":\"TRBL-141\",\"status\":\"pending\"}","marker":null}
+{"id":624,"timestamp":"2026-11-20T06:31:32Z","event_type":"task_completed","task_id":"TRBL-139","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":625,"timestamp":"2026-11-20T06:31:50Z","event_type":"task_completed","task_id":"TRBL-139","actor":"foreman","detail":"SPEC-06 8a toolset wrap-vs-build addendum: commit 339ca70, tier2 PASS verdict 36a0e277 (ollama-cloud lane; deepseek lane 402 -> INCOMPLETE 77cfd408 retained), tier1 PASS, selfcheck PASS (361 paths/0 missing), wrap-vs-build=24","marker":null}

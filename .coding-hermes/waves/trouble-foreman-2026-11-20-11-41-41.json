@@ -1,0 +1,18 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-11-20-11-41-41",
+  "mode": "serial-fallback",
+  "wave_budget": 6,
+  "reason": "Only one genuinely independent repo-scoped implementation row is dispatchable this tick (QA-TROUBLE-17-R4). QA-TROUBLE-25 product fix already landed (merge 3cb39b2); remainder is QA-lane AC3. DOC-22/DOC-26 work already landed at HEAD - foreman verify+close. TRBL-142 is foreman-direct local reconciliation (untracked .gitreins/tasks.yaml). Remaining pending rows are owner-routed elsewhere (11-17 routing): QA harness rows, bunker infra, owner-gated RELEASE-012.",
+  "workers": [
+    {
+      "task_id": "QA-TROUBLE-17-R4",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R4",
+      "branch": "wt/QA-TROUBLE-17-R4",
+      "base": "origin/main",
+      "base_sha": "9f2bf99",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "QA-TROUBLE-17-R4"
+    }
+  ]
+}

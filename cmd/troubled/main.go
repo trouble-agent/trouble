@@ -86,10 +86,11 @@ const (
 // daemonArgs is what the daemon parses for itself out of argv. Every other
 // argument is a config key flag and reaches the resolver unchanged.
 type daemonArgs struct {
-	config  string
-	verbose bool
-	version bool
-	help    bool
+	config    string
+	configSet bool
+	verbose   bool
+	version   bool
+	help      bool
 }
 
 // splitDaemonArgs partitions argv into the daemon's own flags and the config key
@@ -126,6 +127,7 @@ func splitDaemonArgs(argv []string) (daemonArgs, []string, error) {
 				value = argv[i]
 			}
 			own.config = value
+			own.configSet = true
 		case ownVerbose, ownVersion, ownHelp, ownHelpH:
 			b, err := boolValue(arg, value, hasValue)
 			if err != nil {
@@ -219,7 +221,7 @@ func run(argv []string) int {
 	// It is APPENDED rather than prepended because that selector is last-one-wins
 	// and the flag the operator typed must beat a --config_path further left.
 	args := keys
-	if own.config != "" {
+	if own.configSet {
 		args = append(append(make([]string, 0, len(keys)+2), keys...), "--config", own.config)
 	}
 

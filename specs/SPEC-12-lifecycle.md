@@ -278,6 +278,13 @@ Rules, pinned:
   `source` is `env` is recorded with `payload.env_source=true`, so a surprise environment override is always
   legible in the ledger.
 
+### 3.1g Explicit config file refusal
+
+An explicitly selected `--config` or `--config_path` file must be readable and not a directory.
+A missing, unreadable, empty-path or directory selection is refused with TROUBLE-LIFECYCLE-018,
+naming the exact path and reason, before the daemon touches the state root or binds a listener.
+An absent implicitly discovered file remains optional; explicit selection never falls back to defaults.
+
 ### 3.1a Declaring projects: the `[[projects]]` array of tables
 
 The sentinel's project set is configuration, not an embedded default: nothing listens for an app until the
@@ -1339,6 +1346,7 @@ minted and the range is unchanged.
 | TROUBLE-LIFECYCLE-015 | transient | spool budget exceeded → oldest sealed segment deleted | `gap` record with exact `EstLost` + ledger note | raise `spool.budget_bytes` or restore the hub |
 | TROUBLE-LIFECYCLE-016 | permanent | unit is missing its escalation wiring (`OnFailure=` absent, escalate unit uninstalled, or `escalate.channels` empty) | `trouble install --check` fails non-zero and names the missing piece | `trouble install --force` after configuring a channel |
 | TROUBLE-LIFECYCLE-017 | transient | clock skew across hosts beyond `clock_skew_tolerance` | record + verification `invalid` for the affected zone | fix time sync on the offending host |
+| TROUBLE-LIFECYCLE-018 | permanent | explicitly selected config file unavailable | boot refuses before state or listeners, naming path and reason | select a readable file |
 
 ## 6. Edge cases
 

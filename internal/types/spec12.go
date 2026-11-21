@@ -100,6 +100,7 @@ const (
 	CodeLifecycle015 ErrorCode = "TROUBLE-LIFECYCLE-015" // transient: spool budget exceeded → drop-oldest
 	CodeLifecycle016 ErrorCode = "TROUBLE-LIFECYCLE-016" // permanent: unit missing escalation wiring
 	CodeLifecycle017 ErrorCode = "TROUBLE-LIFECYCLE-017" // transient: clock skew beyond tolerance
+	CodeLifecycle018 ErrorCode = "TROUBLE-LIFECYCLE-018" // permanent: explicitly selected config file unavailable
 )
 
 // LifecycleCodeClass is the SPEC-12 §5 class column.
@@ -121,6 +122,7 @@ var LifecycleCodeClass = map[ErrorCode]ErrorClass{
 	CodeLifecycle015: ErrClassTransient,
 	CodeLifecycle016: ErrClassPermanent,
 	CodeLifecycle017: ErrClassTransient,
+	CodeLifecycle018: ErrClassPermanent,
 }
 
 func init() {

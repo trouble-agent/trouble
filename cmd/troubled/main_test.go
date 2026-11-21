@@ -221,9 +221,9 @@ func TestSplitDaemonArgsOwnFlags(t *testing.T) {
 		{name: "-version", argv: []string{"-version"}, want: daemonArgs{version: true}},
 		{name: "-h", argv: []string{"-h"}, want: daemonArgs{help: true}},
 		{name: "--help", argv: []string{"--help"}, want: daemonArgs{help: true}},
-		{name: "-config <path>", argv: []string{"-config", "/x/config.toml"}, want: daemonArgs{config: "/x/config.toml"}},
-		{name: "--config <path>", argv: []string{"--config", "/x/config.toml"}, want: daemonArgs{config: "/x/config.toml"}},
-		{name: "--config=<path>", argv: []string{"--config=/x/config.toml"}, want: daemonArgs{config: "/x/config.toml"}},
+		{name: "-config <path>", argv: []string{"-config", "/x/config.toml"}, want: daemonArgs{config: "/x/config.toml", configSet: true}},
+		{name: "--config <path>", argv: []string{"--config", "/x/config.toml"}, want: daemonArgs{config: "/x/config.toml", configSet: true}},
+		{name: "--config=<path>", argv: []string{"--config=/x/config.toml"}, want: daemonArgs{config: "/x/config.toml", configSet: true}},
 		{
 			// The mechanical spelling of the config_path KEY is not the daemon's
 			// own flag: it must be forwarded so the resolver records it.
@@ -235,7 +235,7 @@ func TestSplitDaemonArgsOwnFlags(t *testing.T) {
 		{
 			name: "mixed",
 			argv: []string{"--v", "--state_root", "/x", "--config", "/y.toml", "--dashboard-bind", "127.0.0.1:7645"},
-			want: daemonArgs{verbose: true, config: "/y.toml"},
+			want: daemonArgs{verbose: true, config: "/y.toml", configSet: true},
 		},
 		{
 			name: "key flags and positionals are forwarded verbatim",

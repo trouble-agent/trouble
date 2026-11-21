@@ -4,8 +4,8 @@ Every `TROUBLE-*` code the binary can emit, generated from the `ErrorCode`
 declarations in `internal/types`. The declarations are authoritative: this page
 is derived from them, and a Go test fails when the two drift apart.
 
-* **Measured code count at HEAD (generator run on this tree):** 208
-* **Shaped `TROUBLE-<FAMILY>-<NNN>` codes:** 207 across 13 families
+* **Measured code count at HEAD (generator run on this tree):** 209
+* **Shaped `TROUBLE-<FAMILY>-<NNN>` codes:** 208 across 13 families
 * **Codes outside that shape:** 1
 * **Regenerate with:** `python3 specs/tools/generate_error_codes.py`
 * **Drift gate:** `go test ./internal/types/ -run TestErrorCodeReference` — fails
@@ -35,10 +35,10 @@ page is no longer declared, when a class column disagrees with `CodeClass` (the 
 daemon's retry and refusal decisions actually read), or when the measured count above
 disagrees with the declarations.
 
-The declaration walk counts 208 `ErrorCode` constants — 207 shaped
+The declaration walk counts 209 `ErrorCode` constants — 208 shaped
 `TROUBLE-<FAMILY>-<NNN>` codes plus the unshaped `TROUBLE-REDIS-REFUSING`. A repo-wide
-regex walk (`TROUBLE-[A-Z][A-Z0-9]*-[0-9]{3}`) also returns 208 tokens, but a different
-208: it counts the `TROUBLE-A-000` sentinel described below and misses the unshaped
+regex walk (`TROUBLE-[A-Z][A-Z0-9]*-[0-9]{3}`) also returns 209 tokens, but a different
+209: it counts the `TROUBLE-A-000` sentinel described below and misses the unshaped
 code. The two walks agree on the thing that matters — no declared code is absent here.
 
 ## How to read an entry
@@ -154,6 +154,7 @@ spec that owned it says, not this page.
 | `TROUBLE-LIFECYCLE-015` | `transient` | spool budget exceeded → drop-oldest | Inspect the state root, the resolved config (`trouble config explain`) and the boot preflight that refused. Retry once the named dependency recovers; if it recurs, treat it as a chronic fault rather than a blip. |
 | `TROUBLE-LIFECYCLE-016` | `permanent` | unit missing escalation wiring | Inspect the state root, the resolved config (`trouble config explain`) and the boot preflight that refused. Retrying unchanged reproduces it: fix the condition, then restart the affected process. |
 | `TROUBLE-LIFECYCLE-017` | `transient` | clock skew beyond tolerance | Inspect the state root, the resolved config (`trouble config explain`) and the boot preflight that refused. Retry once the named dependency recovers; if it recurs, treat it as a chronic fault rather than a blip. |
+| `TROUBLE-LIFECYCLE-018` | `permanent` | explicitly selected config file unavailable | Select a readable config file at the named path. |
 
 ### TROUBLE-FLOW
 

@@ -649,3 +649,6 @@
 {"id":644,"timestamp":"2026-11-21T17:47:48Z","event_type":"task_updated","task_id":"TRBL-143","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
 {"id":645,"timestamp":"2026-11-21T17:47:48Z","event_type":"task_updated","task_id":"TRBL-145","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
 {"id":646,"timestamp":"2026-11-21T17:47:48Z","event_type":"task_updated","task_id":"TRBL-130-R3","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":647,"timestamp":"2026-11-21T18:34:00Z","event_type":"task_completed","task_id":"TRBL-143","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":648,"timestamp":"2026-11-21T18:34:00Z","event_type":"task_completed","task_id":"TRBL-145","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":649,"timestamp":"2026-11-21T18:34:00Z","event_type":"task_completed","task_id":"TRBL-130-R3","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

@@ -970,7 +970,7 @@ The two documents below are the WRITER-SEAT shape (the daemon's `Status()` and t
 every counter is measured: no member is listed in `unmeasured` and none is absent. `trouble ledger status
 --json` — the read-only walk (§2.4) — omits the five members marked §3.10b (`last_seq_pending`,
 `fsync_calls`, `fsync_per_record`, `queue_depth`, `backpressure_total`) and names each in `unmeasured`
-with `in_process_counter`; everything else is identical.
+with `in_process_counter`; the unbuilt index exception is specified in §3.10c.
 
 ```json
 {"last_seq":41207,"last_seq_pending":41209,"last_ts":"2026-09-16T09:14:03.221Z","stall_s":1.2,"loss_window_ms":200,"day":"2026-09-16","gen":0,"part":1,"file":"2026-09-16.jsonl","bytes":30408704,"records":41207,"fsync_calls":11,"fsync_per_record":0.000267,"queue_depth":0,"queue_cap":65536,"backpressure_total":0,"gap_records":0,"est_lost_total":0,"writer_pid":2028599,"writer_version":"0.1.0","disk_bytes":30408704,"disk_budget_bytes":2147483648,"index":{"entries":41207,"groups":7,"groups_cold":0,"incidents":2,"sources":3,"days":1,"files_scanned":1,"bytes_scanned":30408704,"lines_scanned":41207,"torn_lines":1,"corrupt_lines":0,"skipped_newer_schema":0,"build_ms":412,"budget_ms":9000,"budget_bytes":536870912,"index_bytes":4194304,"scan_rate_mibs":148.2,"degraded":false,"degraded_reason":"","truncated_before_ts":"","cold_evictions_per_min":0}}
@@ -1043,6 +1043,14 @@ no holes" and cannot be mistaken for silence.
 `--json` stays additive apart from those five members, which go from a value to an omission. A consumer that
 read `status.fsync_calls` must now branch on presence (`unmeasured` is what to branch on); a consumer that
 silently read the old absence as 0 was reading a number the command never measured.
+
+### 3.10c Unbuilt index incident count
+
+The read-only status walk does not build the writer's bounded incident projection (§3.6). Its `index`
+reports `measured: false` and `unmeasured_reason: "read_only_path_did_not_build_index"`, and omits
+`incidents` from JSON rather than publishing an unmeasured zero. The writer's measured index reports its
+actual count, including zero. Counting T01 records alone is not equivalent to the writer's distinct,
+bounded incident projection; the text status likewise identifies the index as unmeasured.
 
 ## 4. Wiring
 

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -61,6 +62,20 @@ type IndexStats struct {
 	// ledger records. An unbuilt index must not read as an empty one.
 	Measured         bool   `json:"measured"`
 	UnmeasuredReason string `json:"unmeasured_reason,omitempty"`
+}
+
+// MarshalJSON omits the incident count when no index was built. A measured
+// index still emits zero, which is a real count rather than an absent value.
+func (s IndexStats) MarshalJSON() ([]byte, error) {
+	type indexStats IndexStats
+	var incidents *int
+	if s.Measured {
+		incidents = &s.Incidents
+	}
+	return json.Marshal(struct {
+		indexStats
+		Incidents *int `json:"incidents,omitempty"`
+	}{indexStats: indexStats(s), Incidents: incidents})
 }
 
 // LedgerStatus is printed by `trouble ledger status --json` (SPEC-01 §3.10).

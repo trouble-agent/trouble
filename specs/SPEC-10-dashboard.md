@@ -50,7 +50,7 @@ no regex routes, no third-party mux. `{id}` is an exact `<prefix>_<ULID>` match.
 | 7 | GET | `/breakers` | read | HTML page | `Index.Breakers()` (kind `breaker`, SPEC-05 registry) |
 | 8 | GET | `/health.json` | read¹ | JSON `HealthResponse` | §2.9 aggregator; **also consumed by the external stall checker (SPEC-12 §3)** |
 | 9 | POST | `/api/incidents/{id}/ack` | write | HTML fragment (200) | `ladder.Ack(ctx, inc, actor, reason, until)` → T49 `human_ack` (`{detected,recorded}` → `acknowledged`, SPEC-05 §3.2a; record-only where the table has no edge, R14) + refreshed `incident-rows` |
-| 10 | POST | `/api/incidents/{id}/close` | write | HTML fragment (200) | `ladder.Close(ctx, inc, actor, reason, resolution)` → the table's own edge into `resolved` (T38 from `verifying`, T45 from `suppressed`, T50 `human_close` from `acknowledged`) + refreshed `incident-rows` |
+| 10 | POST | `/api/incidents/{id}/close` | write | HTML fragment (200) | `ladder.Close(ctx, inc, actor, reason, resolution)` → the table's own edge into `resolved` (T38 from `verifying`, T45 from `suppressed`, T50 `human_close` from `acknowledged`, T50a `human_close` from `play:failed`, SPEC-05 §3.2c) + refreshed `incident-rows` |
 | 11 | POST | `/api/autonomy` | autonomy | HTML fragment (200) | `lifecycle.SetAutonomy(ctx, gates, actor)` → refreshed `health-strip` |
 | 12 | GET | `/partials/health` | read | HTML fragment | §2.9 aggregator (strip fields only) |
 | 13 | GET | `/partials/incidents?since=<seq>` | read | HTML fragment | `Index.OpenIncidentsSince(seq,limit)` |
@@ -175,7 +175,7 @@ returns **403** + TROUBLE-DASHBOARD-003 even when a client forges the request. T
 
 **State-gated controls (TRBL-118).** Scope is not the only axis a control can be absent on. The close
 control is rendered only for the states whose edge into `resolved` exists in SPEC-05's table — `verifying`
-(T38), `suppressed` (T45) and `acknowledged` (T50, §3.2a) — and for any other state the actions panel
+(T38), `suppressed` (T45), `acknowledged` (T50, §3.2a) and `play:failed` (T50a, §3.2c) — and for any other state the actions panel
 explains why instead ("close is not offered in state `recorded`: a close needs verified work (T38), a quiet
 suppression window (T45) or an acknowledgement (T50)"). A control whose only possible outcome is
 TROUBLE-LADDER-012 (`no_close_edge`) is a defect, not an affordance: the dogfood run of 2026-10-23 found

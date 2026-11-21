@@ -440,6 +440,15 @@ Rules:
 4. **The refusal path is unchanged.** `refuseLocked` writes its own payload (§3.3) and never carries
    `rung_entry`.
 
+### 3.2c Amendment TRBL-143 — human close of a failed play (T50a)
+
+T50a permits `play:failed` → `resolved` on `human_close`, with the human as
+resolution evidence, the same non-stage semantics as T50, and an incident transition
+record carrying `state` and `resolved_ts`. The timestamp is set at the transition.
+A daemon must not take this human edge. Other close edges and refusals remain unchanged.
+The dashboard close action accepts a reason and resolution and records the human decision
+as specified in SPEC-10 §4.2.
+
 ### 3.3 Refused transitions — TROUBLE-LADDER-001
 
 A refusal appends `I⟨refused:true, from, to, illegal:true, error_code:TROUBLE-LADDER-001⟩`, increments the
@@ -1172,9 +1181,9 @@ re-minted here.
 ## 7. Testing
 
 `internal/ladder/statemachine_test.go`
-- The transition table is data: 50 legal vectors (T01–T50) + 14 refusal vectors (R01–R14) asserted
+- The transition table is data: 51 legal vectors (T01–T50 and T50a) + 14 refusal vectors (R01–R14) asserted
   cell-by-cell — resulting `LadderState`, emitted record kind, the exact `payload` keys, and the exact
-  error code. A count guard asserts `len(legal)=50 && len(refused)=14` so a table edit cannot silently drop
+  error code. A count guard asserts `len(legal)=51 && len(refused)=14` so a table edit cannot silently drop
   an edge. Threshold: 0 uncovered rows.
 - The human ack/close edges (§3.2a): T49 lands in `acknowledged` and its record stamps `state`; T50 closes
   from there with no evidence tuple and stamps `resolved_ts`; `acknowledged` has no edge into `resolved`

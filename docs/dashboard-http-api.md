@@ -291,6 +291,14 @@ Fields, per row:
 | 11 | `kill_switch` | no | a boolean; unparseable is `400` + `010`, detail `invalid_body_kill_switch`. Setting it is always allowed; **clearing** it needs `dashboard.allow_resume`, else `403` + `010`, detail `resume_disabled` |
 | 11 | `grants` | no | a comma-separated list; the empty string sets `[]` |
 
+Close is available from `acknowledged` (T50), `play:failed` (T50a),
+`verifying` (T38) and `suppressed` (T45); the latter two remain subject to
+their verification/quiet-window guards. For `play:failed`, a write-authorized
+operator supplies a reason and one of the listed resolutions; success returns
+200 with refreshed incident rows and resolves the incident. Other states without
+a close edge return 409 with `TROUBLE-LADDER-012` and `no_close_edge`.
+See SPEC-05 §3.2c.
+
 **Compare-and-set (rows 9 and 10).** A POST that sends `expected_state` and/or
 `ledger_seq` (the values the fragment it came from rendered) is refused `409` +
 `TROUBLE-DASHBOARD-010` with detail `stale_view` if either no longer holds —

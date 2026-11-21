@@ -276,15 +276,15 @@ func (s *server) canWrite() bool { return true }
 
 // humanClosable reports whether the ladder's transition table has an edge from
 // st into `resolved` for a human click: T38 (window_passed) from `verifying`,
-// T45 (quiet_close) from `suppressed` and T50 (human_close) from
-// `acknowledged` (SPEC-05 §3.2/§3.2a). The list is a MIRROR of the table, kept
+// T45 (quiet_close) from `suppressed`, T50 (human_close) from
+// `acknowledged`, and T50a from `play:failed` (SPEC-05 §3.2c). The list is a MIRROR of the table, kept
 // here because the dashboard imports `internal/types` only and the row-render
 // path must not reach into the ladder; it is presentation, and the bridge's
 // derived check (ladder.CloseEdge) is the authority a POST is held to
 // (SPEC-10 §2.2: UI state is presentation only).
 func humanClosable(st types.LadderState) bool {
 	switch st {
-	case types.StVerifying, types.StSuppressed, types.StAcknowledged:
+	case types.StVerifying, types.StSuppressed, types.StAcknowledged, types.StPlayFailed:
 		return true
 	}
 	return false

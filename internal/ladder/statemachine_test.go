@@ -9,15 +9,15 @@ import (
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
-// statemachine_test.go is the §7 row for the transition table: 50 legal vectors
-// (T01–T50) plus 14 refusal vectors (R01–R14) asserted cell-by-cell — the
+// statemachine_test.go is the §7 row for the transition table: 51 legal vectors
+// (T01–T50 and T50a) plus 14 refusal vectors (R01–R14) asserted cell-by-cell — the
 // resulting LadderState, the emitted record kind, the exact payload keys and the
-// exact error code. A count guard asserts len(legal)=50 && len(refused)=14 so a
+// exact error code. A count guard asserts len(legal)=51 && len(refused)=14 so a
 // table edit cannot silently drop an edge.
 
 func TestTransitionTableCountGuard(t *testing.T) {
-	if got := LegalEdgeCount(); got != 50 {
-		t.Errorf("the legal table must hold 50 edges, got %d", got)
+	if got := LegalEdgeCount(); got != 51 {
+		t.Errorf("the legal table must hold 51 edges, got %d", got)
 	}
 	if got := RefusedEdgeCount(); got != 14 {
 		t.Errorf("the refused table must hold 14 edges, got %d", got)
@@ -25,6 +25,9 @@ func TestTransitionTableCountGuard(t *testing.T) {
 	// The ids must be T01…T50 and R01…R14 with no gaps.
 	for i, id := range EdgeIDs() {
 		want := fmt.Sprintf("T%02d", i+1)
+		if i == 50 {
+			want = "T50a"
+		}
 		if id != want {
 			t.Errorf("legal edge %d is %s, want %s", i, id, want)
 		}
@@ -413,10 +416,14 @@ func TestLegalEdgeVectors(t *testing.T) {
 			}
 			return res.Inc, Transition{Trigger: "T50"}
 		}, wantTo: types.StResolved},
+		{id: "T50a", seed: func(t *testing.T, h *harness) (string, Transition) {
+			inc, _ := playFailed(t, h, "t50a")
+			return inc, Transition{Trigger: "T50a"}
+		}, wantTo: types.StResolved},
 	}
 
-	if len(vectors) != 50 {
-		t.Fatalf("the vector suite must cover all 50 legal rows, got %d", len(vectors))
+	if len(vectors) != 51 {
+		t.Fatalf("the vector suite must cover all 51 legal rows, got %d", len(vectors))
 	}
 	for _, v := range vectors {
 		v := v

@@ -8,9 +8,9 @@ import (
 	"github.com/trouble-agent/trouble/internal/types"
 )
 
-// The transition table is DATA (SPEC-05 §7): 50 legal edges (T01–T50) and 14
+// The transition table is DATA (SPEC-05 §7): 51 legal edges (T01–T50 and T50a) and 14
 // refused edges (R01–R14), asserted cell-by-cell. A count guard in the tests
-// asserts len(legal)==50 && len(refused)==14 so a table edit cannot silently drop
+// asserts len(legal)==51 && len(refused)==14 so a table edit cannot silently drop
 // an edge. T49/T50 are the human ack/close edges added by amendment TRBL-118
 // (§3.2a): the dashboard's ack owns a real state (`acknowledged`) instead of a
 // record-only note, and a human close walks out of it.
@@ -849,6 +849,15 @@ var legal = []edge{
 		// ladder's own proofs (T38 window_passed, T45 quiet_close) stay the only
 		// edges the daemon may take on its own — T50 exists only because a person
 		// clicked close.
+		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
+			st.Inc.ResolvedTS = types.FormatUTC(l.now())
+			return nil
+		},
+	},
+	// T50a — TRBL-143, SPEC-05 §3.2c: a human may close a failed play.
+	{
+		ID: "T50a", From: anyOf(types.StPlayFailed), To: types.StResolved, Trigger: "human_close",
+		Emitted: []string{"transition", "state", "resolved_ts"},
 		Apply: func(l *Ladder, st *incState, tr Transition) *Error {
 			st.Inc.ResolvedTS = types.FormatUTC(l.now())
 			return nil

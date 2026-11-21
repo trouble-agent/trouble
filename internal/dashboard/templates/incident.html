@@ -51,7 +51,7 @@
 {{if not .CanWrite}}<small class="why">requires a write-scope token (this session has {{.Scope}})</small>{{end}}
 </form>
 {{else}}
-<p class="why">close is not offered in state {{.Incident.State}}: a close needs verified work (T38), a quiet suppression window (T45) or an acknowledgement (T50) — SPEC-05 §3.2</p>
+<p class="why">close is not offered in state {{.Incident.State}}: a close needs verified work (T38), a quiet suppression window (T45), an acknowledgement (T50) or a failed play (T50a) — SPEC-05 §3.2</p>
 {{end}}
 </section>
 <section class="panel">

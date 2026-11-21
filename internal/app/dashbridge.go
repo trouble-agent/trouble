@@ -352,7 +352,7 @@ type noCloseEdge struct{ state types.LadderState }
 
 func (e *noCloseEdge) Error() string {
 	return "TROUBLE-LADDER-012: incident state " + string(e.state) +
-		" has no legal edge to resolved; a human close is defined from verified work (T38), a quiet suppression window (T45) or an acknowledged incident (T50)"
+		" has no legal edge to resolved; a human close is defined from verified work (T38), a quiet suppression window (T45), an acknowledged incident (T50) or a failed play (T50a)"
 }
 
 // ErrorCode is the seam code: TROUBLE-LADDER-012 is the ladder's permanent

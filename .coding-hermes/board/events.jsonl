@@ -637,3 +637,5 @@
 {"id":632,"timestamp":"2026-11-20T12:06:16Z","event_type":"task_completed","task_id":"TRBL-142","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":633,"timestamp":"2026-11-20T12:15:14Z","event_type":"task_completed","task_id":"QA-TROUBLE-17-R4","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":634,"timestamp":"2026-11-21T01:01:06Z","event_type":"task_completed","task_id":"TRBL-140","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":635,"timestamp":"2026-11-21T07:43:47Z","event_type":"task_updated","task_id":"QA-TROUBLE-25","actor":"foreman","detail":"{\"status\":\"pending\"}","marker":null}
+{"id":636,"timestamp":"2026-11-21T07:45:00Z","event_type":"task_completed","task_id":"TRBL-049","actor":"foreman","detail":"{\"status\":\"complete\",\"by\":\"trouble-pm cycle 4 - owner decision moot; 3/3 gate arms verified\"}","marker":null}

@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/trouble-agent/trouble/internal/types"
@@ -26,7 +27,7 @@ func TestReadStatusMarksUnbuiltIndexExplicitly(t *testing.T) {
 			Origin: types.Origin{HostID: "7f3a91c2d4e5b607", Source: "psi"},
 			Actor:  testActor(),
 			Payload: map[string]any{
-				"state": "detected",
+				"state": "detected", "transition": "T01",
 			},
 		})
 
@@ -39,6 +40,8 @@ func TestReadStatusMarksUnbuiltIndexExplicitly(t *testing.T) {
 			t.Fatalf("ReadStatus: %v", err)
 		}
 		assertReadOnlyIndexUnmeasured(t, readOnly)
+		assertIncidentJSON(t, live, true, 1)
+		assertIncidentJSON(t, readOnly, false, 0)
 		if readOnly.Records == 0 {
 			t.Fatal("read-only status did not observe the populated ledger")
 		}
@@ -50,10 +53,30 @@ func TestReadStatusMarksUnbuiltIndexExplicitly(t *testing.T) {
 			t.Fatalf("ReadStatus: %v", err)
 		}
 		assertReadOnlyIndexUnmeasured(t, readOnly)
+		assertIncidentJSON(t, readOnly, false, 0)
+		assertIncidentJSON(t, types.LedgerStatus{Index: types.IndexStats{Measured: true}}, true, 0)
 		if readOnly.Records != 0 {
 			t.Fatalf("empty read-only status records = %d, want 0", readOnly.Records)
 		}
 	})
+}
+
+func assertIncidentJSON(t *testing.T, st types.LedgerStatus, present bool, want float64) {
+	t.Helper()
+	b, err := json.Marshal(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Index map[string]any `json:"index"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := doc.Index["incidents"]
+	if ok != present || (ok && got != want) {
+		t.Fatalf("index incidents = %v (present=%t), want %v (present=%t); JSON: %s", got, ok, want, present, b)
+	}
 }
 
 func assertReadOnlyIndexUnmeasured(t *testing.T, st types.LedgerStatus) {

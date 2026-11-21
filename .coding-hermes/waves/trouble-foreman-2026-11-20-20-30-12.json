@@ -1,0 +1,24 @@
+{
+  "scheduler_tick_id": "trouble-foreman-2026-11-20-20-30-12",
+  "mode": "serial",
+  "wave_budget": 3,
+  "composed_wave": null,
+  "serial_reason": "Only 2 ready rows at tick start; neither is a coding row for a worker. TRBL-140 = board-plane acceptance-criteria repairs (foreman-inline per doctrine clause 22). TRBL-141 = fleet-side checker fix, routed out of lane via defer with owner named (checker lives at ~/.hermes/scripts/acceptance_gate.py).",
+  "tasks": [
+    {
+      "row": "TRBL-140",
+      "mode": "foreman-inline",
+      "state": "edits committed 36dfbb4; gitreins task complete flip landed (tasks.yaml, gitignored) but sync judge output lost twice to tool-window kills; verdict recovery via async judge",
+      "async_judge_job": "job-bf44740ae07940ea9e12d75cf7c37284",
+      "poll": "gitreins judge --status job-bf44740ae07940ea9e12d75cf7c37284",
+      "next": "on PASS verdict: boardctl update TRBL-140 --status complete --evidence-run-id <history-dir-id>; commit + push"
+    },
+    {
+      "row": "TRBL-141",
+      "mode": "routed-out",
+      "state": "deferred with owner named (fleet tools lane, ~/.hermes/scripts/acceptance_gate.py); committed 36dfbb4"
+    }
+  ],
+  "started_at": "2026-11-20T20:30:12-05:00",
+  "head_at_dispatch": "36dfbb4"
+}

@@ -2220,6 +2220,7 @@ allocated in SPEC-INDEX §3.5 (twelve subsystems plus `internal/hub` since v0.1.
 | TROUBLE-LIFECYCLE-015 | transient | spool budget exceeded → drop-oldest + ledger note | SPEC-12 |
 | TROUBLE-LIFECYCLE-016 | permanent | unit is missing OnFailure/escalation wiring | SPEC-12 |
 | TROUBLE-LIFECYCLE-017 | transient | clock skew beyond tolerance across hosts | SPEC-12 |
+| TROUBLE-LIFECYCLE-018 | permanent | explicitly selected config file unavailable | SPEC-12 |
 | TROUBLE-HUB-001 | permanent | invalid/incomplete server profile (unknown profile, light-hub without a Redis URL or a DuckBrain namespace, light-hub on a satellite) | SPEC-13 |
 | TROUBLE-HUB-002 | permanent | Redis connection or credentials rejected (bad URL scheme, NOAUTH/WRONGPASS, unusable DB) | SPEC-13 |
 | TROUBLE-HUB-003 | transient | Redis unreachable at boot (degraded start, or exit 13 when `require_redis=true`) | SPEC-13 |

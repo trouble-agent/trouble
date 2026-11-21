@@ -180,7 +180,7 @@ SPEC-INDEX §6.1 — never inside a numbered spec section.
 | TROUBLE-ISSUES-0NN | SPEC-09 | 001–010 |
 | TROUBLE-DASHBOARD-0NN | SPEC-10 | 001–013 |
 | TROUBLE-SKILLS-0NN | SPEC-11 | 001–014 |
-| TROUBLE-LIFECYCLE-0NN | SPEC-12 | 001–017 |
+| TROUBLE-LIFECYCLE-0NN | SPEC-12 | 001–018 |
 | TROUBLE-HUB-0NN | SPEC-13 | 001–016 |
 
 The authoritative catalog with meanings and classes is SPEC-TYPES §5. A spec MAY add a new code inside

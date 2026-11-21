@@ -1926,6 +1926,15 @@ func registry(c *Config) []keyMeta {
 
 // Resolve builds a Resolved config from flags, env, file and defaults.
 func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
+	return resolve(args, env, cfgPath, false)
+}
+
+// ResolveExplicit requires the selected config file to be readable, even when absent.
+func ResolveExplicit(args []string, env []string, cfgPath string) (Resolved, error) {
+	return resolve(args, env, cfgPath, true)
+}
+
+func resolve(args []string, env []string, cfgPath string, explicit bool) (Resolved, error) {
 	def := defaults()
 	known := make(map[string]keyMeta)
 	for _, m := range registry(def) {
@@ -1947,12 +1956,27 @@ func Resolve(args []string, env []string, cfgPath string) (Resolved, error) {
 	}
 
 	// file
-	if cfgPath == "" {
+	if cfgPath == "" && !explicit {
 		cfgPath = def.ConfigPath
 	}
+	if explicit {
+		info, err := os.Stat(cfgPath)
+		if err != nil {
+			return Resolved{}, fmt.Errorf("%w: config path %q: %w", types.CodeLifecycle018, cfgPath, err)
+		}
+		if info.IsDir() {
+			return Resolved{}, fmt.Errorf("%w: config path %q: is a directory", types.CodeLifecycle018, cfgPath)
+		}
+	}
 	fileVals, tableDocs, err := parseTOMLFile(cfgPath)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return Resolved{}, fmt.Errorf("%w: %v", types.CodeLifecycle001, err)
+	if err != nil {
+		var pathErr *os.PathError
+		if explicit && errors.As(err, &pathErr) {
+			return Resolved{}, fmt.Errorf("%w: config path %q: %w", types.CodeLifecycle018, cfgPath, err)
+		}
+		if explicit || !errors.Is(err, os.ErrNotExist) {
+			return Resolved{}, fmt.Errorf("%w: %v", types.CodeLifecycle001, err)
+		}
 	}
 	// A registered subsystem table absorbs every file key under its name
 	// (SPEC-12 §3.1b) before the allowlist check below: `[issues]` and

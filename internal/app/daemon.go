@@ -172,8 +172,12 @@ func RunDaemon(ctx context.Context, o BootOptions) (*Daemon, error) {
 	// (SPEC-12 §2.5). Nothing else on argv is interpreted here — the key flags go
 	// to Resolve untouched, which is what makes the documented per-key surface
 	// reachable from the shipped binary (TRBL-018).
-	args, cfgPath := splitConfigFlag(o.Args, defaultConfigPath())
-	res, err := lifecycle.Resolve(args, o.Env, cfgPath)
+	args, cfgPath, explicit := splitConfigFlag(o.Args, defaultConfigPath())
+	resolve := lifecycle.Resolve
+	if explicit {
+		resolve = lifecycle.ResolveExplicit
+	}
+	res, err := resolve(args, o.Env, cfgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1076,27 +1080,32 @@ func setResolved(vals []types.ConfigValue, key, value, source, sourceRef string)
 // Only the operator form is removed from the returned arguments. The mechanical
 // form stays in argv: it is still a resolved key, and `trouble config explain` has
 // to show that a flag — not the file — chose it.
-func splitConfigFlag(args []string, def string) ([]string, string) {
+func splitConfigFlag(args []string, def string) ([]string, string, bool) {
 	out := make([]string, 0, len(args))
 	path := def
+	explicit := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
 		case arg == "--config" && i+1 < len(args):
+			explicit = true
 			path = args[i+1]
 			i++
 			continue
 		case strings.HasPrefix(arg, "--config="):
+			explicit = true
 			path = strings.TrimPrefix(arg, "--config=")
 			continue
 		case arg == "--config_path" && i+1 < len(args):
+			explicit = true
 			path = args[i+1]
 		case strings.HasPrefix(arg, "--config_path="):
+			explicit = true
 			path = strings.TrimPrefix(arg, "--config_path=")
 		}
 		out = append(out, arg)
 	}
-	return out, path
+	return out, path, explicit
 }
 
 func defaultConfigPath() string {

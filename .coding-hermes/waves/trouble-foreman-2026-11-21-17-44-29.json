@@ -1,0 +1,33 @@
+{
+  "tick_id": "trouble-foreman-2026-11-21-17-44-29",
+  "project": "trouble",
+  "repo": "/home/kara/trouble",
+  "base": "origin/main",
+  "base_sha": "22ea570",
+  "wave_budget": 3,
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "tasks": [
+    {
+      "id": "TRBL-143",
+      "title": "play:failed incidents have no legal close edge: dashboard close always refused",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-143",
+      "branch": "wt/TRBL-143",
+      "status": "dispatched"
+    },
+    {
+      "id": "TRBL-145",
+      "title": "troubled --config <missing-file> boots silently on the default state root",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-145",
+      "branch": "wt/TRBL-145",
+      "status": "dispatched"
+    },
+    {
+      "id": "TRBL-130-R3",
+      "title": "Recurrence: ledger status reports incidents=0 (measured:false) while 16 incidents are on disk",
+      "worktree": "/home/kara/worktrees/trouble-TRBL-130-R3",
+      "branch": "wt/TRBL-130-R3",
+      "status": "dispatched"
+    }
+  ]
+}

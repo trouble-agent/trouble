@@ -639,3 +639,8 @@
 {"id":634,"timestamp":"2026-11-21T01:01:06Z","event_type":"task_completed","task_id":"TRBL-140","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":635,"timestamp":"2026-11-21T07:43:47Z","event_type":"task_updated","task_id":"QA-TROUBLE-25","actor":"foreman","detail":"{\"status\":\"pending\"}","marker":null}
 {"id":636,"timestamp":"2026-11-21T07:45:00Z","event_type":"task_completed","task_id":"TRBL-049","actor":"foreman","detail":"{\"status\":\"complete\",\"by\":\"trouble-pm cycle 4 - owner decision moot; 3/3 gate arms verified\"}","marker":null}
+{"id":637,"timestamp":"2026-11-21T11:13:18Z","event_type":"task_created","task_id":"TRBL-143","actor":"foreman","detail":"{\"id\":\"TRBL-143\",\"status\":\"pending\"}","marker":null}
+{"id":638,"timestamp":"2026-11-21T11:13:18Z","event_type":"task_created","task_id":"TRBL-144","actor":"foreman","detail":"{\"id\":\"TRBL-144\",\"status\":\"pending\"}","marker":null}
+{"id":639,"timestamp":"2026-11-21T11:13:18Z","event_type":"task_created","task_id":"TRBL-145","actor":"foreman","detail":"{\"id\":\"TRBL-145\",\"status\":\"pending\"}","marker":null}
+{"id":640,"timestamp":"2026-11-21T11:13:18Z","event_type":"task_created","task_id":"TRBL-146","actor":"foreman","detail":"{\"id\":\"TRBL-146\",\"status\":\"pending\"}","marker":null}
+{"id":641,"timestamp":"2026-11-21T11:13:18Z","event_type":"task_created","task_id":"TRBL-130-R3","actor":"foreman","detail":"{\"id\":\"TRBL-130-R3\",\"status\":\"pending\"}","marker":null}

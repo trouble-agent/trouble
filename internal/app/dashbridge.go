@@ -240,7 +240,10 @@ func (a Actions) Ack(ctx context.Context, inc string, actor types.Actor, reason 
 func (a Actions) Close(ctx context.Context, inc string, actor types.Actor, reason, resolution string) error {
 	cur, err := a.Ladder.Incident(ctx, inc)
 	if err != nil {
-		return err
+		// TRBL-144: this return carried the raw ladder error, which fell
+		// through mapActionError to the generic 500 action_failed on the
+		// close route (the dogfood incident). Every seam path adapts.
+		return adaptSeam(err)
 	}
 	if closeTrigger(cur.State) == "" {
 		return errNoCloseEdge(cur.State)
@@ -313,11 +316,13 @@ func (a Autonomy) SetAutonomy(ctx context.Context, gates types.AutonomyGates, ac
 	ctx = WithActor(ctx, actor)
 	applied, err := lifecycle.SetAutonomy(ctx, lifecycle.AutonomyDeps{Gates: gatesStore{a.Ladder}, Writer: a.records()}, gates, actor)
 	if err != nil {
-		return types.AutonomyGates{}, err
+		// TRBL-144: same seam rule as Ack/Close — a ladder refusal (e.g.
+		// LADDER-011 from SetGates) must travel to the wire, not 500.
+		return types.AutonomyGates{}, adaptSeam(err)
 	}
 	if a.Ladder != nil {
 		if _, err := a.Ladder.SetGates(ctx, applied, actor); err != nil {
-			return types.AutonomyGates{}, err
+			return types.AutonomyGates{}, adaptSeam(err)
 		}
 	}
 	return applied, nil
@@ -383,25 +388,21 @@ func (a ladderSeamError) Error() string { return a.e.Error() }
 // through the adapter (and any further wrapping).
 func (a ladderSeamError) Unwrap() error { return a.e }
 
-func (a ladderSeamError) ErrorCode() types.ErrorCode { return a.e.Code }
+// The wire vocabulary is owned by *ladder.Error itself (TRBL-144: the ladder
+// carries the seam shape directly, so any un-adapted path still maps); the
+// adapter DELEGATES, it does not restate it.
+func (a ladderSeamError) ErrorCode() types.ErrorCode { return a.e.ErrorCode() }
 
 func (a ladderSeamError) ErrorDetail() string {
-	if a.e.Detail != "" {
-		return "ladder_" + strings.ToLower(strings.TrimPrefix(string(a.e.Code), "TROUBLE-LADDER-"))
-	}
-	return ""
+	return a.e.ErrorDetail()
 }
 
 func (a ladderSeamError) ErrorReason() string {
-	if a.e.Reason != "" {
-		return a.e.Reason
-	}
-	// Guard refusals carry the human cause in Detail (newErr's format string).
-	return a.e.Detail
+	return a.e.ErrorReason()
 }
 
 func (a ladderSeamError) RefusedTransition() bool {
-	return types.CodeClass[a.e.Code] == types.ErrClassPermanent
+	return a.e.RefusedTransition()
 }
 
 // adaptSeam wraps a write-seam error from the owning subsystem onto the shape

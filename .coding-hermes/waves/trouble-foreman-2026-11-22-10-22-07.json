@@ -1,0 +1,19 @@
+{
+  "wave_id": "trouble-foreman-2026-11-22-10-22-07",
+  "tick": "trouble-foreman-2026-11-22-10-22-07",
+  "recovered_manifest": "trouble-foreman-2026-11-21-17-44-29.json",
+  "recovery_note": "recovery manifest had 0 workers; nothing to recover",
+  "base": {"branch": "main", "sha": "63db459"},
+  "worker_model": "glm-5.3-flash@ollama-cloud (AUTHORITATIVE)",
+  "budget": {"admitted": 7, "composed": 3},
+  "workers": [
+    {"row": "TRBL-144", "worktree": "/home/kara/worktrees/trouble-TRBL-144", "branch": "wt/TRBL-144", "brief": "brief-TRBL-144.md"},
+    {"row": "TRBL-138", "worktree": "/home/kara/worktrees/trouble-TRBL-138", "branch": "wt/TRBL-138", "cross_repo": true, "brief": "brief-TRBL-138.md"},
+    {"row": "QA-TROUBLE-17-R4-R2", "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-17-R4-R2", "branch": "wt/QA-TROUBLE-17-R4-R2", "brief": "brief-QA-TROUBLE-17-R4-R2.md"}
+  ],
+  "not_composed": [
+    {"row": "TRBL-135", "reason": "file-seam collision with TRBL-138 (both edit engine/evaluator.py in ~/gitreins); TRBL-138 dispatched, TRBL-135 next wave"},
+    {"row": "TRBL-146", "reason": "dogfood install leg = QA/dogfood-lane action, not coding-in-repo; deferred to dogfood lane"},
+    {"row": "QA-TROUBLE-031", "reason": "QA-harness defect (bunker-qa.sh own tooling) routes to qa-foreman/bunker-qa lane"}
+  ]
+}

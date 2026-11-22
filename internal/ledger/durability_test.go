@@ -88,18 +88,18 @@ func runAppends(t *testing.T, l *Ledger, n, c int) time.Duration {
 // enforced by TestAmortizedThroughput.
 func TestFsyncCountIsStructural(t *testing.T) {
 	const batch = 4096
-	loadAtStart := loadAvg1()
 	// QA-TROUBLE-17-R2-R2: this structural count still depends on the
 	// scheduler delivering the producer wave. Above the shared host-load
 	// ceiling, a count miss cannot distinguish a ledger regression from host
 	// descheduling, so skip before creating the measured region. Below it, the
 	// want..want+1 invariant below remains unchanged and can fail normally.
-	if loadfence.AboveHostGate(loadAtStart) {
-		t.Skipf("%s", loadfence.HostGateSkipText(
-			"TestFsyncCountIsStructural",
-			"batch-counted fsync invariant is not falsifiable while producer scheduling is above the shared ceiling",
-			loadAtStart))
-	}
+	// QA-TROUBLE-17-R4-R2: the window RE-SAMPLES across the measurement — a
+	// sibling's burst after the opening sample is a named SKIP at grading
+	// time, not a graded red.
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestFsyncCountIsStructural",
+		"batch-counted fsync invariant is not falsifiable while producer scheduling is above the shared ceiling")
 	// QA-TROUBLE-22: under a memory cap the group-commit run's wall time is
 	// what the timeout eats (25600×4096 producers × ~1050 batches of fsyncs
 	// scale with cap pressure). The invariant is batch-COUNTED, so a smaller
@@ -126,6 +126,10 @@ func TestFsyncCountIsStructural(t *testing.T) {
 	deltaR := after.Records - before.Records
 	want := (deltaR + int64(batch) - 1) / int64(batch)
 	load := loadAvg1()
+	// QA-TROUBLE-17-R4-R2: the burst fence sits BEFORE the miss is graded —
+	// a skip recorded after a failure does not un-fail the test.
+	win.SkipBurst(t, "TestFsyncCountIsStructural",
+		"the batch-counted fsync invariant is not falsifiable on a window a host load burst crossed (producer descheduling)")
 	if deltaF < want || deltaF > want+1 {
 		// QA-TROUBLE-23: the miss is fenced on host PRESSURE, not load alone —
 		// under a memory ceiling the producer wave straggles without moving
@@ -175,17 +179,17 @@ func TestFsyncCountIsStructural(t *testing.T) {
 // fails exactly as it always has.
 func TestAmortizedThroughput(t *testing.T) {
 	loadfence.SkipUnderCIIfLoadCalibrated(t, "amortized group-commit 515,000 rec/s (spec floor 100,000), reference host measured 515k")
-	loadAtStart := loadAvg1()
 	// QA-TROUBLE-17-R2-R2: the measured rate includes producer scheduling and
 	// fsync service time. Above the shared host-load ceiling, a low rate is not
 	// falsifiable as a ledger regression, so skip before the measured region.
 	// Below it, the calibrated floor remains a real assertion.
-	if loadfence.AboveHostGate(loadAtStart) {
-		t.Skipf("%s", loadfence.HostGateSkipText(
-			"TestAmortizedThroughput",
-			"amortized group-commit rate is not falsifiable while producer scheduling is above the shared ceiling",
-			loadAtStart))
-	}
+	// QA-TROUBLE-17-R4-R2: the window RE-SAMPLES across the measurement — a
+	// sibling's burst after the opening sample is a named SKIP at grading
+	// time, not a graded red.
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestAmortizedThroughput",
+		"amortized group-commit rate is not falsifiable while producer scheduling is above the shared ceiling")
 	if raceEnabled {
 		t.Skip("absolute throughput floors are measured without -race; run `go test -count=1 ./internal/ledger/...` for the regression bar")
 	}
@@ -216,6 +220,10 @@ func TestAmortizedThroughput(t *testing.T) {
 	scale := prof.Scale()
 	load := prof.Load
 	floor := 100000.0 / scale
+	// QA-TROUBLE-17-R4-R2: the burst fence sits BEFORE the miss is graded —
+	// a skip recorded after a failure does not un-fail the test.
+	win.SkipBurst(t, "TestAmortizedThroughput",
+		"amortized group-commit rate is not falsifiable on a window a host load burst crossed (producer descheduling)")
 	if rate < floor {
 		// QA-TROUBLE-23: a rate under the floor is fenced on host PRESSURE —
 		// the 2026-10-28 chaos-resource leg measured 12,435 rec/s at load_avg
@@ -372,6 +380,16 @@ func TestFsyncWindowBound(t *testing.T) {
 // amortized).
 func TestPerLineRegression(t *testing.T) {
 	loadfence.SkipUnderCIIfLoadCalibrated(t, "amortized 515,000 rec/s vs per-line 512 rec/s (runner floor 73,294 rec/s at scale x1.36)")
+	// QA-TROUBLE-17-R4-R2: the regression bar is a host measurement, and this
+	// gate was the one without a host-load fence at all in the 2026-11-22
+	// recurrence (a rebuild scan rate graded 19.0 MiB/s against a 50.3 MiB/s
+	// floor purely on IO contention). The window re-samples load across the
+	// whole measurement (group-commit run, per-line run, pilots) and its peak
+	// fences the grading below: a burst → named SKIP, not a graded red.
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestPerLineRegression",
+		"the per-line regression bar is not falsifiable while scheduling is above the shared ceiling")
 	// QA-TROUBLE-22: the amortized leg runs 102,400 records through 4096
 	// concurrent producers — the same population as TestAmortizedThroughput —
 	// and its wall time is the cap-sensitive half of this test. The ratio
@@ -404,6 +422,10 @@ func TestPerLineRegression(t *testing.T) {
 		// disk that load_avg cannot.
 		prof := loadfence.Measure(t.TempDir())
 		scale := prof.Scale()
+		// QA-TROUBLE-17-R4-R2: the burst fence sits BEFORE the miss is
+		// graded — a skip recorded after a failure does not un-fail the test.
+		win.SkipBurst(t, "TestPerLineRegression",
+			"the per-line regression bar is not falsifiable on a window a host load burst crossed (IO contention)")
 		if floor := 100000.0 / scale; groupRate < floor {
 			t.Errorf("group-commit throughput = %.0f rec/s at load_avg_1m=%.2f (io=x%.2f scale=x%.2f), want >= %.0f",
 				groupRate, prof.Load, prof.IOMultiple, scale, floor)

@@ -1101,14 +1101,14 @@ func TestBudgetDashboardRSS(t *testing.T) {
 	}
 	// QA-TROUBLE-17-R2-R2: the load-sensitive driver/helper measurement must
 	// skip before starting either process above the shared host-load ceiling.
-	// Below it, the real dashboard assertions remain unchanged.
-	dashboardLoad := loadAvgDashboard()
-	if loadfence.AboveHostGate(dashboardLoad) {
-		t.Skipf("%s", loadfence.HostGateSkipText(
-			"TestBudgetDashboardRSS",
-			"dashboard render/RSS/request-rate budgets are not falsifiable while helper scheduling is above the shared ceiling",
-			dashboardLoad))
-	}
+	// QA-TROUBLE-17-R4-R2: the window now RE-SAMPLES load across the whole
+	// measurement window (helper run, burst, stats) — a sibling's burst after
+	// the opening sample is a named SKIP at grading time, not a graded red.
+	// Below either sample, the real dashboard assertions remain unchanged.
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestBudgetDashboardRSS",
+		"dashboard render/RSS/request-rate budgets are not falsifiable while helper scheduling is above the shared ceiling")
 	// QA-TROUBLE-22: this fixed-shape two-process measurement has no bounded
 	// variant. Its GC cadence would report cap thrash rather than dashboard
 	// state, so use the shared measured-cap skip before building the fixture.
@@ -1254,12 +1254,20 @@ func TestBudgetDashboardRSS(t *testing.T) {
 			w.name, len(w.v.Batches), strings.Join(floors, " "), strings.Join(peaks, " "))
 	}
 	load := loadAvgDashboard()
-	t.Logf("retained heap (§2.9a): dashboard total %d bytes over the window, steady-state tail slope %d bytes per batch over %d batches = %d bytes scaled to the window; control total %d bytes, slope %d scaled; budgets: steady %d bytes, RSS ceiling %d bytes; load_avg_1m=%.2f",
+	t.Logf("retained heap (§2.9a): dashboard total %d bytes over the window, steady-state tail slope %d bytes per batch over %d batches = %d bytes scaled to the window; control total %d bytes, slope %d scaled; budgets: steady %d bytes, RSS ceiling %d bytes; load_avg_1m=%.2f (window open %.2f, peak %.2f)",
 		st.Dashboard.Retained.Total, st.Dashboard.Retained.SlopePer, st.Dashboard.Retained.TailBatches,
 		st.Dashboard.Retained.SlopeWindow, st.Control.Retained.Total, st.Control.Retained.SlopeWindow,
-		steadyRSSDelta, rssProcessCeiling, load)
+		steadyRSSDelta, rssProcessCeiling, load, win.Start(), win.Peak())
 
 	const gate = "TestBudgetDashboardRSS"
+
+	// QA-TROUBLE-17-R4-R2: a load burst that opened AFTER the quiet first
+	// sample contaminated this window (2026-11-22: p99 133.5 ms vs the
+	// 2x-clamped 40 ms budget and 67 rps vs the 75% floor, at load 31.38,
+	// while the opening sample was quiet). Skip named, before any Error* —
+	// a skip recorded after a failure does not un-fail the test.
+	win.SkipBurst(t, gate,
+		"dashboard render p99/rps/RSS budgets are not falsifiable on a window a host load burst crossed")
 
 	// The render p99 is a quiet-host number: it is a per-request wall clock
 	// inside the helper, so it absorbs both the helper's descheduling AND the

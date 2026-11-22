@@ -74,6 +74,16 @@ func TestRebuildBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("512 MiB synthetic fixture is skipped under -short")
 	}
+	// QA-TROUBLE-17-R4-R2: the §3.6/§7 budget is a host measurement, and the
+	// start sample alone cannot see a sibling's burst that begins after it
+	// (the 2026-11-22 recurrence graded a rebuild scan rate of 41.8 MiB/s
+	// against a 50.3 MiB/s floor purely on I/O contention). The window
+	// re-samples load across the whole measurement (fixture write, pilot,
+	// rebuild) and its peak fences the grading below: a burst → named SKIP.
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestRebuildBudget",
+		"the §3.6 rebuild budget and §7 scan-rate floor are not falsifiable while scheduling is above the shared ceiling")
 	// The 500 MiB write is pure sequential encode I/O (QA-TROUBLE-6 measured
 	// the writer streaming at O(1) live set); what the ceiling inflates is its
 	// WALL TIME through the GC assist on the encode churn. The unit is 2
@@ -138,6 +148,10 @@ func TestRebuildBudget(t *testing.T) {
 	}
 	t.Logf("calibration: %s -> scale x%.2f (io x%.2f cpu x%.2f, load_avg_1m=%.2f) budget_ms=%d rate_floor=%.1f MiB/s",
 		prof, scale, prof.IOMultiple, prof.CPUMultiple, load, budgetMS, rateFloor)
+	// QA-TROUBLE-17-R4-R2: the burst fence sits BEFORE the graded assertions
+	// — a skip recorded after a failure does not un-fail the test.
+	win.SkipBurst(t, "TestRebuildBudget",
+		"the §3.6 rebuild budget and §7 scan-rate floor are not falsifiable on a window a host load burst crossed (the 2026-11-22 recurrence graded a 41.8 MiB/s scan against a 50.3 MiB/s floor on IO contention)")
 	if st.BuildMS > budgetMS {
 		t.Errorf("BuildMS = %d, want <= %d (SPEC-01 §7 budget is %d; race=%v load_avg_1m=%.2f scale=x%.2f)",
 			st.BuildMS, budgetMS, DefaultIndexBuildBudgetMS, raceEnabled, load, scale)
@@ -257,6 +271,13 @@ func TestQueryLatency(t *testing.T) {
 	if testing.Short() {
 		t.Skip("500k/500k latency fixture skipped under -short")
 	}
+	// QA-TROUBLE-17-R4-R2: the §3.8 ceilings are host-measured query latencies
+	// graded after a long fixture build; the same load-burst window fences
+	// them (skip before any Error*, as for the other host gates).
+	win := loadfence.StartLoadWindow()
+	defer win.Stop()
+	win.SkipStart(t, "TestQueryLatency",
+		"the §3.8 query-latency ceilings are not falsifiable while scheduling is above the shared ceiling")
 	clk := newFakeClock(testNow())
 	l := testLedger(t, clk, func(o *Options) {
 		o.Index.MaxGroups = 600000
@@ -267,6 +288,13 @@ func TestQueryLatency(t *testing.T) {
 	applyFixtureRecords(t, l, n)
 	t.Logf("fixture: %d groups, %d incidents, %d sources",
 		l.IndexStats().Groups, l.IndexStats().Incidents, l.IndexStats().Sources)
+	// QA-TROUBLE-17-R4-R2: the burst fence sits BEFORE every latency
+	// assertion — the fixture build takes tens of seconds, and a burst that
+	// opens after the quiet start inflates the measured queries without the
+	// bounds ever seeing it (the 2026-11-22 recurrence shape). A skip
+	// recorded after a failure does not un-fail the test.
+	win.SkipBurst(t, "TestQueryLatency",
+		"the §3.8 query-latency ceilings are not falsifiable on a window a host load burst crossed")
 
 	// §3.8 trigger-3 limits; -race multiplies every measurement by 5-10x
 	scale := int64(1)

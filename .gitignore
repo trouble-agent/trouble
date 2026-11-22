@@ -31,6 +31,14 @@ deploy/container/secrets/
 namespaces/
 .gitreins/logs/
 .gitreins/tasks.yaml.lock
+# GitReins runtime state rewritten on every invocation (TRBL-147):
+# keep git status clean so dead-wave scans can tell debris from work.
+.gitreins/review-state.json
+.gitreins/review-state.lock
+.gitreins/worktrees.json
+.gitreins/worktrees.lock
+.gitreins/tasks.yaml.bak-*
+.gitreins/tasks.yaml.corrupt-*
 
 # Build artifacts from make bin / go build. Root-anchored on purpose: a bare
 # `trouble` also matches the cmd/trouble/ DIRECTORY, which hides new files in the

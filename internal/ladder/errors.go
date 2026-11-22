@@ -7,6 +7,7 @@ package ladder
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/trouble-agent/trouble/internal/types"
 )
@@ -74,6 +75,51 @@ func ClassOf(err error) types.ErrorClass {
 		return e.Class
 	}
 	return types.ErrClassPermanent
+}
+
+// TRBL-144: *Error carries the write-seam shape the dashboard maps
+// (Error.ErrorCode/ErrorDetail/ErrorReason, SPEC-10 §5/§7.6) itself. The
+// interfaces live in internal/dashboard, but they are structural: no ladder
+// error can be un-adapted on any seam path, so a refusal never collapses into
+// the generic 500 action_failed again. The compile-time assertion pins the
+// shape; the class semantics mirror the ladder's own catalog (§5): a
+// permanent refusal is a refused state transition (409), a transient one is
+// 503, and everything else the dashboard maps as 4xx.
+var _ interface {
+	ErrorCode() types.ErrorCode
+	ErrorDetail() string
+	ErrorReason() string
+	RefusedTransition() bool
+} = (*Error)(nil)
+
+// ErrorCode is the seam code the dashboard's mapActionError answers with.
+func (e *Error) ErrorCode() types.ErrorCode { return e.Code }
+
+// ErrorReason is the human cause: the ladder's reason, or — where a guard
+// refusal carries only a formatted detail (newErr's format string) — the
+// detail itself.
+func (e *Error) ErrorReason() string {
+	if e.Reason != "" {
+		return e.Reason
+	}
+	return e.Detail
+}
+
+// ErrorDetail is the machine-readable refusal name: the ladder's code on the
+// ladder_<suffix> vocabulary the wire uses for ladder-carried refusals, only
+// when the ladder actually filled a detail.
+func (e *Error) ErrorDetail() string {
+	if e.Detail == "" {
+		return ""
+	}
+	return "ladder_" + strings.ToLower(strings.TrimPrefix(string(e.Code), "TROUBLE-LADDER-"))
+}
+
+// RefusedTransition marks a permanent-class ladder refusal as a refused
+// state transition that rejected a write: the API answers 409 Conflict; a
+// transient class keeps its 503 via the code-class mapping.
+func (e *Error) RefusedTransition() bool {
+	return types.CodeClass[e.Code] == types.ErrClassPermanent
 }
 
 // reason constants (SPEC-05 §3; the string lands in payload.reason).

@@ -78,3 +78,119 @@ func TestCloseUnexpectedErrorIsStillGeneric500(t *testing.T) {
 		t.Fatalf("detail = %q, want action_failed", eb.Detail)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TRBL-144: NO operator action on a legal-but-refused transition returns 5xx.
+// The ladder's *Error now carries the seam shape itself (the composition root
+// adapts it), so every typed refusal — refused transition, transient, or a
+// plain policy refusal — must reach the wire on all three operator writes
+// (ack, close, autonomy) with its owning code, never the generic 500
+// action_failed. The sweep drives each route through the real handler with an
+// equivalent carrier of the seam shape (the packages cannot import each
+// other), the same discipline as the close test above.
+// ---------------------------------------------------------------------------
+
+// seamCarrier is the full seam shape a write seam may expose: the owning
+// code, the machine-readable detail, the human reason and the
+// refused-transition mark. Zero-value fields mean "absent", exactly like a
+// seam carrier that implements only part of the interfaces.
+type seamCarrier struct {
+	code      types.ErrorCode
+	detail    string
+	reason    string
+	refused   bool
+	withShape bool // false = the carrier implements ErrorCode only
+}
+
+func (e *seamCarrier) Error() string { return "seam carrier: " + string(e.code) }
+
+func (e *seamCarrier) ErrorCode() types.ErrorCode { return e.code }
+
+func (e *seamCarrier) ErrorDetail() string {
+	if !e.withShape {
+		return ""
+	}
+	return e.detail
+}
+
+func (e *seamCarrier) ErrorReason() string {
+	if !e.withShape {
+		return ""
+	}
+	return e.reason
+}
+
+func (e *seamCarrier) RefusedTransition() bool {
+	if !e.withShape {
+		return false
+	}
+	return e.refused
+}
+
+func TestOperatorRefusalsNeverReturn5xx(t *testing.T) {
+	rows := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   types.ErrorCode
+	}{
+		{
+			name: "refused transition (close on a state with no/close edge)",
+			err: &seamCarrier{code: types.CodeLadder012, detail: "no_close_edge",
+				reason: "incident state recorded has no legal edge to resolved", refused: true, withShape: true},
+			wantStatus: http.StatusConflict,
+			wantCode:   types.CodeLadder012,
+		},
+		{
+			name: "transient ladder refusal",
+			err: &seamCarrier{code: types.CodeLadder015, detail: "ladder_015",
+				reason: "park_failed", refused: false, withShape: true},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   types.CodeLadder015,
+		},
+		{
+			name:       "typed policy refusal of another subsystem",
+			err:        &seamCarrier{code: types.CodeRegistry006},
+			wantStatus: http.StatusBadRequest,
+			wantCode:   types.CodeRegistry006,
+		},
+	}
+
+	for _, row := range rows {
+		for _, route := range []struct {
+			name     string
+			path     string
+			payload  string
+			tokenIdx func(*testEnv) string
+		}{
+			{"ack", "/ack", `{"reason":"operator check"}`, func(e *testEnv) string { return e.writePlain }},
+			{"close", "/close", `{"reason":"operator check","resolution":"fixed"}`, func(e *testEnv) string { return e.writePlain }},
+			{"autonomy", "", `{"mode":"assisted"}`, func(e *testEnv) string { return e.autoPlain }},
+		} {
+			t.Run(row.name+"/"+route.name, func(t *testing.T) {
+				env := newEnv(t, envOptions{cfg: unlimitedRates})
+				switch route.name {
+				case "ack":
+					env.actions.ackErr = row.err
+				case "close":
+					env.actions.closeErr = row.err
+				case "autonomy":
+					env.autonomy.err = row.err
+				}
+				path := "/api/autonomy"
+				if route.name != "autonomy" {
+					path = "/api/incidents/" + validIncidentID() + route.path
+				}
+				resp, body := env.post(path, route.tokenIdx(env), route.payload)
+				if resp.StatusCode == http.StatusInternalServerError {
+					t.Fatalf("%s returned the generic 500 (%.300s): a typed seam refusal must never collapse into action_failed", route.name, body)
+				}
+				wantStatus(t, resp, body, row.wantStatus)
+				eb := decodeError(t, body)
+				if eb.Error.Code != string(row.wantCode) {
+					t.Fatalf("error.code = %s, want the owning code %s (body %.300s)", eb.Error.Code, row.wantCode, body)
+				}
+			})
+		}
+	}
+}

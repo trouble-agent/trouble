@@ -28,11 +28,14 @@ import (
 // bootCloseDashboard is the production wiring in miniature: real store, real
 // ladder, real bridge (NewActions/NewLookup), real dashboard server on a
 // scratch loopback listener with one minted write token.
-func bootCloseDashboard(t *testing.T) (base, token, incID string) {
-	t.Helper()
-	s, l := testStore(t)
-	ctx := context.Background()
+type closeDashBoot struct {
+	base, token, incID string
+	lb                 *ladder.Ladder
+	s                  *Store
+}
 
+func bootLadder(t *testing.T, s *Store) *ladder.Ladder {
+	t.Helper()
 	rules := map[string]types.Rule{
 		"io-pressure": {
 			Name: "io-pressure", Enabled: true, Source: types.SigSource("psi"),
@@ -51,6 +54,15 @@ func bootCloseDashboard(t *testing.T) (base, token, incID string) {
 	if err != nil {
 		t.Fatalf("ladder.New: %v", err)
 	}
+	return lb
+}
+
+func bootCloseDashboard(t *testing.T) closeDashBoot {
+	t.Helper()
+	s, l := testStore(t)
+	ctx := context.Background()
+
+	lb := bootLadder(t, s)
 
 	// Admit one incident through the ladder's own T01 edge: the incident sits
 	// in `recorded`, a state with no human-close edge (T38/T45 are the only
@@ -119,14 +131,21 @@ func bootCloseDashboard(t *testing.T) (base, token, incID string) {
 		}
 		_ = l.Close(context.Background())
 	})
-	return "http://" + ln.Addr().String(), plaintext, string(res.Inc)
+	return closeDashBoot{
+		base:  "http://" + ln.Addr().String(),
+		token: plaintext,
+		incID: string(res.Inc),
+		lb:    lb,
+		s:     s,
+	}
 }
 
 // TestCloseNonClosableIncidentSurfacesLadderRefusal is the wire contract: the
 // refusal a human gets names the ladder code, the no_close_edge detail and the
 // reason, with 409 Conflict — never the generic 500 action_failed.
 func TestCloseNonClosableIncidentSurfacesLadderRefusal(t *testing.T) {
-	base, token, inc := bootCloseDashboard(t)
+	b := bootCloseDashboard(t)
+	base, token, inc := b.base, b.token, b.incID
 
 	req, err := http.NewRequest(http.MethodPost, base+"/api/incidents/"+inc+"/close",
 		strings.NewReader(`{"reason":"human close","resolution":"fixed"}`))
@@ -273,5 +292,108 @@ func TestAdaptSeamGuardRefusal(t *testing.T) {
 	}
 	if ae.ErrorReason() == "" {
 		t.Fatal("reason empty: the refusal must carry the human cause")
+	}
+}
+
+// TestCloseLedgerOnlyIncidentSurfacesTypedRefusal is the TRBL-144 dogfood
+// reproduction, on the production wiring. The dogfood incident had been
+// admitted in a PREVIOUS ladder lifetime (ladder.New replays nothing; the
+// in-memory table is empty at boot), so the dashboard's ledger-backed lookup
+// still displayed it — a close passed target validation, then the bridge's
+// Ladder.Incident call refused with the ladder's own "not in the index"
+// error, which reached the dashboard UN-adapted and collapsed into the
+// generic 500 action_failed (TROUBLE-DASHBOARD-013) in 0.02s. After the fix
+// every seam path adapts (and *ladder.Error carries the seam shape itself):
+// close AND ack answer 409 + TROUBLE-LADDER-012 with the ladder's detail.
+func TestCloseLedgerOnlyIncidentSurfacesTypedRefusal(t *testing.T) {
+	b := bootCloseDashboard(t)
+
+	// Admit a SECOND incident through a fresh ladder instance over the same
+	// store: the ledger (and therefore the dashboard's lookup) holds the
+	// incident, the serving ladder's in-memory table deliberately does not.
+	lb2 := bootLadder(t, b.s)
+	res, err := lb2.Admit(context.Background(), ladder.Observation{
+		EventID: "ev_01JAAPPWIRINGLEDGER0001",
+		TS:      types.FormatUTC(time.Now()),
+		Sig:     types.NewSig(types.SigSource("psi"), "sha256v1", 1, []byte("ledger-digest-0001")),
+		InKey:   "psi|io-pressure|host2",
+		Rule:    "io-pressure",
+		Source:  ladder.SourcePath("psi"),
+		Detail:  map[string]any{"some_avg10": 93.0},
+	})
+	if err != nil {
+		t.Fatalf("Admit (second lifetime): %v", err)
+	}
+	if res.Inc == "" {
+		t.Fatalf("Admit returned no incident id (%+v)", res)
+	}
+	ledgerInc := string(res.Inc)
+
+	if _, ok := NewLookup(b.s.L).Incident(ledgerInc); !ok {
+		t.Fatalf("fixture broken: the dashboard lookup cannot see %s in the ledger", ledgerInc)
+	}
+
+	// The close route: never the generic 500 — the refusal is the ladder's
+	// own code.
+	resp, body := postJSON(t, b, "/api/incidents/"+ledgerInc+"/close", `{"reason":"human close","resolution":"fixed"}`)
+	if resp.StatusCode == http.StatusInternalServerError {
+		t.Fatalf("close on a ledger-only incident = the generic 500 (%.300s): the raw ladder error collapsed into action_failed", body)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %.300s)", resp.StatusCode, body)
+	}
+	assertLadder012Refusal(t, body, "ladder_012")
+
+	// The ack route must carry the same typed code class.
+	resp, body = postJSON(t, b, "/api/incidents/"+ledgerInc+"/ack", `{"reason":"operator check"}`)
+	if resp.StatusCode == http.StatusInternalServerError {
+		t.Fatalf("ack on a ledger-only incident = the generic 500 (%.300s): same seam contract violation on the sibling route", body)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("ack status = %d, want 409 (body %.300s)", resp.StatusCode, body)
+	}
+	assertLadder012Refusal(t, body, "ladder_012")
+}
+
+// postJSON POSTs one JSON body with the boot's write token.
+func postJSON(t *testing.T, b closeDashBoot, path, payload string) (*http.Response, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, b.base+path, strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+b.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", path, err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	return resp, string(body)
+}
+
+// assertLadder012Refusal checks the typed wire body: the ladder's code, its
+// machine-readable detail and the human cause in the message.
+func assertLadder012Refusal(t *testing.T, body, wantDetail string) {
+	t.Helper()
+	var eb struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(body), &eb); err != nil {
+		t.Fatalf("decode body %.300s: %v", body, err)
+	}
+	if eb.Error.Code != string(types.CodeLadder012) {
+		t.Fatalf("error.code = %s, want %s (body %.300s)", eb.Error.Code, types.CodeLadder012, body)
+	}
+	if eb.Detail != wantDetail {
+		t.Fatalf("detail = %q, want %q", eb.Detail, wantDetail)
+	}
+	if !strings.Contains(eb.Error.Message, "not in the index") {
+		t.Fatalf("message = %q, want the ladder's human cause", eb.Error.Message)
 	}
 }

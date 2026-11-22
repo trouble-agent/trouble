@@ -1,0 +1,39 @@
+# trace-repair 2026-11-22 (TRBL-148)
+
+- L135: evidence=jq-board-sweep -> evidence=.coding-hermes/board/tasks.jsonl
+- L136: evidence=local-focused-gates+gitreins-verdict-9cd896f9 -> evidence=none:gate-stdout-not-persisted+verdict-id-9cd896f9-receipt-tmp-swept
+- L136: verdict=tier2:9cd896f9 STATUS: -> verdict=tier2:9cd896f9 commit=e64b066e03b198e7620e85af25b8bb5154839b93 STATUS:
+- L136: evidence=/tmp/qa17_complete_7f3a.log -> evidence=none:ephemeral-tmp-swept
+- L137: evidence=gh run list + git ls-remote outputs this tick -> evidence=gh-run:37153361925+sha:3629ccd+ls-remote:tags=0
+- L138: evidence=TestBootDaemonWithRetriesABindInUseRace -> evidence=internal/app/daemon_test.go#TestBootDaemonWithRetriesABindInUseRace
+- L139: evidence=commit-2c6f2cb-diff -> evidence=git:2c6f2cb
+- L140: evidence=grep -c  -> evidence=none:procedural-grep-count 
+- L141: evidence=commit-2c6f2cb-diff -> evidence=git:2c6f2cb
+- L145: evidence=/tmp/qa-trouble-1005/harvest/qa-evidence.jsonl verdict=pendin -> evidence=.gitreins/history/2026-10-07/145bb77a verdict=56e23168 commit=c12f64a
+- L146: evidence=/tmp/qa-trouble-1005/harvest/qa-evidence.jsonl verdict=pendin -> evidence=none:harness-side-close-no-repo-artifact verdict=none:written-pending-no-judge-ra
+- L147: evidence=/tmp/qa-trouble-1006-offbat.log -> evidence=none:ephemeral-tmp-swept
+- L148: evidence=/tmp/qa-trouble-1038/harvest/qa-evidence.jsonl -> evidence=.gitreins/history/2026-10-06
+- L148: evidence=capped-focused-gates+commit-031961d -> evidence=commit:031961d
+- L148: verdict=tier1:baseline-fail STATUS: -> verdict=tier1:baseline-fail commit=4d4f13a STATUS:
+- L149: evidence=gh run list + git ls-remote --tags + gh release list outputs  -> evidence=gh-run:37571903806+sha:e119787+ls-remote:tags=0
+- L152: evidence=merged-tree-gates -> evidence=commit:9d13580a40ab0f771b63130e57add7d5fd7885e1
+- L158: evidence=branch wt/TRBL-106 -> evidence=commit:98ba880+branch:wt/TRBL-106
+- L160: evidence=go-test-pass -> evidence=commit:28d948f
+- L161: evidence=branch wt/TRBL-109 -> evidence=commit:33d85d5+branch:wt/TRBL-109
+- L166: evidence=/tmp/trbl-head-reds.txt+commit:e880298+gh-run:e880298 -> evidence=commit:e880298+gh-run:e880298
+- L166: verdict=0175d0be(tier1 TRBL-014 baseline) -> verdict=0175d0be commit=e880298 tier1 TRBL-014 baseline
+- L168: evidence=~/.hermes/stand-in/docs/trouble/smoke-e2e-2026-10-19.log -> evidence=/home/kara/.hermes/stand-in/docs/trouble/smoke-e2e-2026-10-19.log
+- L169: evidence=~/.hermes/stand-in/docs/trouble/probe-cli-surface.txt -> evidence=/home/kara/.hermes/stand-in/docs/trouble/probe-cli-surface.txt
+- L170: evidence=~/.hermes/stand-in/docs/trouble/probe-cli-surface.txt -> evidence=/home/kara/.hermes/stand-in/docs/trouble/probe-cli-surface.txt
+- L195: evidence=/tmp/trouble-foreman-2026-10-24-12-19-33-release-verify.sh -> evidence=commit:dec01b3be4b498ca3ca0da19858a050d186c041b
+- L208: verdict=running:gitreins-task-complete-and-async-judge -> verdict=running:gitreins-task-complete-and-async-judge commit=b17bdd4d724d67cc7294afef69d6
+- L171: evidence=commit witness= -> evidence=commit:d1ed13d witness=
+- L171: evidence=~/.hermes/stand-in/docs/trouble/probe-changelog-staleness.txt -> evidence=/home/kara/.hermes/stand-in/docs/trouble/probe-changelog-staleness.txt
+- L172: evidence=commit witness= -> evidence=commit:46f0071 witness=
+- L173: evidence=commit witness= -> evidence=commit:fa44de2 witness=
+- L176: evidence=~/.hermes/stand-in/docs/trouble/selfcheck-out.txt -> evidence=/home/kara/.hermes/stand-in/docs/trouble/selfcheck-out.txt
+- L175: evidence=~/.hermes/stand-in/docs/trouble/audit-2026-10-19-ledger-query -> evidence=/home/kara/.hermes/stand-in/docs/trouble/audit-2026-10-19-ledger-query.txt
+- L199: acceptance_criteria doctrine quote "ch:trace row=" -> "ch:trace row=..." (R1: empty row= in a quote)
+- (second pass) DOC-12 L172: ~/.hermes/stand-in/docs/trouble/probe-doc-reachability.txt -> /home/kara/.hermes/stand-in/docs/trouble/probe-doc-reachability.txt (file exists)
+- (second pass) DOC-13 L173: ~/.hermes/stand-in/docs/trouble/probe-skill-stale-claims.txt -> /home/kara/.hermes/stand-in/docs/trouble/probe-skill-stale-claims.txt (file exists)
+- (second pass) DOC-14 L174: ~/.hermes/stand-in/docs/trouble/audit-2026-10-19-makefile-rot.txt -> /home/kara/.hermes/stand-in/docs/trouble/audit-2026-10-19-makefile-rot.txt (file exists)

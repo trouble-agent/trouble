@@ -1,0 +1,48 @@
+ok  	github.com/trouble-agent/trouble/cmd/trouble	50.114s
+ok  	github.com/trouble-agent/trouble/cmd/troubled	0.719s
+ok  	github.com/trouble-agent/trouble/internal/app	217.382s
+ok  	github.com/trouble-agent/trouble/internal/boardintegrity	0.264s
+--- FAIL: TestBudgetDashboardRSS (123.85s)
+    budget_test.go:1223: dashboard window: 4011 requests in 1m0s (67 rps); parent p99 round-trip 165.361525ms (host load, informational)
+    budget_test.go:1225: control window:   5698 requests in 1m0s (95 rps)
+    budget_test.go:1226: RSS deltas — dashboard: peak 19.13 MB, steady 14.81 MB, retained after the load 2.04 MB
+    budget_test.go:1228: RSS deltas — control:   peak 1.17 MB, steady 0.95 MB, retained 0.13 MB
+    budget_test.go:1230: attributed RSS (dashboard − control, logged only: RSS carries the runtime's arena over the fixture): peak 17.96 MB, steady 13.86 MB
+    budget_test.go:1234: live-heap churn (logged only): peak HeapAlloc above the window base — dashboard 9.93 MB, control 0.14 MB; peak HeapInuse — dashboard 11.31 MB, control 0.20 MB
+    budget_test.go:1237: child allocations: dashboard window 437490 B/req, control window 4091 B/req
+    budget_test.go:1238: child render p99 133.516932ms over 4011 dashboard requests; Sys 92.0 MB, HeapSys 82.6 MB, open files 0
+    budget_test.go:1253: retained-heap batches — dashboard (10 batches, floor/peak of HeapAlloc after a forced GC, bytes):
+          floor 44759472 45365800 45003160 45304472 45598704 47309752 45435496 45723520 45281600 45474928
+          peak  50856288 52985448 49039632 51517712 53317720 52215200 51348520 53596456 54742040 51505808
+    budget_test.go:1253: retained-heap batches — control (10 batches, floor/peak of HeapAlloc after a forced GC, bytes):
+          floor 44602192 44615032 44564336 44593776 44596352 44600544 44588856 44604184 44595528 44566120
+          peak  44677256 44674160 44674336 44672904 44686976 44671360 44680464 44669632 44674304 44678896
+    budget_test.go:1257: retained heap (§2.9a): dashboard total 715456 bytes over the window, steady-state tail slope -458706 bytes per batch over 4 batches = -4587060 bytes scaled to the window; control total -36072 bytes, slope -86060 scaled; budgets: steady 6291456 bytes, RSS ceiling 12582912 bytes; load_avg_1m=31.38
+    budget_test.go:1274: p99 render = 133.516932ms, §7 requires ≤40ms on a quiet host (host profile io x1.00 cpu x1.54 load 31.38/8 cores (contention x4.92, measured))
+    budget_test.go:1315: 100-concurrent-render burst: live heap delta 0.81 MB (HeapInuse 3.59 MB), RSS 3.49 MB above the pre-burst baseline (idle live set 42.5 MB)
+    budget_test.go:1336: dashboard window served 67 rps vs control 95 rps (70%): the dashboard, not the host, is the bottleneck
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/dashboard	189.177s
+ok  	github.com/trouble-agent/trouble/internal/flow	46.992s
+ok  	github.com/trouble-agent/trouble/internal/hub	8.237s
+ok  	github.com/trouble-agent/trouble/internal/issues	9.328s
+ok  	github.com/trouble-agent/trouble/internal/ladder	0.275s
+ok  	github.com/trouble-agent/trouble/internal/ledger	325.128s
+ok  	github.com/trouble-agent/trouble/internal/lifecycle	86.918s
+ok  	github.com/trouble-agent/trouble/internal/llm	1.427s
+ok  	github.com/trouble-agent/trouble/internal/loadfence	3.789s
+ok  	github.com/trouble-agent/trouble/internal/portability	0.128s
+ok  	github.com/trouble-agent/trouble/internal/registry	5.780s
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen/gen	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/registry/testkit	0.095s
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/badmodule	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/fakebus	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/validate	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/research	1.150s
+ok  	github.com/trouble-agent/trouble/internal/scrub	42.094s
+ok  	github.com/trouble-agent/trouble/internal/sensors	119.393s
+ok  	github.com/trouble-agent/trouble/internal/sentinel	123.440s
+ok  	github.com/trouble-agent/trouble/internal/skills	12.507s
+ok  	github.com/trouble-agent/trouble/internal/types	0.056s
+FAIL

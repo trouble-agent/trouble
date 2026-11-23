@@ -1,0 +1,343 @@
+QA-6 hygiene: removed stale agent-workspace venv (/home/bunker-87f4b3cc/qa-trouble/.venv) before act replay
+time="2026-11-22T13:21:09-08:00" level=info msg="Using docker host 'unix:///run/bunker/87f4b3cc/docker.sock', and daemon socket 'unix:///run/bunker/87f4b3cc/docker.sock'"
+[ci/build, vet, test, spec selfcheck] ⭐ Run Set up job
+[ci/build, vet, test, spec selfcheck] 🚀  Start image=catthehacker/ubuntu:act-latest
+[ci/build, vet, test, spec selfcheck]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[ci/build, vet, test, spec selfcheck]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[ci/build, vet, test, spec selfcheck]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Set up job
+[ci/build, vet, test, spec selfcheck]   ☁  git clone 'https://github.com/actions/setup-go' # ref=v5
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Check out repository
+[ci/build, vet, test, spec selfcheck]   🐳  docker cp src=/home/bunker-87f4b3cc/qa-trouble/. dst=/home/bunker-87f4b3cc/qa-trouble
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Check out repository [508.044863ms]
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Set up Go
+[ci/build, vet, test, spec selfcheck]   🐳  docker cp src=/home/bunker-87f4b3cc/.cache/act/actions-setup-go@v5/ dst=/var/run/act/actions/actions-setup-go@v5/
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-go@v5/dist/setup/index.js] user= workdir=
+[ci/build, vet, test, spec selfcheck]   | Setup go version spec 1.26.0
+[ci/build, vet, test, spec selfcheck]   | Attempting to download 1.26.0...
+[ci/build, vet, test, spec selfcheck]   | (node:32) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[ci/build, vet, test, spec selfcheck]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[ci/build, vet, test, spec selfcheck]   | matching 1.26.0...
+[ci/build, vet, test, spec selfcheck]   | Acquiring 1.26.0 from https://github.com/actions/go-versions/releases/download/1.26.0-21889650668/go-1.26.0-linux-x64.tar.gz
+[ci/build, vet, test, spec selfcheck]   | Extracting Go...
+[ci/build, vet, test, spec selfcheck]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/b9304495-9c23-483e-b9f2-a02f18bc7f86 -f /tmp/aa55cca4-2886-47aa-b21d-659faf4a3a56
+[ci/build, vet, test, spec selfcheck]   | Successfully extracted go to /tmp/b9304495-9c23-483e-b9f2-a02f18bc7f86
+[ci/build, vet, test, spec selfcheck]   | Adding to the cache ...
+[ci/build, vet, test, spec selfcheck]   | Successfully cached go to /opt/hostedtoolcache/go/1.26.0/x64
+[ci/build, vet, test, spec selfcheck]   | Added go to the path
+[ci/build, vet, test, spec selfcheck]   | Successfully set up Go version 1.26.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading go1.26.11 (linux/amd64)
+[ci/build, vet, test, spec selfcheck]   | [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOMODCACHE
+[ci/build, vet, test, spec selfcheck]   | [command]/opt/hostedtoolcache/go/1.26.0/x64/bin/go env GOCACHE
+[ci/build, vet, test, spec selfcheck]   | /root/go/pkg/mod
+[ci/build, vet, test, spec selfcheck]   | /root/.cache/go-build
+[ci/build, vet, test, spec selfcheck]   | Cache is not found
+[ci/build, vet, test, spec selfcheck]   ❓ add-matcher /run/act/actions/actions-setup-go@v5/matchers.json
+[ci/build, vet, test, spec selfcheck]   | go version go1.26.11 linux/amd64
+[ci/build, vet, test, spec selfcheck]   | 
+[ci/build, vet, test, spec selfcheck]   ❓  ::group::go env
+[ci/build, vet, test, spec selfcheck]   | AR='ar'
+[ci/build, vet, test, spec selfcheck]   | CC='gcc'
+[ci/build, vet, test, spec selfcheck]   | CGO_CFLAGS='-O2 -g'
+[ci/build, vet, test, spec selfcheck]   | CGO_CPPFLAGS=''
+[ci/build, vet, test, spec selfcheck]   | CGO_CXXFLAGS='-O2 -g'
+[ci/build, vet, test, spec selfcheck]   | CGO_ENABLED='1'
+[ci/build, vet, test, spec selfcheck]   | CGO_FFLAGS='-O2 -g'
+[ci/build, vet, test, spec selfcheck]   | CGO_LDFLAGS='-O2 -g'
+[ci/build, vet, test, spec selfcheck]   | CXX='g++'
+[ci/build, vet, test, spec selfcheck]   | GCCGO='gccgo'
+[ci/build, vet, test, spec selfcheck]   | GO111MODULE=''
+[ci/build, vet, test, spec selfcheck]   | GOAMD64='v1'
+[ci/build, vet, test, spec selfcheck]   | GOARCH='amd64'
+[ci/build, vet, test, spec selfcheck]   | GOAUTH='netrc'
+[ci/build, vet, test, spec selfcheck]   | GOBIN=''
+[ci/build, vet, test, spec selfcheck]   | GOCACHE='/root/.cache/go-build'
+[ci/build, vet, test, spec selfcheck]   | GOCACHEPROG=''
+[ci/build, vet, test, spec selfcheck]   | GODEBUG=''
+[ci/build, vet, test, spec selfcheck]   | GOENV='/root/.config/go/env'
+[ci/build, vet, test, spec selfcheck]   | GOEXE=''
+[ci/build, vet, test, spec selfcheck]   | GOEXPERIMENT=''
+[ci/build, vet, test, spec selfcheck]   | GOFIPS140='off'
+[ci/build, vet, test, spec selfcheck]   | GOFLAGS=''
+[ci/build, vet, test, spec selfcheck]   | GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build1072621120=/tmp/go-build -gno-record-gcc-switches'
+[ci/build, vet, test, spec selfcheck]   | GOHOSTARCH='amd64'
+[ci/build, vet, test, spec selfcheck]   | GOHOSTOS='linux'
+[ci/build, vet, test, spec selfcheck]   | GOINSECURE=''
+[ci/build, vet, test, spec selfcheck]   | GOMOD='/home/bunker-87f4b3cc/qa-trouble/go.mod'
+[ci/build, vet, test, spec selfcheck]   | GOMODCACHE='/root/go/pkg/mod'
+[ci/build, vet, test, spec selfcheck]   | GONOPROXY=''
+[ci/build, vet, test, spec selfcheck]   | GONOSUMDB=''
+[ci/build, vet, test, spec selfcheck]   | GOOS='linux'
+[ci/build, vet, test, spec selfcheck]   | GOPATH='/root/go'
+[ci/build, vet, test, spec selfcheck]   | GOPRIVATE=''
+[ci/build, vet, test, spec selfcheck]   | GOPROXY='https://proxy.golang.org,direct'
+[ci/build, vet, test, spec selfcheck]   | GOROOT='/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.11.linux-amd64'
+[ci/build, vet, test, spec selfcheck]   | GOSUMDB='sum.golang.org'
+[ci/build, vet, test, spec selfcheck]   | GOTELEMETRY='local'
+[ci/build, vet, test, spec selfcheck]   | GOTELEMETRYDIR='/root/.config/go/telemetry'
+[ci/build, vet, test, spec selfcheck]   | GOTMPDIR=''
+[ci/build, vet, test, spec selfcheck]   | GOTOOLCHAIN='auto'
+[ci/build, vet, test, spec selfcheck]   | GOTOOLDIR='/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.11.linux-amd64/pkg/tool/linux_amd64'
+[ci/build, vet, test, spec selfcheck]   | GOVCS=''
+[ci/build, vet, test, spec selfcheck]   | GOVERSION='go1.26.11'
+[ci/build, vet, test, spec selfcheck]   | GOWORK=''
+[ci/build, vet, test, spec selfcheck]   | PKG_CONFIG='pkg-config'
+[ci/build, vet, test, spec selfcheck]   | 
+[ci/build, vet, test, spec selfcheck]   ❓  ::endgroup::
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Set up Go [25.795423706s]
+[ci/build, vet, test, spec selfcheck]   ⚙  ::set-output:: cache-hit=false
+[ci/build, vet, test, spec selfcheck]   ⚙  ::set-output:: go-version=1.26.11
+[ci/build, vet, test, spec selfcheck]   ⚙  ::add-path:: /opt/hostedtoolcache/go/1.26.0/x64/bin
+[ci/build, vet, test, spec selfcheck]   ⚙  ::add-path:: /root/go/bin
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Check gofmt
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Check gofmt [840.623651ms]
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Build (CGO disabled)
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[ci/build, vet, test, spec selfcheck]   | go: downloading github.com/redis/go-redis/v9 v9.22.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/sys v0.48.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading github.com/BurntSushi/toml v1.6.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading github.com/godbus/dbus/v5 v5.2.2
+[ci/build, vet, test, spec selfcheck]   | go: downloading go.uber.org/atomic v1.12.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading github.com/cespare/xxhash/v2 v2.3.0
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Build (CGO disabled) [37.317295068s]
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Vet
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/4] user= workdir=
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Vet [27.324954439s]
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Vulnerability scan (RELEASE-013 gate)
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/5] user= workdir=
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/vuln v1.7.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/telemetry v0.0.0-20260811182544-a038080d80e5
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/mod v0.39.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/tools v0.49.0
+[ci/build, vet, test, spec selfcheck]   | go: downloading golang.org/x/sync v0.22.0
+[ci/build, vet, test, spec selfcheck]   | go version go1.26.11 linux/amd64
+[ci/build, vet, test, spec selfcheck]   | No vulnerabilities found.
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Main Vulnerability scan (RELEASE-013 gate) [12.359980636s]
+[ci/build, vet, test, spec selfcheck] ⭐ Run Main Test (short mode)
+[ci/build, vet, test, spec selfcheck]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/6] user= workdir=
+[ci/build, vet, test, spec selfcheck]   | dashboard token store: /tmp/TestRunTokenCreateOutputEnv2573665740/001/dashboard.token
+[ci/build, vet, test, spec selfcheck]   | wrote TROUBLE_DASHBOARD_TOKEN to /tmp/TestRunTokenCreateOutputEnv2573665740/001/trouble.env (0600)
+[ci/build, vet, test, spec selfcheck]   | tdt_miH4FXmjpj-nErqrEJsTrRy365jNeQHLPTZ_LZQwLZ8
+[ci/build, vet, test, spec selfcheck]   | token "e2e" created with scopes [read]; the plaintext above is shown once and is not recoverable
+[ci/build, vet, test, spec selfcheck]   | dashboard token store: /tmp/TestRunTokenRotateOutputEnv3541048350/001/dashboard.token
+[ci/build, vet, test, spec selfcheck]   | wrote TROUBLE_DASHBOARD_TOKEN to /tmp/TestRunTokenRotateOutputEnv3541048350/001/trouble.env (0600)
+[ci/build, vet, test, spec selfcheck]   | tdt_JgqRbearLR5mNE4HJLA_5yqDq0OHl6_mithvYr5SGos
+[ci/build, vet, test, spec selfcheck]   | token "e2e" created with scopes [read]; the plaintext above is shown once and is not recoverable
+[ci/build, vet, test, spec selfcheck]   | dashboard token store: /tmp/TestRunTokenRotateOutputEnv3541048350/001/dashboard.token
+[ci/build, vet, test, spec selfcheck]   | wrote TROUBLE_DASHBOARD_TOKEN to /tmp/TestRunTokenRotateOutputEnv3541048350/001/trouble.env (0600)
+[ci/build, vet, test, spec selfcheck]   | tdt_rLes5f3gBxqL7e-v44cp701ZME9tVoNL5LWAnj2YL3M
+[ci/build, vet, test, spec selfcheck]   | "e2e" revoked, "e2e+20261122" minted (no grace window)
+[ci/build, vet, test, spec selfcheck]   | tdt_FgZvUDiNkaKJBbHAxwK86l0kZ9bCPZRTh8FcXBKbPrA
+[ci/build, vet, test, spec selfcheck]   | tdt_WTqw8uPj7Nc-fEf9ckpxlp38Nu2UszMCZ-nb-xprQ8M
+[ci/build, vet, test, spec selfcheck]   | dashboard token store: /tmp/TestTokenListMirrorsDivergenceWarning2694186896/001/cli-store.json
+[ci/build, vet, test, spec selfcheck]   | WARNING: the resolved config declares dashboard.token_file = /data/state/dashboard.token, but `dashboard token create` addresses /tmp/TestTokenListMirrorsDivergenceWarning2694186896/001/cli-store.json.
+[ci/build, vet, test, spec selfcheck]   |   the daemon reads the config's path, so a token minted here will not authenticate. To agree:
+[ci/build, vet, test, spec selfcheck]   |     CLI:    TROUBLE_DASHBOARD_TOKEN_FILE=/data/state/dashboard.token
+[ci/build, vet, test, spec selfcheck]   |     daemon: --dashboard-token_file=/data/state/dashboard.token
+[ci/build, vet, test, spec selfcheck]   | tdt_TktxEy0be2rApMiAjQqjZkWL7a01mES6dhJD71uf8HM
+[ci/build, vet, test, spec selfcheck]   | token "listed" created with scopes [read]; the plaintext above is shown once and is not recoverable
+[ci/build, vet, test, spec selfcheck]   | listed                       read                   active    created=2026-11-22T21:25:05.789Z last_used=
+[ci/build, vet, test, spec selfcheck]   | tdt_itjOEyYZm6gjpn4oAGx21gaaKjSiAA1aM8L2xJaPi7E
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestSensorsProbeEmitsOneCapabilityProbeRecord (0.06s)
+[ci/build, vet, test, spec selfcheck]   |     sensors_probe_test.go:37: sensors probe exit = 13, want 0
+[ci/build, vet, test, spec selfcheck]   |         stdout: 
+[ci/build, vet, test, spec selfcheck]   |         stderr: sensors probe: the probe wrote 2 records, want exactly 1
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestSensorsProbePrintsRecord (0.05s)
+[ci/build, vet, test, spec selfcheck]   |     sensors_probe_test.go:73: sensors probe exit = 13, want 0
+[ci/build, vet, test, spec selfcheck]   |         stdout: 
+[ci/build, vet, test, spec selfcheck]   |         stderr: sensors probe: the probe wrote 2 records, want exactly 1
+[ci/build, vet, test, spec selfcheck]   | tdt_Ra6TIOB1DBNkyC9Bl7Ja6ss2kFpZuOzF-UCcJlyaD0A
+[ci/build, vet, test, spec selfcheck]   | FAIL
+[ci/build, vet, test, spec selfcheck]   | FAIL	github.com/trouble-agent/trouble/cmd/trouble	22.651s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/cmd/troubled	2.293s
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:53.069Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:54.105Z level=INFO msg="dashboard listening" addr=127.0.0.1:39997 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:54.723Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:55.614Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:56.683Z level=INFO msg="dashboard listening" addr=127.0.0.1:43477 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:57.449Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:58.321Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:24:59.345Z level=INFO msg="dashboard listening" addr=127.0.0.1:38757 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:00.395Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:04.398Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:05.493Z level=INFO msg="dashboard listening" addr=127.0.0.1:41923 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:05.978Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:08.401Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:09.492Z level=INFO msg="dashboard listening" addr=127.0.0.1:43901 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:10.087Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:10.283Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:10.285Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:46561: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:11.239Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:12.308Z level=INFO msg="dashboard listening" addr=127.0.0.1:39647 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:12.994Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:15.812Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:17.529Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:18.685Z level=INFO msg="dashboard listening" addr=127.0.0.1:37223 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:19.202Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:20.120Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:21.212Z level=INFO msg="dashboard listening" addr=127.0.0.1:35547 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:21.878Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:22.779Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:24.093Z level=INFO msg="dashboard listening" addr=127.0.0.1:40861 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:24.843Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:25.509Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:26.978Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:28.092Z level=INFO msg="dashboard listening" addr=127.0.0.1:39945 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:28.707Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:28.903Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:30.603Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:31.718Z level=INFO msg="dashboard listening" addr=127.0.0.1:44205 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:32.279Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:47.245Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:48.327Z level=INFO msg="dashboard listening" addr=127.0.0.1:41729 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:48.892Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:49.880Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:51.004Z level=INFO msg="dashboard listening" addr=127.0.0.1:42341 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:51.527Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:52.229Z level=WARN msg="hub: archival paused: TROUBLE-HUB-009 (archive_config): server.duckbrain.endpoint is empty: no DuckBrain driver endpoint to write to"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:52.232Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:53.492Z level=WARN msg="dashboard token store is empty" path=/root/.local/state/trouble-test/e2e-507617676/dashboard-tokens.json reason=missing
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:53.495Z level=INFO msg="dashboard listening (refused: token store missing; health-only)" addr=127.0.0.1:38765 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:54.715Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:54.920Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:54.920Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:43595: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:56.084Z level=WARN msg="hub: archival paused: TROUBLE-HUB-009 (archive_config): server.duckbrain.endpoint is empty: no DuckBrain driver endpoint to write to"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:56.087Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:57.307Z level=WARN msg="dashboard token store is empty" path=/root/.local/state/trouble-test/e2e-3190846914/dashboard-tokens.json reason=missing
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:57.308Z level=INFO msg="dashboard listening (refused: token store missing; health-only)" addr=127.0.0.1:44557 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:57.934Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:57.934Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:45439: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:58.596Z level=WARN msg="hub: archival paused: TROUBLE-HUB-009 (archive_config): server.duckbrain.endpoint is empty: no DuckBrain driver endpoint to write to"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:58.596Z level=WARN msg="hub: TROUBLE-HUB-003 (redis_dial): redis is unreachable: dial tcp 127.0.0.1:6379: connect: connection refused (require_redis=false): serving on the standalone in-process path until redis returns"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:58.598Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:59.818Z level=WARN msg="dashboard token store is empty" path=/root/.local/state/trouble-test/e2e-2785309022/dashboard-tokens.json reason=missing
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:25:59.819Z level=INFO msg="dashboard listening (refused: token store missing; health-only)" addr=127.0.0.1:44967 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:00.837Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:01.039Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:01.039Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:41165: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:02.202Z level=WARN msg="hub: archival paused: TROUBLE-HUB-009 (archive_config): server.duckbrain.endpoint is empty: no DuckBrain driver endpoint to write to"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:03.029Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:04.047Z level=INFO msg="dashboard listening" addr=127.0.0.1:41941 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:04.670Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:05.565Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:06.600Z level=INFO msg="dashboard listening" addr=127.0.0.1:42901 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:07.250Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:07.457Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:08.354Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:09.376Z level=INFO msg="dashboard listening" addr=127.0.0.1:41303 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:09.984Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:10.854Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:11.878Z level=INFO msg="dashboard listening" addr=127.0.0.1:33299 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:12.497Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:13.371Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:14.411Z level=INFO msg="dashboard listening" addr=127.0.0.1:39681 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:15.012Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:15.697Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:16.723Z level=INFO msg="dashboard listening" addr=127.0.0.1:35667 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:17.280Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:17.287Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:44085: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestMissingRulesDirBootsToHealthOK (2.27s)
+[ci/build, vet, test, spec selfcheck]   |     missing_rules_dir_test.go:141: the absent-rules-dir boot: waiting up to 1m2.85s for READY (base 30s × 2.09; io x1.00 × 2.09 contention at load_avg 6.57 / 6 cores = 1.09 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   |     missing_rules_dir_test.go:169: detail.sensor_degraded = journald on a boot whose only unusual condition is an absent rules directory
+[ci/build, vet, test, spec selfcheck]   |     missing_rules_dir_test.go:173: sensor journald is degraded with an absent rules.d (access_denied (TROUBLE-SENSORS-024)): SPEC-03 §3.7b keeps it up with the shipped defaults active
+[ci/build, vet, test, spec selfcheck]   |     missing_rules_dir_test.go:147: the absent-rules-dir boot: waiting up to 41.9s for the drain (base 20s × 2.09; io x1.00 × 2.09 contention at load_avg 6.57 / 6 cores = 1.09 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:18.172Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:19.422Z level=WARN msg="dashboard token store is empty" path=/root/.local/state/trouble-test/e2e-3729169364/dashboard-tokens.json reason=missing
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:19.424Z level=INFO msg="dashboard listening (refused: token store missing; health-only)" addr=127.0.0.1:45731 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:19.859Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:20.751Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:21.823Z level=INFO msg="dashboard listening" addr=127.0.0.1:42839 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:22.452Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:22.660Z level=INFO msg="plays loaded" count=1 dir=/root/.local/state/trouble-test/e2e-4174832899/plays
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:22.864Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:23.766Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:24.824Z level=INFO msg="dashboard listening" addr=127.0.0.1:41045 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:25.462Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:25.677Z level=INFO msg="plays loaded" count=1 dir=/root/.local/state/trouble-test/e2e-2757764718/plays
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:25.883Z level=INFO msg="ladder drive" advanced=1 incidents=[inc_01M82JEDDPDPHTSSN3KZBFHGRT]
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:25.883Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:29.070Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:30.356Z level=INFO msg="dashboard listening" addr=127.0.0.1:43351 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:30.917Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:31.591Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:32.655Z level=INFO msg="dashboard listening" addr=127.0.0.1:41117 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:33.285Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:33.490Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:33.491Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:44587: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:34.183Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:35.255Z level=INFO msg="dashboard listening" addr=127.0.0.1:42061 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:35.765Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:35.765Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:42755: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:36.472Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:37.526Z level=INFO msg="dashboard listening" addr=127.0.0.1:34485 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:38.162Z level=INFO msg="rule set loaded from the sensors" rules=9 gen=1
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:38.380Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:38.381Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:42867: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestShippedExampleConfigBootsToServe (2.61s)
+[ci/build, vet, test, spec selfcheck]   |     shipped_example_test.go:417: the shipped-example boot: waiting up to 54.95s for READY (base 30s × 1.83; io x1.00 × 1.83 contention at load_avg 4.99 / 6 cores = 0.83 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   |     shipped_example_test.go:594: sensor journald is degraded on the shipped-example boot (access_denied (TROUBLE-SENSORS-024)): the AC3 status assertion below would fail for a sensor reason, not a subsystem one
+[ci/build, vet, test, spec selfcheck]   |     shipped_example_test.go:427: the shipped-example boot: waiting up to 36.63s for the drain (base 20s × 1.83; io x1.00 × 1.83 contention at load_avg 4.99 / 6 cores = 0.83 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:39.291Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:40.347Z level=INFO msg="dashboard listening" addr=127.0.0.1:36681 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:40.900Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:42.222Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:43.294Z level=INFO msg="dashboard listening" addr=127.0.0.1:46613 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:43.916Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:44.604Z level=INFO msg="ladder resume" resumed=0
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:45.676Z level=INFO msg="dashboard listening" addr=127.0.0.1:40835 identity=token loopback=true
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:46.184Z level=INFO msg="dashboard stopped"
+[ci/build, vet, test, spec selfcheck]   | time=2026-11-22T21:26:46.184Z level=ERROR msg=sentinel err="accept tcp 127.0.0.1:46517: use of closed network connection"
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestShippedExampleConfiguredValidlyBootsOk (2.27s)
+[ci/build, vet, test, spec selfcheck]   |     subsystems_config_test.go:677: the shipped example with its documented opt-in: waiting up to 53.35s for READY (base 30s × 1.78; io x1.00 × 1.78 contention at load_avg 4.67 / 6 cores = 0.78 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   |     subsystems_config_test.go:705: sensor journald is degraded (access_denied (TROUBLE-SENSORS-024)): the status assertion below would fail for a sensor reason
+[ci/build, vet, test, spec selfcheck]   |     subsystems_config_test.go:683: the shipped example with its documented opt-in: waiting up to 34.57s for the drain (base 20s × 1.73; io x1.00 × 1.73 contention at load_avg 4.37 / 6 cores = 0.73 per core, cap x4)
+[ci/build, vet, test, spec selfcheck]   | FAIL
+[ci/build, vet, test, spec selfcheck]   | FAIL	github.com/trouble-agent/trouble/internal/app	122.462s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/boardintegrity	0.193s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/dashboard	65.422s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/flow	55.039s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/hub	7.909s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/issues	3.872s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/ladder	0.122s
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestFsyncCountIsStructural (8.08s)
+[ci/build, vet, test, spec selfcheck]   |     durability_test.go:141: FsyncCalls delta = 29, want 25..26 for 102400 records at batch 4096 (one loss-window flush may catch a partial batch; beyond that the writer is flushing small groups — load_avg_1m=7.83)
+[ci/build, vet, test, spec selfcheck]   |     durability_test.go:153: group commit: 102400 records in 6.121860488s (16727 rec/s), 29 fsyncs (3531 records per fsync)
+[ci/build, vet, test, spec selfcheck]   | FAIL
+[ci/build, vet, test, spec selfcheck]   | FAIL	github.com/trouble-agent/trouble/internal/ledger	80.836s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/lifecycle	65.820s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/llm	1.339s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/loadfence	4.823s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/portability	0.318s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/registry	9.827s
+[ci/build, vet, test, spec selfcheck]   | ?   	github.com/trouble-agent/trouble/internal/registry/schemagen	[no test files]
+[ci/build, vet, test, spec selfcheck]   | ?   	github.com/trouble-agent/trouble/internal/registry/schemagen/gen	[no test files]
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/registry/testkit	0.023s
+[ci/build, vet, test, spec selfcheck]   | ?   	github.com/trouble-agent/trouble/internal/registry/testkit/badmodule	[no test files]
+[ci/build, vet, test, spec selfcheck]   | ?   	github.com/trouble-agent/trouble/internal/registry/testkit/fakebus	[no test files]
+[ci/build, vet, test, spec selfcheck]   | ?   	github.com/trouble-agent/trouble/internal/registry/validate	[no test files]
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/research	1.251s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/scrub	8.223s
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestUnwatchedManagerIsNamed (0.01s)
+[ci/build, vet, test, spec selfcheck]   |     dbus_test.go:175: a configured-but-unwatched manager must be named; reason="TROUBLE-SENSORS-026: container substrate: no system D-Bus (no system_bus_socket) is absent (TRBL-078)" err=<nil>
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestTimersListParseFailureRecordsRawSize (0.01s)
+[ci/build, vet, test, spec selfcheck]   |     disk_timer_inotify_test.go:277: expected one 023 record, got 0
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestTimersDependencyProducesNoSecondGap (0.04s)
+[ci/build, vet, test, spec selfcheck]   |     disk_timer_inotify_test.go:303: reason = "TROUBLE-SENSORS-026: container substrate: no system D-Bus, so no timer units to watch is absent (TRBL-078)"
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestJournaldMissingBinaryDisablesOnlyItself (0.00s)
+[ci/build, vet, test, spec selfcheck]   |     journald_test.go:371: reason = "TROUBLE-SENSORS-026: container substrate: no journal (no journalctl binary, no journal socket) is absent (TRBL-078)"
+[ci/build, vet, test, spec selfcheck]   | --- FAIL: TestDependencyDegradationFilesOneGap (0.00s)
+[ci/build, vet, test, spec selfcheck]   |     liveness_test.go:128: timers reason = "TROUBLE-SENSORS-026: container substrate: no system D-Bus, so no timer units to watch is absent (TRBL-078)"
+[ci/build, vet, test, spec selfcheck]   | FAIL
+[ci/build, vet, test, spec selfcheck]   | FAIL	github.com/trouble-agent/trouble/internal/sensors	28.480s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/sentinel	79.639s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/skills	3.426s
+[ci/build, vet, test, spec selfcheck]   | ok  	github.com/trouble-agent/trouble/internal/types	0.009s
+[ci/build, vet, test, spec selfcheck]   | FAIL
+[ci/build, vet, test, spec selfcheck]   ❌  Failure - Main Test (short mode) [2m37.85295782s]
+[ci/build, vet, test, spec selfcheck] exitcode '1': failure
+[ci/build, vet, test, spec selfcheck] ⭐ Run Complete job
+[ci/build, vet, test, spec selfcheck]   ✅  Success - Complete job
+[ci/build, vet, test, spec selfcheck] 🏁  Job failed
+Error: Job 'build, vet, test, spec selfcheck' failed

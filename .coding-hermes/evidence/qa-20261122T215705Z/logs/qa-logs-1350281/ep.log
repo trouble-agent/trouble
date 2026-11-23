@@ -1,0 +1,37 @@
+trouble — incident ladder daemon control
+
+usage:
+  trouble install [--scope user|system] [--root DIR] [--check] [--dry-run] [--force]
+  trouble upgrade [--to PATH] [--rollback] [--wait DURATION]
+  trouble config explain [--key K] [--json]
+  trouble topology [--json]
+  trouble check-stall [--health-url URL] [--state-root DIR] [--json]
+  trouble escalate --unit NAME
+  trouble dashboard token create --label LABEL --scopes read[,write][,autonomy]
+            [--output-env ENVFILE] [--token-file PATH]
+  trouble dashboard token rotate --label LABEL [--output-env ENVFILE] [--token-file PATH]
+  trouble dashboard token revoke --label LABEL [--token-file PATH]
+  trouble dashboard token list [--json] [--token-file PATH]
+  trouble hub status [--json]
+  trouble ledger status [--json]
+  trouble ledger verify [--day YYYY-MM-DD] [--json]
+  trouble ledger compact --day YYYY-MM-DD [--dry-run] [--json]
+  trouble hub archive [--dry-run] [--file FILE] [--force]
+  trouble hub dedup --key KEY [--json]
+  trouble hub drain [--timeout DURATION]
+  trouble sensors probe [--json] [--timeout DURATION]
+  trouble board integrity
+  trouble --version
+
+State-root spelling: --state_root is the canonical config-key form. The
+documented --state-root spelling is retained as a compatibility alias, and both
+forms are accepted by every verb that resolves configuration.
+
+--token-file PATH (alias --dashboard-token_file PATH) is how the dashboard token
+verbs address a store other than the resolved dashboard.token_file: pass the
+daemon's own --dashboard-token_file value and the mint lands in the file that
+daemon reads. The value must be an explicit path (/…, ~/…, ./… or ../…), the
+same rule the daemon's argv control enforces.
+
+Config precedence is flag > env > file > default (SPEC-12 §3.1); every key has a
+default and `trouble config explain` shows which source won.

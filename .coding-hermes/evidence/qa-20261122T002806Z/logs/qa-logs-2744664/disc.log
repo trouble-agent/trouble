@@ -1,0 +1,78 @@
+NETWORK_CUT_APPLIED
+ok  	github.com/trouble-agent/trouble/cmd/trouble	33.531s
+ok  	github.com/trouble-agent/trouble/cmd/troubled	0.612s
+ok  	github.com/trouble-agent/trouble/internal/app	182.761s
+ok  	github.com/trouble-agent/trouble/internal/boardintegrity	0.168s
+--- FAIL: TestBudgetDashboardRSS (123.50s)
+    budget_test.go:1223: dashboard window: 4652 requests in 1m0s (78 rps); parent p99 round-trip 105.110006ms (host load, informational)
+    budget_test.go:1225: control window:   5238 requests in 1m0s (87 rps)
+    budget_test.go:1226: RSS deltas — dashboard: peak 18.14 MB, steady 16.12 MB, retained after the load 1.88 MB
+    budget_test.go:1228: RSS deltas — control:   peak 2.51 MB, steady 1.98 MB, retained -0.07 MB
+    budget_test.go:1230: attributed RSS (dashboard − control, logged only: RSS carries the runtime's arena over the fixture): peak 15.64 MB, steady 14.15 MB
+    budget_test.go:1234: live-heap churn (logged only): peak HeapAlloc above the window base — dashboard 7.02 MB, control 0.18 MB; peak HeapInuse — dashboard 8.05 MB, control 0.30 MB
+    budget_test.go:1237: child allocations: dashboard window 438102 B/req, control window 4977 B/req
+    budget_test.go:1238: child render p99 92.228414ms over 4652 dashboard requests; Sys 92.3 MB, HeapSys 82.5 MB, open files 0
+    budget_test.go:1253: retained-heap batches — dashboard (10 batches, floor/peak of HeapAlloc after a forced GC, bytes):
+          floor 44863192 44968760 46061608 45040064 46179552 46840072 44993632 44879344 47698032 45034608
+          peak  49180560 50269536 49420096 49770800 51692784 50457808 51356024 48777080 48892080 48941952
+    budget_test.go:1253: retained-heap batches — control (10 batches, floor/peak of HeapAlloc after a forced GC, bytes):
+          floor 44668272 44664640 44665344 44684336 44670080 44669376 44639880 44659096 44668080 44694080
+          peak  44743240 44739048 44751392 44740856 44735408 44745096 44746888 44726992 44743888 44764928
+    budget_test.go:1257: retained heap (§2.9a): dashboard total 171416 bytes over the window, steady-state tail slope -451366 bytes per batch over 4 batches = -4513660 bytes scaled to the window; control total 25808 bytes, slope 61760 scaled; budgets: steady 6291456 bytes, RSS ceiling 12582912 bytes; load_avg_1m=3.77
+    budget_test.go:1274: p99 render = 92.228414ms, §7 requires ≤40ms on a quiet host (host profile io x1.00 cpu x1.41 load 3.77/8 cores (contention x1.47, measured))
+    budget_test.go:1315: 100-concurrent-render burst: live heap delta 0.92 MB (HeapInuse 3.41 MB), RSS 3.21 MB above the pre-burst baseline (idle live set 42.6 MB)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/dashboard	188.097s
+ok  	github.com/trouble-agent/trouble/internal/flow	50.517s
+ok  	github.com/trouble-agent/trouble/internal/hub	8.267s
+ok  	github.com/trouble-agent/trouble/internal/issues	9.711s
+ok  	github.com/trouble-agent/trouble/internal/ladder	0.195s
+--- FAIL: TestAmortizedThroughput (4.11s)
+    durability_test.go:227: amortized throughput = 35576 rec/s, want >= 67114 (load_avg_1m=3.92, calibration io=x0.67 load=x1.49 scale=x1.49; SPEC-01 §7 floor is 100000, reference host measured 515k)
+    durability_test.go:231: amortized (group-commit) throughput: 35576 rec/s over 102400 records in 2.878350871s (load_avg_1m=3.92, calibration io=x0.67 scale=x1.49, floor=67114, spec floor=100000/measured 515k)
+--- FAIL: TestPerLineRegression (9.13s)
+    durability_test.go:408: group-commit throughput = 44244 rec/s at load_avg_1m=2.95 (io=x0.60 scale=x1.37), want >= 73059
+    durability_test.go:416: amortized 44244 rec/s vs per-line 344 rec/s (128x at load_avg_1m=3.04; spec reference 515k vs 512)
+--- FAIL: TestRebuildBudget (38.33s)
+    index_test.go:95: rebuild of 503.4 MiB: build_ms=26627 scan_rate=19 MiB/s index_bytes=2685528 (2.6 MiB) groups=5000 entries=960001
+    index_test.go:139: calibration: io x0.59 cpu x1.54 load 1.54/8 cores (contention x1.19, measured) -> scale x1.19 (io x0.59 cpu x1.54, load_avg_1m=1.54) budget_ms=10732 rate_floor=50.3 MiB/s
+    index_test.go:142: BuildMS = 26627, want <= 10732 (SPEC-01 §7 budget is 9000; race=false load_avg_1m=1.54 scale=x1.19)
+    index_test.go:149: ScanRateMiBs = 18.9, want >= 50.3 (SPEC-01 §7 floor is 60 MiB/s; race=false load_avg_1m=1.54 scale=x1.19)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/ledger	276.997s
+ok  	github.com/trouble-agent/trouble/internal/lifecycle	27.464s
+ok  	github.com/trouble-agent/trouble/internal/llm	1.394s
+ok  	github.com/trouble-agent/trouble/internal/loadfence	4.118s
+ok  	github.com/trouble-agent/trouble/internal/portability	0.160s
+ok  	github.com/trouble-agent/trouble/internal/registry	5.200s
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen/gen	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/registry/testkit	0.015s
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/badmodule	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/fakebus	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/validate	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/research	1.366s
+ok  	github.com/trouble-agent/trouble/internal/scrub	35.631s
+--- FAIL: TestRuleEvaluationBudget256Rules (3.52s)
+    perf_test.go:135: p99 rule evaluation = 7.304763ms, budget is 6.125171ms (256 rules; io x1.36 cpu x1.80 load 5.59/8 cores (contention x1.70, measured); the SPEC-03 §7 budget is 2ms on the reference host)
+    perf_test.go:139: measured: rule evaluation p50 31.689µs, p99 7.304763ms over 2000 events with 256 rules (budget=6.125171ms, io x1.36 cpu x1.80 load 5.59/8 cores (contention x1.70, measured))
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/sensors	102.136s
+--- FAIL: TestLoadIngestThroughput (49.32s)
+    load_test.go:583: load: 42035 requests in 45.038s = 933 req/s (mean 154.197ms, p50 137.68ms, p99 393.674ms, p999 494.76ms); ref 6199 req/s
+    load_test.go:586: load: wave = 8 workers x 18 in flight for 45s (load_avg_1m at start 5.23; LOAD_PIPELINE/LOAD_DURATION_S unset -> auto-bounded by loadPipelineForLoad/loadWindowForLoad)
+    load_test.go:588: load: 5xx=0 non-200=0; RSS 40587264 -> 123658240 bytes (peak growth 83070976, spec target 8388608)
+    load_test.go:590: load: suite-wait 0.348 over the run window (TRBL-057 term; max allowance x2)
+    load_test.go:615: load: backpressure (TROUBLE-SENTINEL-010) = 0 of 42035 (0.00%) at load_avg_1m 3.05
+    load_test.go:664: load: RSS after FreeOSMemory 49815552 bytes (steady-state growth 9228288); heap live 27312128, sys 138701080, objects 74838
+    load_test.go:667: load: ledger index stats: {Entries:42659 Groups:1 GroupsCold:0 Incidents:0 Sources:2 Days:1 FilesScanned:1 BytesScanned:0 LinesScanned:0 TornLines:0 CorruptLines:0 SkippedNewerSchema:0 BuildMS:0 BudgetMS:9000 BudgetBytes:536870912 IndexBytes:1065 ScanRateMiBs:0 Degraded:false DegradedReason: TruncatedBeforeTS: ColdEvictionsPerMin:0 Measured:true UnmeasuredReason:}
+    load_test.go:716: steady-state RSS growth = 9113600 bytes, want <= 8388608 (spec target 8388608; min of 3 GC+FreeOSMemory settle samples, load_avg_1m at end 3.05)
+sentinel: 2026/11/22 00:18:16 sentinel: group records in ingest batch failed: TROUBLE-SENTINEL-010: ledger backpressure (overloaded)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/sentinel	135.086s
+--- FAIL: TestArtifactParseBudget (0.89s)
+    canonical_test.go:279: 1000 artifacts parsed in 885.780565ms, over the 684.6875ms budget (load_avg_1m=5.91; the spec budget is 500ms on a quiet host)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/skills	10.798s
+ok  	github.com/trouble-agent/trouble/internal/types	0.015s
+FAIL

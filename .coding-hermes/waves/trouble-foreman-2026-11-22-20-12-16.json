@@ -1,0 +1,37 @@
+{
+  "tick_id": "trouble-foreman-2026-11-22-20-12-16",
+  "project": "trouble",
+  "repo": "/home/kara/trouble",
+  "base": "origin/main",
+  "wave_budget": 2,
+  "worker_model": "glm-5.3-flash",
+  "worker_provider": "ollama-cloud",
+  "tasks": [
+    {
+      "id": "TRBL-135",
+      "title": "GitReins tier-2 grades the wrong artifact and has no ceiling (empty merge-commit diff, no timeout verdict, no aggregate accounting)",
+      "worktree": null,
+      "branch": null,
+      "repo": "/home/kara/gitreins",
+      "status": "worker committed 3 commits c2292d54/d1d41309/3628a9f9 on wt/TRBL-135 in ~/gitreins; gitreins task TRBL-135 state complete; tier-2 judge dispatched async (grading); merge+push to follow",
+      "note": "cross-repo coding task; worker dispatch shares the /home/kara/gitreins checkout which is a git repo; no trouble-repo worktree since the change does not touch this repo"
+    },
+    {
+      "id": "TRBL-122",
+      "title": "bunker-qa.sh launch is silent while blocked on the shared battery lock",
+      "mode": "foreman-direct",
+      "note": "trivial one-file shell change outside the trouble repo; foreman-implement per trivial one-file carve-out; changes land as a dated copy-free patch on the deployed script with the AC gate-arm grep",
+      "status": "closed (resolved-differently: flock battery lock removed from deployed script 11-02..11-04; row closed with lineage)"
+    },
+    {
+      "id": "TRBL-148",
+      "title": "trace-marker hygiene: repair unique ch:trace violations (PM-injected 2026-11-22, id normalized from null)",
+      "mode": "foreman-direct",
+      "note": "board-receipt repair is foreman work (board editing); worker exclusion by law",
+      "status": "closed (39 violations -> 0, trace_marker_check rc=0; 37 replacements logged in .coding-hermes/evidence/trace-repair-2026-11-22.md)"
+    }
+  ],
+  "base_sha": "c0a3ccc",
+  "finished_at": "2026-11-23T03:35:00Z",
+  "finish_note": "Recovered by trouble-foreman-2026-11-23-03-25-13: all 3 rows terminal (TRBL-135 complete w/ tier2 PASS + merge aa8066d1 pushed parity 0; TRBL-122/148 closed foreman-direct). 0 worker worktrees to gate or merge. Evidence dirs + manifest committed with recovery close."
+}

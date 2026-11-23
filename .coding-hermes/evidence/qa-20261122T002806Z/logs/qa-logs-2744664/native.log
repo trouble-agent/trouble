@@ -1,0 +1,166 @@
+# github.com/trouble-agent/trouble/internal/loadfence.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/portability.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/cmd/trouble.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+FAIL	github.com/trouble-agent/trouble/cmd/trouble [build failed]
+# github.com/trouble-agent/trouble/internal/ladder.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/issues.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/cmd/troubled.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+FAIL	github.com/trouble-agent/trouble/cmd/troubled [build failed]
+# github.com/trouble-agent/trouble/internal/hub.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/app.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+FAIL	github.com/trouble-agent/trouble/internal/app [build failed]
+# github.com/trouble-agent/trouble/internal/sensors.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+--- FAIL: TestPhantomShaFixture (0.05s)
+    integrity_test.go:69: git init: exit status 128: error: copy-fd: write returned: No space left on device
+        fatal: cannot copy '/usr/share/git-core/templates/hooks/sendemail-validate.sample' to '/tmp/TestPhantomShaFixture1046455788/001/.git/hooks/sendemail-validate.sample': No space left on device
+--- FAIL: TestRealShaPasses (0.02s)
+    integrity_test.go:103: git init: exit status 128: error: copy-fd: write returned: No space left on device
+        fatal: cannot copy '/usr/share/git-core/templates/hooks/pre-push.sample' to '/tmp/TestRealShaPasses318263702/001/.git/hooks/pre-push.sample': No space left on device
+--- FAIL: TestNonCompleteRowsSkipped (0.03s)
+    integrity_test.go:134: git init: exit status 128: error: copy-fd: write returned: No space left on device
+        fatal: cannot copy '/usr/share/git-core/templates/hooks/update.sample' to '/tmp/TestNonCompleteRowsSkipped3980373743/001/.git/hooks/update.sample': No space left on device
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/boardintegrity	0.130s
+# github.com/trouble-agent/trouble/internal/scrub.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/research.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/lifecycle.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/llm.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/skills.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+# github.com/trouble-agent/trouble/internal/sentinel.test
+/home/bunker-3ea1cde0/tools/go/pkg/tool/linux_amd64/link: mapping output file failed: no space left on device
+ok  	github.com/trouble-agent/trouble/internal/dashboard	66.628s
+--- FAIL: TestValidatePaths (0.02s)
+    testing.go:1581: TempDir: mkdir /tmp/TestValidatePaths2214583978/003: no space left on device
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/flow	9.427s
+FAIL	github.com/trouble-agent/trouble/internal/hub [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/issues [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/ladder [build failed]
+--- FAIL: TestAC6AppendOnlyLedger (6.23s)
+    ac_test.go:40: 8192 appends failed
+--- FAIL: TestRebuildBudget (2.83s)
+    index_test.go:91: encode: write /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-656420597/2026-09-16.jsonl: no space left on device
+--- FAIL: TestColdReadIsCapped (0.00s)
+    index_test.go:348: encode: write /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2551761526/2026-09-16.jsonl: no space left on device
+--- FAIL: TestAC30WalkRepeatsNothingAndSkipsNothing (0.10s)
+    --- FAIL: TestAC30WalkRepeatsNothingAndSkipsNothing/page_size_1 (0.02s)
+        page_test.go:154: AppendBatch(day 1, 40 records): TROUBLE-LEDGER-001 (write): write failed
+    --- FAIL: TestAC30WalkRepeatsNothingAndSkipsNothing/page_size_3 (0.02s)
+        page_test.go:154: AppendBatch(day 1, 40 records): TROUBLE-LEDGER-001 (write): write failed
+    --- FAIL: TestAC30WalkRepeatsNothingAndSkipsNothing/page_size_7 (0.03s)
+        page_test.go:154: AppendBatch(day 1, 40 records): TROUBLE-LEDGER-001 (write): write failed
+    --- FAIL: TestAC30WalkRepeatsNothingAndSkipsNothing/page_size_50 (0.03s)
+        page_test.go:154: AppendBatch(day 1, 40 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestAC30DroppedGenerationReturnsTheResetHint (0.06s)
+    page_test.go:211: AppendBatch(day 2, 8 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestAC30PageSizeClamp (0.04s)
+    page_test.go:438: Open: TROUBLE-LEDGER-012 (io_error): cannot create /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2689767247/quarantine
+--- FAIL: TestAC30PageReadIsBounded (0.03s)
+    page_test.go:463: corpus: 640 records in 2 generation files, batched per day (≤6 §3.5a windows/day at max_batch_records 64); load_avg_1m=5.93
+    page_test.go:464: AppendBatch(day 0, 320 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestAC30SidecarRebuildIsExercised (0.04s)
+    page_test.go:568: rebuild after tear: TROUBLE-LEDGER-011 (io_error): cannot rebuild sidecar for 2026-09-16.jsonl
+--- FAIL: TestAC30PageSurvivesCompaction (0.03s)
+    page_test.go:606: AppendBatch(day 2, 10 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestAC30FilesNotCarriedByTheIndexGetAnExplainedAnswer (0.03s)
+    page_test.go:673: encode fixture: write /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-1403300434/2026-09-16.3.gen.jsonl: no space left on device
+--- FAIL: TestAC30ColdReadPartialAccounting (0.22s)
+    page_test.go:726: Append(event): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestPartRollover (0.08s)
+    rotate_test.go:93: Append(event): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestReaderAcrossCompaction (0.07s)
+    rotate_test.go:202: Compact: TROUBLE-LEDGER-007 (compaction): cannot write the generation file
+--- FAIL: TestSidecarWrittenAtRotation (0.03s)
+    sidecar_test.go:49: AppendBatch(day 2, 6 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestSidecarDescribesTheFileExactly (0.03s)
+    sidecar_test.go:68: AppendBatch(day 0, 260 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestSidecarRebuildPath (0.02s)
+    sidecar_test.go:129: AppendBatch(day 0, 40 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestSidecarAcceleratesTheWalk (0.02s)
+    sidecar_test.go:211: AppendBatch(day 0, 60 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestSidecarDroppedWithItsGeneration (0.03s)
+    sidecar_test.go:256: AppendBatch(day 1, 20 records): TROUBLE-LEDGER-001 (write): write failed
+--- FAIL: TestReadStatusMarksUnbuiltIndexExplicitly (0.00s)
+    --- FAIL: TestReadStatusMarksUnbuiltIndexExplicitly/populated (0.00s)
+        unmeasured_index_status_test.go:21: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-3423810018/LOCK
+--- FAIL: TestReadStatusOmitsWriterSeatCounters (0.00s)
+    unmeasured_status_test.go:31: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-3292160279/LOCK
+--- FAIL: TestLiveStatusMarksRateAsNoRecords (0.00s)
+    unmeasured_status_test.go:118: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-1489790102/LOCK
+--- FAIL: TestVerifyReportCollectionsAreAlwaysArrays (0.00s)
+    unmeasured_status_test.go:170: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-981609364/LOCK
+--- FAIL: TestVerifyDoesNotCountLiveGroupFoldsAsDeclared (0.00s)
+    verify_aggregate_test.go:71: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-155396112/LOCK
+--- FAIL: TestVerifyStillCatchesUndeclaredAggregateLoss (0.00s)
+    verify_aggregate_test.go:115: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2271687816/LOCK
+--- FAIL: TestVerifyPayloadHashStructOrderedPayload (0.00s)
+    --- FAIL: TestVerifyPayloadHashStructOrderedPayload/config_snapshot (0.00s)
+        verify_payload_hash_test.go:175: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-935396857/LOCK
+    --- FAIL: TestVerifyPayloadHashStructOrderedPayload/lifecycle_record_with_nested_struct (0.00s)
+        verify_payload_hash_test.go:231: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-4200177310/LOCK
+    --- FAIL: TestVerifyPayloadHashStructOrderedPayload/map-only_payload_is_unchanged (0.00s)
+        verify_payload_hash_test.go:260: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-1255575311/LOCK
+--- FAIL: TestVerifyPayloadHashTamperedStillReported (0.00s)
+    verify_payload_hash_test.go:291: Open: TROUBLE-LEDGER-012 (io_error): cannot publish writer identity in /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2826929477/LOCK
+--- FAIL: TestVerifyPayloadHashMismatchDifferential (0.00s)
+    verify_payload_hash_test.go:370: write 2026-09-16.jsonl: write /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2943616698/2026-09-16.jsonl: no space left on device
+--- FAIL: TestVerifyPayloadHashEmptyPayloadNoMember (0.00s)
+    testutil_test.go:87: cannot create test root: mkdir /home/bunker-3ea1cde0/.local/state/trouble-test/ledger-2717739818: no space left on device
+--- FAIL: TestReadHeadActiveDay_basic (0.00s)
+    readonly_head_active_test.go:19: write HEAD: write /tmp/TestReadHeadActiveDay_basic2377771170/001/HEAD: no space left on device
+--- FAIL: TestReadHeadActiveDay_corrupt (0.00s)
+    readonly_head_active_test.go:49: write corrupt HEAD: write /tmp/TestReadHeadActiveDay_corrupt2006542825/001/HEAD: no space left on device
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/ledger	134.078s
+FAIL	github.com/trouble-agent/trouble/internal/lifecycle [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/llm [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/loadfence [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/portability [build failed]
+--- FAIL: TestPlayOnFailRollbackReplayWithoutGrants (0.00s)
+    play_test.go:1418: outcome = "failed", want "rolled_back"
+    play_test.go:1424: config.set calls = 1, want 3 (two applies + the aborted replay)
+--- FAIL: TestPlayVersionedIdentity (0.00s)
+    play_test.go:1508: write /tmp/TestPlayVersionedIdentity1067916811/001/svc-pool@99.toml: no space left on device
+--- FAIL: TestLatencyThresholds (0.00s)
+    registry_bench_test.go:255: fixture config: write /tmp/TestLatencyThresholds775041570/001/app.toml: no space left on device
+--- FAIL: TestConformanceRunAll (0.70s)
+    --- FAIL: TestConformanceRunAll/config.get (0.01s)
+        testing.go:1581: TempDir: mkdir /tmp/TestConformanceRunAllconfig.get478456134: no space left on device
+    --- FAIL: TestConformanceRunAll/config.list (0.00s)
+        testing.go:1581: TempDir: mkdir /tmp/TestConformanceRunAllconfig.list2839330244: no space left on device
+    --- FAIL: TestConformanceRunAll/config.set (0.00s)
+        testing.go:1581: TempDir: mkdir /tmp/TestConformanceRunAllconfig.set365098479: no space left on device
+    --- FAIL: TestConformanceRunAll/file.patch (0.00s)
+        testing.go:1581: TempDir: mkdir /tmp/TestConformanceRunAllfile.patch1779388032: no space left on device
+    --- FAIL: TestConformanceRunAll/file.read (0.00s)
+        --- FAIL: TestConformanceRunAll/file.read/seeded-file (0.00s)
+            testing.go:1581: TempDir: mkdir /tmp/TestConformanceRunAllfile.readseeded-file3639759207/003: no space left on device
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/registry	3.406s
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen/gen	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/registry/testkit	0.053s
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/badmodule	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/fakebus	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/validate	[no test files]
+FAIL	github.com/trouble-agent/trouble/internal/research [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/scrub [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/sensors [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/sentinel [build failed]
+FAIL	github.com/trouble-agent/trouble/internal/skills [build failed]
+ok  	github.com/trouble-agent/trouble/internal/types	0.018s
+FAIL

@@ -1,0 +1,6 @@
+go: downloading github.com/redis/go-redis/v9 v9.22.0
+go: downloading github.com/BurntSushi/toml v1.6.0
+go: downloading golang.org/x/sys v0.48.0
+go: downloading github.com/godbus/dbus/v5 v5.2.2
+go: downloading go.uber.org/atomic v1.12.0
+go: downloading github.com/cespare/xxhash/v2 v2.3.0

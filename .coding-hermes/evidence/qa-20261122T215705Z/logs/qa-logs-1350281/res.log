@@ -1,0 +1,44 @@
+PARENT_CAP=unlimited
+SUBSHELL_CAP=3145728
+CAP_EFFECTIVE=3145728 CAP_REQUESTED=3145728
+ok  	github.com/trouble-agent/trouble/cmd/trouble	26.702s
+ok  	github.com/trouble-agent/trouble/cmd/troubled	0.843s
+ok  	github.com/trouble-agent/trouble/internal/app	116.433s
+ok  	github.com/trouble-agent/trouble/internal/boardintegrity	0.222s
+ok  	github.com/trouble-agent/trouble/internal/dashboard	65.115s
+ok  	github.com/trouble-agent/trouble/internal/flow	43.571s
+ok  	github.com/trouble-agent/trouble/internal/hub	7.891s
+ok  	github.com/trouble-agent/trouble/internal/issues	2.662s
+ok  	github.com/trouble-agent/trouble/internal/ladder	0.136s
+--- FAIL: TestPerLineRegression (6.80s)
+    memcap.go:249: TestPerLineRegression: mem cap 3.00GiB (rlimit:RLIMIT_AS(ulimit -v)) bounds the run at 32768 of 102400 units (floor 32768, ~32.0MiB live/unit); the 102400-unit run stays the quiet-host contract
+    durability_test.go:430: group-commit throughput = 40911 rec/s at load_avg_1m=6.80 (io=x0.09 scale=x2.13), want >= 46875
+    durability_test.go:438: amortized 40911 rec/s vs per-line 378 rec/s (108x at load_avg_1m=7.13; spec reference 515k vs 512)
+--- FAIL: TestRebuildBudget (35.21s)
+    index_test.go:105: rebuild of 503.4 MiB: build_ms=21829 scan_rate=23 MiB/s index_bytes=2685528 (2.6 MiB) groups=5000 entries=960001
+    index_test.go:149: calibration: io x0.09 cpu x2.04 load 3.38/6 cores (contention x1.56, measured) -> scale x1.56 (io x0.09 cpu x2.04, load_avg_1m=3.38) budget_ms=14070 rate_floor=38.4 MiB/s
+    index_test.go:156: BuildMS = 21829, want <= 14070 (SPEC-01 §7 budget is 9000; race=false load_avg_1m=3.38 scale=x1.56)
+    index_test.go:163: ScanRateMiBs = 23.1, want >= 38.4 (SPEC-01 §7 floor is 60 MiB/s; race=false load_avg_1m=3.38 scale=x1.56)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/ledger	282.783s
+ok  	github.com/trouble-agent/trouble/internal/lifecycle	23.218s
+ok  	github.com/trouble-agent/trouble/internal/llm	1.339s
+ok  	github.com/trouble-agent/trouble/internal/loadfence	4.603s
+ok  	github.com/trouble-agent/trouble/internal/portability	0.133s
+ok  	github.com/trouble-agent/trouble/internal/registry	5.316s
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/schemagen/gen	[no test files]
+ok  	github.com/trouble-agent/trouble/internal/registry/testkit	0.021s
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/badmodule	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/testkit/fakebus	[no test files]
+?   	github.com/trouble-agent/trouble/internal/registry/validate	[no test files]
+--- FAIL: TestDeriveNeverBlocks (0.66s)
+    slug_test.go:254: derivation 64.016µs vs budget 45.824µs (base 20µs; suite-wait 0.13 → x1.15; canary 9.141319ms vs reference 2.3ms (ratio x3.97) → x2.00; contention x2.29) (want ≤45.824µs; load_avg_1m=3.30; required load < 12.00; the quiet-host budget is 20µs)
+FAIL
+FAIL	github.com/trouble-agent/trouble/internal/research	1.300s
+ok  	github.com/trouble-agent/trouble/internal/scrub	50.990s
+ok  	github.com/trouble-agent/trouble/internal/sensors	109.915s
+ok  	github.com/trouble-agent/trouble/internal/sentinel	167.587s
+ok  	github.com/trouble-agent/trouble/internal/skills	11.255s
+ok  	github.com/trouble-agent/trouble/internal/types	0.039s
+FAIL

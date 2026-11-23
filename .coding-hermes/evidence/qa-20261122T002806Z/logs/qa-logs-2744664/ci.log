@@ -1,0 +1,9 @@
+time="2026-11-22T00:13:07Z" level=info msg="Using docker host 'unix:///run/bunker/3ea1cde0/docker.sock', and daemon socket 'unix:///run/bunker/3ea1cde0/docker.sock'"
+[ci/build, vet, test, spec selfcheck] ⭐ Run Set up job
+[ci/build, vet, test, spec selfcheck] 🚀  Start image=catthehacker/ubuntu:act-latest
+[ci/build, vet, test, spec selfcheck]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[ci/build, vet, test, spec selfcheck]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[ci/build, vet, test, spec selfcheck] failed to create container: 'Error response from daemon: No such image: catthehacker/ubuntu:act-latest'
+[ci/build, vet, test, spec selfcheck]   ❌  Failure - Set up job
+[ci/build, vet, test, spec selfcheck] 🏁  Job failed
+Error: failed to create container: 'Error response from daemon: No such image: catthehacker/ubuntu:act-latest'

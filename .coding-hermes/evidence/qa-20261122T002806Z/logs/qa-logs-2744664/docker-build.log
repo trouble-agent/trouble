@@ -1,0 +1,55 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon  16.83MB
+Step 1/19 : ARG GO_IMAGE=golang:1.26.11-bookworm
+Step 2/19 : FROM ${GO_IMAGE} AS build
+1.26.11-bookworm: Pulling from library/golang
+4f4fb700ef54: Pulling fs layer
+6dbc954da649: Pulling fs layer
+d6c30932f8d3: Pulling fs layer
+c6b99ccefcff: Pulling fs layer
+6da9d21223e3: Pulling fs layer
+338554e9113f: Pulling fs layer
+69245854ad58: Pulling fs layer
+4f4fb700ef54: Download complete
+6da9d21223e3: Download complete
+338554e9113f: Download complete
+2695a5d28899: Download complete
+48c8ffa6c187: Download complete
+69245854ad58: Download complete
+6dbc954da649: Download complete
+d6c30932f8d3: Download complete
+c6b99ccefcff: Download complete
+69245854ad58: Pull complete
+338554e9113f: Pull complete
+d6c30932f8d3: Pull complete
+c6b99ccefcff: Pull complete
+4f4fb700ef54: Pull complete
+6da9d21223e3: Pull complete
+6dbc954da649: Pull complete
+Digest: sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0
+Status: Downloaded newer image for golang:1.26.11-bookworm
+ ---> dc40a13b6130
+Step 3/19 : WORKDIR /src
+ ---> Running in 846e8127f944
+ ---> Removed intermediate container 846e8127f944
+ ---> adbbaa5c8647
+Step 4/19 : ARG VERSION=
+ ---> Running in 06e73c4c05f7
+ ---> Removed intermediate container 06e73c4c05f7
+ ---> 2d15ebebd526
+Step 5/19 : ARG GIT_SHA=
+ ---> Running in 6cf7afc1e799
+ ---> Removed intermediate container 6cf7afc1e799
+ ---> 613744003492
+Step 6/19 : ARG BUILD_TIME=
+ ---> Running in 362d39ed6a4a
+ ---> Removed intermediate container 362d39ed6a4a
+ ---> 5f75fde3853f
+Step 7/19 : COPY go.mod go.sum ./
+ ---> ddfa70e2006b
+Step 8/19 : RUN go mod download
+ ---> Running in b8c4c5026397
+failed to apply diff: mount callback failed on /home/bunker-3ea1cde0/.local/share/docker/containerd/daemon/tmpmounts/containerd-mount3845281177: write /home/bunker-3ea1cde0/.local/share/docker/containerd/daemon/tmpmounts/containerd-mount3845281177/go/pkg/mod/golang.org/x/sys@v0.48.0/windows/mkwinsyscall/mkwinsyscall.go: no space left on device

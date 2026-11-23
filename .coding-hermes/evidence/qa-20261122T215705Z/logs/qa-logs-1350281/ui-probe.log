@@ -1,0 +1,4 @@
+time=2026-11-22T13:32:01.739-08:00 level=INFO msg="ladder resume" resumed=0
+time=2026-11-22T13:32:02.796-08:00 level=WARN msg="dashboard token store is empty" path=/home/bunker-87f4b3cc/.config/trouble/dashboard-tokens.json reason=missing
+time=2026-11-22T13:32:02.801-08:00 level=INFO msg="dashboard listening (refused: token store missing; health-only)" addr=127.0.0.1:7644 identity=token loopback=true
+time=2026-11-22T13:32:23.011-08:00 level=INFO msg="dashboard stopped"

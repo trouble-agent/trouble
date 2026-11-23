@@ -1,0 +1,89 @@
+name: trouble
+services:
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --maxmemory-policy
+      - noeviction
+    container_name: trouble-redis
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      timeout: 5s
+      interval: 30s
+      retries: 3
+    image: redis:7-alpine
+    networks:
+      default: null
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: redis-data
+        target: /data
+        volume: {}
+  trouble:
+    build:
+      context: /home/bunker-3ea1cde0/qa-trouble
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ""
+    command:
+      - --config
+      - /etc/trouble/config.toml
+    container_name: trouble
+    depends_on:
+      redis:
+        condition: service_started
+        required: true
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/trouble
+        - check-stall
+        - --health-url
+        - http://127.0.0.1:7644/health.json
+        - --json
+        - --config
+        - /etc/trouble/config.toml
+      timeout: 10s
+      interval: 30s
+      retries: 3
+      start_period: 15s
+    image: trouble:local
+    networks:
+      default: null
+    ports:
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 7643
+        published: "7643"
+        protocol: tcp
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 7644
+        published: "7644"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: volume
+        source: trouble-state
+        target: /data
+        volume: {}
+      - type: bind
+        source: /home/bunker-3ea1cde0/qa-trouble/deploy/container/config.toml
+        target: /etc/trouble/config.toml
+        read_only: true
+        bind:
+          create_host_path: true
+networks:
+  default:
+    name: trouble_default
+volumes:
+  redis-data:
+    name: trouble_redis-data
+  trouble-state:
+    name: trouble_trouble-state

@@ -18,9 +18,12 @@
       "worktree": "/home/kara/worktrees/trouble-INT-CI-10",
       "branch": "wt/INT-CI-10",
       "base_sha": "8482aed",
-      "files": ["internal/ledger/*_test.go (test only)"],
+      "files": [
+        "internal/ledger/*_test.go (test only)"
+      ],
       "gitreins_task": "created+started",
-      "merge_order": 1
+      "merge_order": 1,
+      "status": "merged+judged+closed"
     },
     {
       "id": "QA-TROUBLE-032",
@@ -28,20 +31,25 @@
       "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-032",
       "branch": "wt/QA-TROUBLE-032",
       "base_sha": "8482aed",
-      "files": [".gitreins/tasks.yaml.corrupt-963c8d6c853e (index only; kept on disk)"],
+      "files": [
+        ".gitreins/tasks.yaml.corrupt-963c8d6c853e (index only; kept on disk)"
+      ],
       "gitreins_task": "created+started",
-      "merge_order": 2
+      "merge_order": 2,
+      "status": "merged+judged+closed"
     }
   ],
   "foreman_direct_parallel": [
     {
       "id": "QA-TROUBLE-033",
-      "note": "committed-arm satisfied by recovery commit 8482aed (both evidence runs + manifests committed; message names run ids; harvest copy at ~/.hermes/qa/harvest/trouble-evidence-qa-20261122T215705Z). Harness-collect half belongs to the qa-foreman bunker-qa.sh family — same owner as deferred siblings QA-TROUBLE-27/28/031"
+      "note": "committed-arm satisfied by recovery commit 8482aed (both evidence runs + manifests committed; message names run ids; harvest copy at ~/.hermes/qa/harvest/trouble-evidence-qa-20261122T215705Z). Harness-collect half belongs to the qa-foreman bunker-qa.sh family \u2014 same owner as deferred siblings QA-TROUBLE-27/28/031"
     }
   ],
   "held_rows": [
-    "QA-TROUBLE-17-R4-R2-R2: quiet-host ledger+research rerun; host load 12.6-22.8 this tick not quiet — rerun after wave settles or next tick",
-    "QA-TROUBLE-25: clean-JIT battery evidence leg — battery infra (qa lane act)",
+    "QA-TROUBLE-17-R4-R2-R2: quiet-host ledger+research rerun; host load 12.6-22.8 this tick not quiet \u2014 rerun after wave settles or next tick",
+    "QA-TROUBLE-25: clean-JIT battery evidence leg \u2014 battery infra (qa lane act)",
     "RELEASE-012: owner-gated (releng lane, first publication BLOCKED on Bane push decision)"
-  ]
+  ],
+  "finished_at": "2026-11-23T04:20:00Z",
+  "outcome": "INT-CI-10 merged 9a9f50d (run 412d3c98 tier1+tier2 PASS, CI 45110792504 green); QA-TROUBLE-032 merged 2080306 (run e9697121 tier2 COMPLETE, tier1 tests red = known load baseline, CI 45106302597 green); QA-TROUBLE-033 closed foreman-direct (8482aed + harvest, run 22a0bb67 tier2 PASS); worktrees reaped, branches deleted; final board b19b7e0"
 }

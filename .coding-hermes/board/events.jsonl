@@ -664,3 +664,6 @@
 {"id":659,"timestamp":"2026-11-22T22:02:43Z","event_type":"task_created","task_id":"QA-TROUBLE-17-R4-R2-R2","actor":"foreman","detail":"{\"id\":\"QA-TROUBLE-17-R4-R2-R2\",\"status\":\"pending\"}","marker":null}
 {"id":660,"timestamp":"2026-11-22T22:02:47Z","event_type":"task_created","task_id":"QA-TROUBLE-032","actor":"foreman","detail":"{\"id\":\"QA-TROUBLE-032\",\"status\":\"pending\"}","marker":null}
 {"id":661,"timestamp":"2026-11-23T00:49:57Z","event_type":"task_created","task_id":"QA-TROUBLE-033","actor":"foreman","detail":"{\"id\":\"QA-TROUBLE-033\",\"status\":\"pending\"}","marker":null}
+{"id":662,"timestamp":"2026-11-23T03:27:32Z","event_type":"task_updated","task_id":"INT-CI-10","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":663,"timestamp":"2026-11-23T03:27:32Z","event_type":"task_updated","task_id":"QA-TROUBLE-032","actor":"foreman","detail":"{\"status\":\"in_progress\"}","marker":null}
+{"id":664,"timestamp":"2026-11-23T03:44:15Z","event_type":"task_completed","task_id":"QA-TROUBLE-032","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}

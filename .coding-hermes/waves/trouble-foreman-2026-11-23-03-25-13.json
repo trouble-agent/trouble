@@ -1,0 +1,47 @@
+{
+  "tick_id": "trouble-foreman-2026-11-23-03-25-13",
+  "project": "trouble",
+  "repo": "/home/kara/trouble",
+  "base": "origin/main",
+  "base_sha": "8482aed",
+  "wave_budget": 3,
+  "worker_model": "glm-5.3-flash",
+  "worker_provider": "ollama-cloud",
+  "recovered_before_dispatch": {
+    "wave": "trouble-foreman-2026-11-22-20-12-16",
+    "outcome": "all 3 rows terminal; 0 worker worktrees to gate/merge; evidence+manifest committed 8482aed, pushed parity 0"
+  },
+  "tasks": [
+    {
+      "id": "INT-CI-10",
+      "title": "TestFsyncCountIsStructural fsync-delta flake -> deterministic/bounded-range assertion",
+      "worktree": "/home/kara/worktrees/trouble-INT-CI-10",
+      "branch": "wt/INT-CI-10",
+      "base_sha": "8482aed",
+      "files": ["internal/ledger/*_test.go (test only)"],
+      "gitreins_task": "created+started",
+      "merge_order": 1
+    },
+    {
+      "id": "QA-TROUBLE-032",
+      "title": "untrack tracked-but-ignored .gitreins/tasks.yaml.corrupt-963c8d6c853e",
+      "worktree": "/home/kara/worktrees/trouble-QA-TROUBLE-032",
+      "branch": "wt/QA-TROUBLE-032",
+      "base_sha": "8482aed",
+      "files": [".gitreins/tasks.yaml.corrupt-963c8d6c853e (index only; kept on disk)"],
+      "gitreins_task": "created+started",
+      "merge_order": 2
+    }
+  ],
+  "foreman_direct_parallel": [
+    {
+      "id": "QA-TROUBLE-033",
+      "note": "committed-arm satisfied by recovery commit 8482aed (both evidence runs + manifests committed; message names run ids; harvest copy at ~/.hermes/qa/harvest/trouble-evidence-qa-20261122T215705Z). Harness-collect half belongs to the qa-foreman bunker-qa.sh family — same owner as deferred siblings QA-TROUBLE-27/28/031"
+    }
+  ],
+  "held_rows": [
+    "QA-TROUBLE-17-R4-R2-R2: quiet-host ledger+research rerun; host load 12.6-22.8 this tick not quiet — rerun after wave settles or next tick",
+    "QA-TROUBLE-25: clean-JIT battery evidence leg — battery infra (qa lane act)",
+    "RELEASE-012: owner-gated (releng lane, first publication BLOCKED on Bane push decision)"
+  ]
+}

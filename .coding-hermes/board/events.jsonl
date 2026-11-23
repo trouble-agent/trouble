@@ -669,3 +669,4 @@
 {"id":664,"timestamp":"2026-11-23T03:44:15Z","event_type":"task_completed","task_id":"QA-TROUBLE-032","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":665,"timestamp":"2026-11-23T03:55:46Z","event_type":"task_completed","task_id":"QA-TROUBLE-033","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
 {"id":666,"timestamp":"2026-11-23T04:33:12Z","event_type":"task_completed","task_id":"INT-CI-10","actor":"foreman","detail":"{\"status\":\"complete\"}","marker":null}
+{"id":667,"timestamp":"2026-11-23T04:47:59Z","event_type":"task_updated","task_id":"QA-TROUBLE-033","actor":"foreman","detail":"{\"status\":\"pending\"}","marker":null}

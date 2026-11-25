@@ -1,0 +1,42 @@
+README-8 refire readback — tick trouble-readme-2026-11-25-22-31-35
+Refire at 2026-11-25T22:31-22:59Z; published tip fbd1cfc373645284a6b2116fd3a83bb15e2c2b09.
+
+Context: an earlier fire of this tick filed README-8, committed fbd1cfc and pushed
+(rows + evidence at origin/main) but died before reporting and without appending an
+audit event. This refire re-verifies and closes the trail gap; new rows: 0.
+
+README-8 readings at tip fbd1cfc:
+- status pending, priority P4, one complete marker in reasoning (marker_field=reasoning).
+- evidence artifact .coding-hermes/evidence/readme-20261125-alias.txt exists at the tip;
+  content sha256 681d18bf1e12876133a1bb9f59ac74534962f820a44bc3402e93e3cc75495a9d
+  (git cat-file -p origin/main:.coding-hermes/evidence/readme-20261125-alias.txt | sha256sum)
+  equals the sha recorded in the row reasoning.
+- premise re-probed live (see premise log beside this file): deploy/README.md lines 20-23
+  at the tip still say the dash spelling "is refused as an unknown flag", while the
+  stranger-installed troubled --help states the documented --state-root spelling is
+  retained as a compatibility alias accepted on every config-resolving surface, and
+  trouble config explain --state-root <isolated-path> --json exited 0 resolving
+  state_root with source flag. Finding remains LIVE. No row mutation.
+
+Additional arms this refire:
+- anchors: 3 checked, 0 broken (check-md-anchors.py README.md).
+- links: 9 local links all resolve, 0 external links (no badges present), 0 missing
+  (readme-link-check.py against repo root at tip; working README blob cae03f6dd5db66739d1272c5704ced2fdeb05d6b
+  equals origin/main blob id).
+- doc-severity census (readme-doc-severity-census.py, ref origin/main): 39 doc rows,
+  38 complete / 1 pending; by priority P1=1 P2=5 P4=29 P5=4; no pending doc rows at
+  P1-P3 (below the P4/P5 policy ceiling), no pre-2026-09-30 open P1-P3 doc rows to
+  re-triage. The one P1 and five P2 doc rows are all complete.
+- release boundary: git ls-remote --tags origin returned zero tags; no published
+  release exists (first publication owner-gated, RELEASE-012), so no release-drift
+  surface. README freshness graded against the tree tip instead.
+- reader-question structure: headings cover what exists, contracts, run, docs,
+  source, build and test; 38 previously completed doc rows cover the historical gaps.
+
+Carried UNVERIFIED (from the filing sweep, not re-run here):
+- go test -short ./internal/... timed out at rc=124 during the filing sweep; a timeout
+  alone does not establish a broken documented command.
+
+Refire probe artifacts (this directory):
+- premise-reprobe.log  sha256 <see evidence-index.sha256>
+- refire-readback.txt  sha256 <see evidence-index.sha256>

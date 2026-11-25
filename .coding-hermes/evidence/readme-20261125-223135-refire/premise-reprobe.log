@@ -1,0 +1,17 @@
+# README-8 premise re-probe (refire 2026-11-25T22:55:57Z)
+# tip: fbd1cfc373645284a6b2116fd3a83bb15e2c2b09
+# install provenance: go module v0.0.0-20261125115524-d6b8ebf679a9 (code identical to tip: tip diff touches board+evidence only)
+
+$ troubled --help | grep -i -A2 'state-root'
+  state_root uses the canonical --state_root spelling. The documented
+  --state-root spelling is retained as a compatibility alias, and both forms
+  are accepted on every config-resolving surface.
+
+EXIT=0
+
+$ trouble config explain --state-root <isolated> --json (state_root rows)
+    "key": "state_root",
+    "value": "/home/kara/.hermes/stand-in/readme/trouble/state-alias-refire",
+    "source": "flag",
+    "source_ref": "--state_root",
+EXIT=0

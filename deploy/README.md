@@ -19,8 +19,12 @@ Prerequisites:
 
 Two boot facts worth knowing first (SPEC-12 §2.5, §3.2): the daemon's per-key
 config override spelling is `--state_root` (for example,
-`troubled --config X --state_root Y`), not `--state-root` — the dash form is
-refused as an unknown flag — and `/tmp` and `/var/tmp` state roots are
+`troubled --config X --state_root Y`); the documented `--state-root` spelling
+is retained as a compatibility alias and both forms are accepted on every
+config-resolving surface (SPEC-12 §2.5 — the alias resolves to the same
+`state_root` key with the same precedence and provenance; verify with
+`trouble config explain --state-root Y --json`, which reports
+`source_ref: --state_root`) — and `/tmp` and `/var/tmp` state roots are
 hard-refused at boot with TROUBLE-LIFECYCLE-004, rather than merely
 discouraged.
 

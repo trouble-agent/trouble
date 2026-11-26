@@ -1,0 +1,11 @@
+005b04376e0487619bfa7dfc2eafd778c972bcdb0ebcd7861bec2bcc85182eed  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/ac1-fixture-proof.sh
+919f2421fbd2f76a3b244b2a8b87efc0634dd3a895eac8bc6f31b99601ff6607  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/guard-pre-repair-full.txt
+d0201414b22145bc7c1cc640aed113d163df13ae113791757dfadf4ee4b0c9a0  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/guard-pre-repair-live3.txt
+a1350cd1be9d7fe45be7b16f6b08d6801821f65a7f14d33579816c19232dec18  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/jsonl-line-census.py
+e2d039278a8614f4570325abe23cb60723f924120896990678c831841a35bde8  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/jsonl-line-guard.py
+9ded600fa4242f317e1cb51ea70b89f3dc3a4705ac88fbc9cfa56425be9ca0be  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/make-fixtures.py
+2eb3c93bb800f53d2b5fcfaa913bab0b301879c25311f1ccebf0df2086e489ba  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/qa_ledger_append.py
+c19b03b58d1daf264106b67d2182673d34917b18e9b0cb18800317b946375647  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/README.md
+f92e63f6f8f247873d748464467c3523bc3f0644fb92c39454a7c8d13e77d529  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/repair-and-proofs.txt
+db3c38ebdff01c43a157cdfc41e2225bd056c7c0e8509e6f11fdfb96abe8c7e9  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/repair-ledger-pretty-block.py
+5ef78761644e7a8c798a7e91d3e33c8eecdf7400807574eaeade1a095ade8507  /home/kara/trouble/.coding-hermes/evidence/ops-2026-11-26-QA-TROUBLE-28/verify-repair.py

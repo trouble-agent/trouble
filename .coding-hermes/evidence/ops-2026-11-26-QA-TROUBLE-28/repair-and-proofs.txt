@@ -1,0 +1,33 @@
+=== guard post-repair (live store) ===
+GUARD PASS /home/kara/.hermes/qa/ledger.jsonl: 1027 lines, 1026 objects, one JSON value per line, trailing newline present
+rc=0
+
+=== repair run output (2026-11-26T07:25:13Z) ===
+backup=/home/kara/.hermes/qa/ledger.jsonl.pre-repair-20261126T072513Z bytes=3101039
+block_object ts=2026-11-23T16:23:24Z
+replaced lines_before=1050 lines_after=1025
+post_repair invalid_lines=0
+
+=== multiset verify (backup vs live) ===
+objects_before=1025 objects_after=1026
+multiset_equal=False
+post_repair_invalid_lines=0
+final_byte_newline=True
+verify_ok=False
+rc=1
+
+=== AC1 fixture proof (torn store + canonical append) ===
+before: last_byte=} lines=0
+appended_to=/home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-torn-append.jsonl created=False nonblank_lines=2 record_tick=fixture-new
+after_lines=2
+GUARD PASS /home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-torn-append.jsonl: 3 lines, 2 objects, one JSON value per line, trailing newline present
+guard_rc=0
+ac1_fixture_ok=true
+
+=== guard fixture proof (healthy + glued) ===
+healthy=/home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-healthy.jsonl glued=/home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-glued.jsonl
+GUARD PASS /home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-healthy.jsonl: 3 lines, 2 objects, one JSON value per line, trailing newline present
+GUARD FAIL /home/kara/.hermes/cache/scratch/ops-2026-11-26/fixture-glued.jsonl: 2 finding(s) over 3 lines (4 objects):
+  final byte is not a newline (next append will glue onto the last line)
+  line 2: holds 2+ JSON values on one line (torn append: prior write omitted the trailing newline)
+rc=1

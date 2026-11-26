@@ -96,8 +96,7 @@ configuration and credentials are ready. The stock project key is valid only as
 a bootable placeholder; replace it before accepting reports from anything other
 than this local proof.
 
-Build the stamped binaries and start the daemon in the foreground. Leave this
-terminal running until the shutdown step.
+Build the stamped binaries.
 
 ```sh
 # Requires Go 1.26+ on PATH (a distro Go with GOTOOLCHAIN=auto also works) —
@@ -113,6 +112,50 @@ LDFLAGS="-s -w -X github.com/trouble-agent/trouble/internal/lifecycle.Version=$V
   -X github.com/trouble-agent/trouble/internal/lifecycle.BuildTime=$BUILD_TIME"
 CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/troubled ./cmd/troubled
 CGO_ENABLED=0 go build -trimpath -ldflags="$LDFLAGS" -o bin/trouble ./cmd/trouble
+```
+
+Mint the dashboard read credential BEFORE the first boot. The dashboard's
+identity plane is built from a 0600 token store (SPEC-10 §3.2), and a boot
+whose store is missing refuses the plane: `/health.json` answers
+`status="degraded"` with a `subsystems[]` row
+`{"name":"dashboard","built":false,"refused":true,"code":"TROUBLE-LIFECYCLE-001",
+"reason":"… token store missing … mint a credential with trouble dashboard
+token create"}` (QA-TROUBLE-19), and every dashboard route other than
+health answers 503 + TROUBLE-DASHBOARD-013. The shipped
+`examples/config.toml` declares no `dashboard.token_file`, so on this
+quickstart — which declares a literal `state_root` — the store resolves, by
+the same rule on both sides (the daemon's boot projection and the mint's own
+resolution both take the anchored path; TRBL-085), to
+`$STATE_ROOT/dashboard-tokens.json`. Run the mint against the edited config,
+never against the shipped stock paths, and let its own
+`dashboard token store: …` notice name the file both sides agree on:
+
+```sh
+bin/trouble dashboard token create \
+  --config "$CONFIG_DIR/config.toml" \
+  --label quickstart --scopes read \
+  --output-env "$CONFIG_DIR/trouble.env"
+```
+
+The mint prints the store it wrote and the plaintext token (`tdt_` + 43
+characters) exactly once, on stdout; the store file itself holds only SHA-256
+digests, never plaintext. `--output-env` writes the
+`TROUBLE_DASHBOARD_TOKEN=…` line into the same 0600 env file the daemon loads
+via `[secrets] environment_file`, replacing any previous token line, and the
+file is created or kept at mode 0600 by the mint itself — no plaintext ever
+rides an argv. Do not transcribe or redirect the printed token: when you need
+the value — the authenticated check below, or a browser session — read it back
+out of the env file, or from `bin/trouble dashboard token list --config
+"$CONFIG_DIR/config.toml"`, which carries labels and hashes only and never
+echoes plaintext. If the daemon is already running when you mint (a boot from
+before this step), it keeps carrying the QA-TROUBLE-19 refusal row in
+`/health.json` until the next restart — the row describes the boot — so mint
+first and start after.
+
+Start the daemon in the foreground. Leave this terminal running until the
+shutdown step.
+
+```sh
 bin/troubled --config "$CONFIG_DIR/config.toml"
 ```
 
@@ -150,6 +193,12 @@ the daemon loaded, never a retyped copy of it; this is the documented loopback
 
 ```sh
 curl -fsS http://127.0.0.1:7644/health.json | jq '{status, ledger_last_seq, subsystems}'
+curl -fsS http://127.0.0.1:7644/health.json | \
+  jq -e '[.subsystems[] | select(.refused)] | length == 0'
+
+DASH_TOKEN="$(grep '^TROUBLE_DASHBOARD_TOKEN=' "$CONFIG_DIR/trouble.env" | cut -d= -f2-)"
+test -n "$DASH_TOKEN" || { echo "no TROUBLE_DASHBOARD_TOKEN in $CONFIG_DIR/trouble.env — run the mint step first"; exit 1; }
+curl -fsS -o /dev/null -H "Authorization: Bearer $DASH_TOKEN" http://127.0.0.1:7644/incidents
 
 CONFIG_PATH="$HOME/.config/trouble/config.toml"
 PUBLIC_KEY="$(grep -oE 'public_key *= *"[0-9a-f]{32}"' "$CONFIG_PATH" | grep -oE '[0-9a-f]{32}')"
@@ -162,7 +211,18 @@ jq -r 'select(.kind == "event" or .kind == "group") | [.kind, .sig] | @tsv' \
   "$STATE_ROOT"/ledger/*.jsonl
 ```
 
-The health request must return JSON and the event request must return
+The health request must return JSON and the second health line must exit 0 —
+no `subsystems[]` row may carry `refused: true`. A `dashboard` row with
+`refused=true` and `code TROUBLE-LIFECYCLE-001` is the missing-credential-store
+refusal the mint step above prevents; on a daemon already running when the
+store appeared, only a restart clears the row. The `/incidents` request must
+answer 200: the minted read token, read back out of the 0600 env file rather
+than retyped, authenticates against the store the daemon loaded at boot — the
+same both-sides-agree path the mint notice named. Without the mint every
+dashboard route answers 503 + TROUBLE-DASHBOARD-013 (`detail
+dashboard_refused`), and a token minted into a store the daemon did not
+resolve answers 401 with the mint's store-notice warning as the only legible
+cause. The event request must return
 `{"id":"<event_id>"}`. The ledger command must show the submitted `event` and
 its fingerprint `group`; this is the durable proof, not merely an HTTP success.
 

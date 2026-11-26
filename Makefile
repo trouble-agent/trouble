@@ -45,7 +45,7 @@ HOST_MEASURED_GATES = TestAmortizedThroughput|TestPerLineRegression|TestDeriveNe
 HOST_GATE_PKGS = ./internal/ledger/... ./internal/research/... ./internal/sentinel/...
 HOST_GATE_NAMES = TestAmortizedThroughput TestPerLineRegression TestDeriveNeverBlocks TestCollectorLongLineIsTruncated
 
-.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host docs-check smoke smoke-e2e upgrade-cross-version ac-matrix clean
+.PHONY: all build bin release test race vet fmt schema schema-check conformance check check-host docs-check smoke smoke-e2e smoke-foreground upgrade-cross-version ac-matrix clean
 
 all: build
 
@@ -195,6 +195,13 @@ smoke: bin
 # the version triple to the checker's exit 0 → exit 8 transition (tests/e2e/).
 smoke-e2e: bin
 	bash tests/e2e/cli_smoke.sh $(BIN)
+
+# The foreground quickstart's credential sequence (TRBL-149): fresh scratch
+# HOME + state root, mint the dashboard read credential into the
+# state-root-anchored store BEFORE boot, then prove /health.json carries no
+# refused subsystem row and the authenticated dashboard answers 200.
+smoke-foreground: bin
+	bash tests/e2e/foreground_token_boot.sh $(BIN)
 
 # The prev-release → HEAD upgrade path (SPEC-12 §3.6; QA-TROUBLE-7) with two
 # STAMPED builds, run as an operator would. It needs no git tag: the two

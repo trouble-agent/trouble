@@ -1,0 +1,121 @@
+{
+  "tick_id": "trouble-foreman-2026-11-27-12-27-32",
+  "project": "trouble",
+  "repo": "/home/kara/trouble",
+  "base": "46ff91984bb3cd359e93e267cee93f89593c5715",
+  "base_sha": "46ff91984bb3cd359e93e267cee93f89593c5715",
+  "wave_budget": 2,
+  "mode": "idle-no-dispatch",
+  "verification_only": false,
+  "workers": [],
+  "rows": [
+    {
+      "id": "RELEASE-012",
+      "classification": "owner-gated releng",
+      "reason": "first publication unauthorized; owner decision required"
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-1",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa harness launch defect"
+    },
+    {
+      "id": "QA-TROUBLE-REVIEW-1",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa harness launch identity defect"
+    },
+    {
+      "id": "QA-TROUBLE-README-10",
+      "classification": "routed qa-foreman",
+      "reason": "battery collect pass"
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-2",
+      "classification": "routed trouble-qa",
+      "reason": "battery evidence run+collect"
+    },
+    {
+      "id": "QA-TROUBLE-REVIEW-2",
+      "classification": "routed trouble-qa",
+      "reason": "battery evidence run+collect"
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-003",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa harness defect"
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-004",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa harness defect"
+    },
+    {
+      "id": "QA-TROUBLE-DOCS-005",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa harness defect"
+    },
+    {
+      "id": "QA-TROUBLE-25",
+      "classification": "routed trouble-qa",
+      "reason": "clean-JIT battery evidence only; product fix already landed"
+    },
+    {
+      "id": "QA-TROUBLE-26",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa UI probe defect"
+    },
+    {
+      "id": "TRBL-133",
+      "classification": "routed trouble-dogfood",
+      "reason": "fresh-machine battery terminalization"
+    },
+    {
+      "id": "QA-TROUBLE-27",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa collect defect"
+    },
+    {
+      "id": "QA-TROUBLE-28",
+      "classification": "routed qa-foreman",
+      "reason": "QA ledger writer/harness defect"
+    },
+    {
+      "id": "TRBL-146",
+      "classification": "routed trouble-dogfood",
+      "reason": "install-bunker evidence leg"
+    },
+    {
+      "id": "QA-TROUBLE-031",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa disk preflight defect"
+    },
+    {
+      "id": "QA-TROUBLE-17-R4-R2-R2",
+      "classification": "parked trouble-qa",
+      "reason": "quiet-host requirement; current host load 18.50/20.27/22.44 on 16 CPUs"
+    },
+    {
+      "id": "QA-TROUBLE-033",
+      "classification": "routed qa-foreman",
+      "reason": "bunker-qa evidence durability defect"
+    }
+  ],
+  "gates": {
+    "go_build": 0,
+    "go_vet": 0,
+    "go_mod_verify": 0,
+    "spec_selfcheck": 0
+  },
+  "ci": {
+    "repo": "trouble-agent/trouble",
+    "recent_runs": "3/3 success",
+    "exact_head": "46ff91984bb3cd359e93e267cee93f89593c5715"
+  },
+  "published_parity": "0/0",
+  "finished_at": "2026-11-27T12:42:49Z",
+  "notes": [
+    "No independent dispatchable rows; WAVE_BUDGET=2 unused by row classification, not arithmetic.",
+    "No GitReins lifecycle created.",
+    "Off-by-One exact discovery returned not_found; no non-trivial debugging performed; no submission."
+  ]
+}
